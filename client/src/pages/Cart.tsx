@@ -78,7 +78,7 @@ export function Cart() {
 
                 return (
                   <div key={item.id} className="flex gap-4 p-6 border-b border-gray-200 last:border-0">
-                    <Link to={`/product/${product?.id}`} className="flex-shrink-0">
+                    <Link to={`/products/${product?.id}`} className="flex-shrink-0">
                       <img
                         src={imageUrl}
                         alt={product?.title}
@@ -87,7 +87,7 @@ export function Cart() {
                     </Link>
 
                     <div className="flex-1">
-                      <Link to={`/product/${product?.id}`} className="font-semibold text-gray-900 dark:text-white hover:text-orange-600 dark:hover:text-orange-400 transition">
+                      <Link to={`/products/${product?.id}`} className="font-semibold text-gray-900 dark:text-white hover:text-orange-600 dark:hover:text-orange-400 transition">
                         {product?.title}
                       </Link>
                       {variant && (

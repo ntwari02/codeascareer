@@ -1,7 +1,14 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, ChangeEvent } from 'react';
 import { motion } from 'framer-motion';
-import { Package, Search, Plus, Edit, Trash2, AlertTriangle, Download, Upload, History, MapPin, Filter, X } from 'lucide-react';
+import { Package, Search, Plus, Edit, Trash2, AlertTriangle, Download, Upload, History, MapPin, Filter, X, Layers } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog';
 
 interface InventoryItem {
   id: string;
@@ -12,6 +19,7 @@ interface InventoryItem {
   status: 'in_stock' | 'low_stock' | 'out_of_stock';
   location?: string;
   variants?: { color?: string; size?: string; sku: string; stock: number }[];
+  tiers?: { minQty: number; maxQty?: number; price: number }[];
 }
 
 interface StockHistory {
@@ -28,8 +36,7 @@ const InventoryManagement: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState<'stock' | 'warehouse' | 'history' | 'variants'>('stock');
   const [selectedItems, setSelectedItems] = useState<string[]>([]);
-  const [showBulkUpdate, setShowBulkUpdate] = useState(false);
-  const [inventory] = useState<InventoryItem[]>([
+  const [inventory, setInventory] = useState<InventoryItem[]>([
     { 
       id: '1', 
       name: 'Wireless Headphones', 
@@ -41,7 +48,12 @@ const InventoryManagement: React.FC = () => {
       variants: [
         { color: 'Black', size: 'Standard', sku: 'WH-001-BLK', stock: 20 },
         { color: 'White', size: 'Standard', sku: 'WH-001-WHT', stock: 25 },
-      ]
+      ],
+      tiers: [
+        { minQty: 1, maxQty: 9, price: 149.99 },
+        { minQty: 10, maxQty: 49, price: 139.99 },
+        { minQty: 50, price: 129.99 },
+      ],
     },
     { 
       id: '2', 
@@ -54,7 +66,12 @@ const InventoryManagement: React.FC = () => {
       variants: [
         { color: 'Silver', size: '42mm', sku: 'SW-002-SLV-42', stock: 5 },
         { color: 'Black', size: '46mm', sku: 'SW-002-BLK-46', stock: 7 },
-      ]
+      ],
+      tiers: [
+        { minQty: 1, maxQty: 4, price: 299.99 },
+        { minQty: 5, maxQty: 19, price: 284.99 },
+        { minQty: 20, price: 269.99 },
+      ],
     },
     { 
       id: '3', 
@@ -106,6 +123,13 @@ const InventoryManagement: React.FC = () => {
     }
   };
 
+  // Product edit & tiered pricing state
+  const [editingItem, setEditingItem] = useState<InventoryItem | null>(null);
+  const [showEditModal, setShowEditModal] = useState(false);
+
+  // CSV import / export
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
   const handleSelectItem = (id: string) => {
     setSelectedItems(prev => 
       prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
@@ -120,8 +144,153 @@ const InventoryManagement: React.FC = () => {
     }
   };
 
+  const openEditModal = (item: InventoryItem) => {
+    // Work on a shallow copy so edits are local until saved
+    setEditingItem({
+      ...item,
+      tiers: item.tiers ? [...item.tiers] : [],
+    });
+    setShowEditModal(true);
+  };
+
+  const closeEditModal = () => {
+    setShowEditModal(false);
+    setEditingItem(null);
+  };
+
+  const updateEditingTier = (index: number, field: 'minQty' | 'maxQty' | 'price', value: string) => {
+    if (!editingItem) return;
+    const tiers = editingItem.tiers ? [...editingItem.tiers] : [];
+    const parsed = value === '' ? undefined : Number(value);
+
+    if (!tiers[index]) {
+      tiers[index] = { minQty: 1, price: editingItem.price };
+    }
+
+    if (field === 'price' && parsed !== undefined) {
+      tiers[index] = { ...tiers[index], price: parsed };
+    } else if (field === 'minQty' && parsed !== undefined) {
+      tiers[index] = { ...tiers[index], minQty: parsed };
+    } else if (field === 'maxQty') {
+      tiers[index] = { ...tiers[index], maxQty: parsed };
+    }
+
+    setEditingItem({ ...editingItem, tiers });
+  };
+
+  const addTierRow = () => {
+    if (!editingItem) return;
+    const tiers = editingItem.tiers ? [...editingItem.tiers] : [];
+    tiers.push({
+      minQty: tiers.length > 0 ? tiers[tiers.length - 1].minQty + 1 : 1,
+      price: editingItem.price,
+    });
+    setEditingItem({ ...editingItem, tiers });
+  };
+
+  const removeTierRow = (index: number) => {
+    if (!editingItem || !editingItem.tiers) return;
+    const tiers = editingItem.tiers.filter((_, i) => i !== index);
+    setEditingItem({ ...editingItem, tiers });
+  };
+
+  const handleSaveProduct = () => {
+    if (!editingItem) return;
+    setInventory((prev) =>
+      prev.map((item) => (item.id === editingItem.id ? editingItem : item))
+    );
+    closeEditModal();
+  };
+
+  const handleExportCsv = () => {
+    const header = [
+      'id',
+      'name',
+      'sku',
+      'stock',
+      'price',
+      'status',
+      'location',
+    ].join(',');
+
+    const rows = inventory.map((item) =>
+      [
+        item.id,
+        `"${item.name.replace(/"/g, '""')}"`,
+        item.sku,
+        item.stock,
+        item.price.toFixed(2),
+        item.status,
+        item.location ?? '',
+      ].join(',')
+    );
+
+    const csvContent = [header, ...rows].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', 'inventory-export.csv');
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImportClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleImportCsv = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = String(e.target?.result || '');
+      const lines = text.split(/\r?\n/).filter(Boolean);
+      if (lines.length < 2) return;
+
+      const [, ...dataLines] = lines;
+      const imported: InventoryItem[] = dataLines
+        .map((line) => {
+          const cells = line.split(',');
+          if (cells.length < 6) return null;
+
+          const [id, rawName, sku, stock, price, status, location] = cells;
+          const name = rawName.replace(/^"|"$/g, '').replace(/""/g, '"');
+
+          return {
+            id: id.trim() || crypto.randomUUID(),
+            name: name.trim(),
+            sku: sku.trim(),
+            stock: Number(stock) || 0,
+            price: Number(price) || 0,
+            status: (status.trim() as InventoryItem['status']) || 'in_stock',
+            location: location?.trim() || undefined,
+          } as InventoryItem;
+        })
+        .filter((item): item is InventoryItem => !!item && !!item.name && !!item.sku);
+
+      if (imported.length > 0) {
+        setInventory(imported);
+      }
+    };
+
+    reader.readAsText(file);
+    event.target.value = '';
+  };
+
   return (
     <div className="space-y-6">
+      {/* Hidden file input for CSV import */}
+      <input
+        type="file"
+        accept=".csv,text/csv"
+        ref={fileInputRef}
+        onChange={handleImportCsv}
+        className="hidden"
+      />
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
@@ -132,11 +301,19 @@ const InventoryManagement: React.FC = () => {
           <p className="text-gray-600 dark:text-gray-400 mt-1 transition-colors duration-300">Manage your product inventory and stock levels</p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" className="border-gray-300 dark:border-gray-700">
+          <Button
+            variant="outline"
+            className="border-gray-300 dark:border-gray-700"
+            onClick={handleExportCsv}
+          >
             <Download className="w-4 h-4 mr-2" />
             Export CSV
           </Button>
-          <Button variant="outline" className="border-gray-300 dark:border-gray-700">
+          <Button
+            variant="outline"
+            className="border-gray-300 dark:border-gray-700"
+            onClick={handleImportClick}
+          >
             <Upload className="w-4 h-4 mr-2" />
             Import CSV
           </Button>
@@ -265,7 +442,12 @@ const InventoryManagement: React.FC = () => {
                     </td>
                     <td className="py-4 px-4">
                       <div className="flex items-center justify-end gap-2">
-                        <Button variant="ghost" size="icon" className="text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"
+                      onClick={() => openEditModal(item)}
+                    >
                           <Edit className="w-4 h-4" />
                         </Button>
                         <Button variant="ghost" size="icon" className="text-red-500 dark:text-red-400 hover:text-red-600 dark:hover:text-red-300 transition-colors">
@@ -430,7 +612,12 @@ const InventoryManagement: React.FC = () => {
                           </td>
                           <td className="py-2 px-3">
                             <div className="flex items-center justify-end gap-2">
-                              <Button variant="ghost" size="icon" className="text-gray-600 dark:text-gray-400">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="text-gray-600 dark:text-gray-400"
+                                onClick={() => openEditModal(item)}
+                              >
                                 <Edit className="w-4 h-4" />
                               </Button>
                             </div>
@@ -445,6 +632,197 @@ const InventoryManagement: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Product Edit / Tiered Pricing Modal */}
+      <Dialog open={showEditModal} onOpenChange={(open) => (open ? setShowEditModal(true) : closeEditModal())}>
+        <DialogContent className="max-w-2xl bg-white/95 dark:bg-gray-900/95 border border-gray-200 dark:border-gray-700 shadow-2xl">
+          <DialogHeader className="flex flex-row items-start justify-between gap-4">
+            <div>
+              <DialogTitle className="flex items-center gap-2 text-xl">
+                <Layers className="w-5 h-5 text-red-400" />
+                Edit Product & B2B Pricing
+              </DialogTitle>
+              <DialogDescription>
+                Adjust core details and configure tiered pricing for volume-based B2B orders.
+              </DialogDescription>
+            </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="rounded-full h-8 w-8"
+              onClick={closeEditModal}
+            >
+              <X className="w-4 h-4" />
+            </Button>
+          </DialogHeader>
+
+          {editingItem && (
+            <div className="space-y-6 mt-2">
+              {/* Basic product summary */}
+              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                <div>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">Product</p>
+                  <p className="text-lg font-semibold text-gray-900 dark:text-white">
+                    {editingItem.name}
+                  </p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                    SKU: <span className="font-mono">{editingItem.sku}</span>
+                  </p>
+                </div>
+                <div className="flex gap-4 text-sm">
+                  <div>
+                    <p className="text-gray-500 dark:text-gray-400">Base Price</p>
+                    <p className="font-semibold text-gray-900 dark:text-white">
+                      ${editingItem.price.toFixed(2)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-gray-500 dark:text-gray-400">Available Stock</p>
+                    <p className="font-semibold text-gray-900 dark:text-white">
+                      {editingItem.stock} units
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Tiered pricing editor */}
+              <div className="border border-gray-200 dark:border-gray-700 rounded-xl p-4 bg-gray-50 dark:bg-gray-900/40 space-y-4">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                      Tiered Pricing (B2B)
+                    </h3>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                      Define volume breaks and discounted unit prices for qualified buyers.
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="border-dashed border-gray-300 dark:border-gray-600"
+                    onClick={addTierRow}
+                  >
+                    <Plus className="w-3 h-3 mr-1" />
+                    Add Tier
+                  </Button>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-gray-200 dark:border-gray-700/60">
+                        <th className="text-left py-2 px-2 text-gray-600 dark:text-gray-400 font-medium">
+                          Min Qty
+                        </th>
+                        <th className="text-left py-2 px-2 text-gray-600 dark:text-gray-400 font-medium">
+                          Max Qty (optional)
+                        </th>
+                        <th className="text-left py-2 px-2 text-gray-600 dark:text-gray-400 font-medium">
+                          Unit Price
+                        </th>
+                        <th className="w-10"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(editingItem.tiers || []).map((tier, index) => (
+                        <tr key={index} className="border-b border-gray-100 dark:border-gray-800/60">
+                          <td className="py-2 px-2">
+                            <input
+                              type="number"
+                              min={1}
+                              value={tier.minQty}
+                              onChange={(e) =>
+                                updateEditingTier(index, 'minQty', e.target.value)
+                              }
+                              className="w-24 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded px-2 py-1 text-xs text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-red-500"
+                            />
+                          </td>
+                          <td className="py-2 px-2">
+                            <input
+                              type="number"
+                              min={tier.minQty}
+                              value={tier.maxQty ?? ''}
+                              onChange={(e) =>
+                                updateEditingTier(index, 'maxQty', e.target.value)
+                              }
+                              placeholder="No upper limit"
+                              className="w-32 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded px-2 py-1 text-xs text-gray-900 dark:text-white placeholder:text-gray-500 focus:outline-none focus:ring-1 focus:ring-red-500"
+                            />
+                          </td>
+                          <td className="py-2 px-2">
+                            <div className="flex items-center gap-1">
+                              <span className="text-xs text-gray-500">$</span>
+                              <input
+                                type="number"
+                                min={0}
+                                step="0.01"
+                                value={tier.price}
+                                onChange={(e) =>
+                                  updateEditingTier(index, 'price', e.target.value)
+                                }
+                                className="w-28 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded px-2 py-1 text-xs text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-red-500"
+                              />
+                            </div>
+                          </td>
+                          <td className="py-2 px-2 text-right">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-gray-400 hover:text-red-500"
+                              onClick={() => removeTierRow(index)}
+                              aria-label="Remove tier"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </Button>
+                          </td>
+                        </tr>
+                      ))}
+
+                      {(editingItem.tiers?.length ?? 0) === 0 && (
+                        <tr>
+                          <td
+                            colSpan={4}
+                            className="py-4 px-2 text-xs text-gray-500 dark:text-gray-400 text-center"
+                          >
+                            No tiered pricing defined yet. Use "Add Tier" to create volume
+                            discounts.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between pt-2">
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  These pricing tiers are local to this session and can be exported via CSV for
+                  further processing in your B2B systems.
+                </p>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="border-gray-300 dark:border-gray-700"
+                    onClick={closeEditModal}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="button"
+                    className="bg-gradient-to-r from-red-500 to-orange-500 hover:from-red-600 hover:to-orange-600"
+                    onClick={handleSaveProduct}
+                  >
+                    Save Changes
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

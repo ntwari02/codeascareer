@@ -8,6 +8,9 @@ import { ParetoChart } from '@/components/charts/ParetoChart';
 
 const Analytics: React.FC = () => {
   const [timeRange, setTimeRange] = useState<'week' | 'month' | 'year'>('month');
+  const [buyerGroup, setBuyerGroup] = useState<'all' | 'enterprise' | 'smb' | 'long_tail'>('all');
+  const [paymentTerms, setPaymentTerms] = useState<'all' | 'prepaid' | 'net30' | 'net60'>('all');
+  const [salesRep, setSalesRep] = useState<'all' | 'team_north' | 'team_south' | 'team_inbound'>('all');
 
   const salesStats = [
     {
@@ -69,6 +72,14 @@ const Analytics: React.FC = () => {
     { source: 'Referral', traffic: 9, conversions: 3.5 },
   ];
 
+  const rfqStats = {
+    totalRfqs: 248,
+    quotesSent: 210,
+    quotesAccepted: 132,
+    rfqConversionRate: ((132 / 210) * 100).toFixed(1),
+    rfqToOrderRate: ((132 / 248) * 100).toFixed(1),
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -91,7 +102,7 @@ const Analytics: React.FC = () => {
         </select>
       </div>
 
-      {/* Sales Analytics */}
+      {/* Sales & RFQ Analytics */}
       <div>
         <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4 transition-colors duration-300">Sales Analytics</h2>
         <motion.div
@@ -103,8 +114,75 @@ const Analytics: React.FC = () => {
             <StatCard key={index} {...stat} />
           ))}
         </motion.div>
-        <div className="bg-white/50 dark:bg-gray-900/50 rounded-xl p-6 border border-gray-200 dark:border-gray-700/30 transition-colors duration-300">
-          <SalesChart />
+
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+          <div className="xl:col-span-2 bg-white/50 dark:bg-gray-900/50 rounded-xl p-6 border border-gray-200 dark:border-gray-700/30 transition-colors duration-300">
+            <SalesChart />
+          </div>
+
+          {/* RFQ Conversion Metrics */}
+          <div className="bg-white/50 dark:bg-gray-900/50 rounded-xl p-6 border border-gray-200 dark:border-gray-700/30 transition-colors duration-300 flex flex-col gap-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-white transition-colors duration-300">
+                  RFQ Conversion Metrics
+                </h3>
+                <p className="text-xs text-gray-600 dark:text-gray-400 mt-1 transition-colors duration-300">
+                  Performance for the selected time range, filtered by the segments below.
+                </p>
+              </div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">
+                RFQs → Quotes → Orders
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 text-xs">
+              <div className="p-3 rounded-lg bg-gray-50 dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700/60">
+                <p className="text-gray-500 dark:text-gray-400">RFQs Received</p>
+                <p className="mt-1 text-lg font-semibold text-gray-900 dark:text-white">
+                  {rfqStats.totalRfqs.toLocaleString()}
+                </p>
+              </div>
+              <div className="p-3 rounded-lg bg-gray-50 dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700/60">
+                <p className="text-gray-500 dark:text-gray-400">Quotes Sent</p>
+                <p className="mt-1 text-lg font-semibold text-gray-900 dark:text-white">
+                  {rfqStats.quotesSent.toLocaleString()}
+                </p>
+              </div>
+              <div className="p-3 rounded-lg bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-700/50">
+                <p className="text-gray-600 dark:text-gray-300">Quotes Accepted</p>
+                <p className="mt-1 text-lg font-semibold text-green-700 dark:text-green-300">
+                  {rfqStats.quotesAccepted.toLocaleString()}
+                </p>
+              </div>
+              <div className="p-3 rounded-lg bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700/50">
+                <p className="text-gray-600 dark:text-gray-300">RFQ → Order Rate</p>
+                <p className="mt-1 text-lg font-semibold text-blue-700 dark:text-blue-300">
+                  {rfqStats.rfqToOrderRate}%
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-1 p-3 rounded-lg bg-gradient-to-r from-red-500/10 to-orange-500/10 dark:from-red-500/25 dark:to-orange-500/25 border border-red-200 dark:border-red-600/60">
+              <div className="flex items-center justify-between text-xs mb-1">
+                <span className="text-gray-700 dark:text-gray-200 font-medium">
+                  Quote Conversion
+                </span>
+                <span className="text-gray-600 dark:text-gray-300">
+                  {rfqStats.rfqConversionRate}%
+                </span>
+              </div>
+              <div className="w-full bg-gray-200 dark:bg-gray-800 rounded-full h-1.5">
+                <div
+                  className="h-1.5 rounded-full bg-gradient-to-r from-red-500 to-orange-500"
+                  style={{ width: `${rfqStats.rfqConversionRate}%` }}
+                />
+              </div>
+              <p className="mt-2 text-[11px] text-gray-600 dark:text-gray-300">
+                Of all quotes issued, this is the share that converted into confirmed B2B orders.
+              </p>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -175,12 +253,56 @@ const Analytics: React.FC = () => {
           </div>
         </div>
 
-        {/* Customer Analytics */}
+        {/* Customer & Segment Analytics */}
         <div className="bg-white/50 dark:bg-gray-900/50 rounded-xl p-6 border border-gray-200 dark:border-gray-700/30 transition-colors duration-300">
           <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4 transition-colors duration-300 flex items-center gap-2">
             <Users className="w-6 h-6 text-red-400" />
-            Customer Analytics
+            Customer & Segment Analytics
           </h2>
+
+          {/* Segment Filters */}
+          <div className="mb-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="space-y-1">
+              <p className="text-[11px] font-medium text-gray-600 dark:text-gray-300">Buyer group</p>
+              <select
+                value={buyerGroup}
+                onChange={(e) => setBuyerGroup(e.target.value as typeof buyerGroup)}
+                className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg px-2 py-1.5 text-xs text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+              >
+                <option value="all">All buyers</option>
+                <option value="enterprise">Enterprise</option>
+                <option value="smb">SMB</option>
+                <option value="long_tail">Long-tail</option>
+              </select>
+            </div>
+            <div className="space-y-1">
+              <p className="text-[11px] font-medium text-gray-600 dark:text-gray-300">Payment terms</p>
+              <select
+                value={paymentTerms}
+                onChange={(e) => setPaymentTerms(e.target.value as typeof paymentTerms)}
+                className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg px-2 py-1.5 text-xs text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+              >
+                <option value="all">All terms</option>
+                <option value="prepaid">Prepaid</option>
+                <option value="net30">Net 30</option>
+                <option value="net60">Net 60</option>
+              </select>
+            </div>
+            <div className="space-y-1">
+              <p className="text-[11px] font-medium text-gray-600 dark:text-gray-300">Sales team</p>
+              <select
+                value={salesRep}
+                onChange={(e) => setSalesRep(e.target.value as typeof salesRep)}
+                className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg px-2 py-1.5 text-xs text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+              >
+                <option value="all">All reps</option>
+                <option value="team_north">Team North</option>
+                <option value="team_south">Team South</option>
+                <option value="team_inbound">Inbound Desk</option>
+              </select>
+            </div>
+          </div>
+
           <div className="space-y-4">
             {customerMetrics.map((metric, index) => (
               <div key={index} className="p-4 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700/50 transition-colors duration-300">
@@ -197,8 +319,13 @@ const Analytics: React.FC = () => {
               </div>
             ))}
             <div className="p-4 bg-gradient-to-r from-red-500/10 to-orange-500/10 dark:from-red-500/20 dark:to-orange-500/20 rounded-lg border border-red-200 dark:border-red-500/30">
-              <p className="text-sm text-gray-600 dark:text-gray-400 mb-1 transition-colors duration-300">Buyer Demographics</p>
-              <p className="text-xs text-gray-500 dark:text-gray-500 transition-colors duration-300">Available in Premium plan</p>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mb-1 transition-colors duration-300">
+                Segmented RFQ & buyer reports
+              </p>
+              <p className="text-xs text-gray-500 dark:text-gray-500 transition-colors duration-300">
+                In a live environment, these filters would drive segment-specific dashboards (by buyer cohort,
+                payment terms, and sales team performance).
+              </p>
             </div>
           </div>
         </div>

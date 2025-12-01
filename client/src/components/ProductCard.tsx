@@ -71,7 +71,7 @@ export function ProductCard({ product, onViewProduct }: ProductCardProps) {
     if (onViewProduct) {
       onViewProduct(product);
     } else {
-      navigate(`/product/${product.id}`);
+      navigate(`/products/${product.id}`);
     }
   };
 

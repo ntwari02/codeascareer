@@ -11,6 +11,8 @@ import CollectionManagement from '@/pages/seller/CollectionManagement';
 import Analytics from '@/pages/seller/Analytics';
 import SubscriptionTiers from '@/pages/seller/SubscriptionTiers';
 import ProfilePage from '@/pages/seller/ProfilePage';
+import InboxPage from '@/pages/seller/InboxPage';
+import SupportCenter from '@/pages/seller/SupportCenter';
 import Notifications from '@/components/dashboard/Notifications';
 
 const SellerDashboard: React.FC = () => {
@@ -28,7 +30,7 @@ const SellerDashboard: React.FC = () => {
   
   // Ensure we're on a valid route
   useEffect(() => {
-    const validRoutes = ['dashboard', 'inventory', 'orders', 'disputes', 'products', 'collections', 'analytics', 'subscription', 'settings'];
+    const validRoutes = ['dashboard', 'inventory', 'orders', 'disputes', 'products', 'collections', 'analytics', 'subscription', 'settings', 'inbox', 'support'];
     if (pathSegments.length === sellerIndex + 1) {
       // We're on /seller, which is fine (index route)
       return;
@@ -80,6 +82,8 @@ const SellerDashboard: React.FC = () => {
             <Route path="analytics" element={<Analytics />} />
             <Route path="subscription" element={<SubscriptionTiers />} />
             <Route path="settings" element={<ProfilePage />} />
+            <Route path="inbox" element={<InboxPage />} />
+            <Route path="support" element={<SupportCenter />} />
           </Routes>
         </main>
       </div>

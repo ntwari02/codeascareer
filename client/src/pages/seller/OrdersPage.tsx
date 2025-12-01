@@ -51,6 +51,10 @@ const OrdersPage: React.FC = () => {
   const [trackingNumber, setTrackingNumber] = useState('');
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
+  const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([]);
+  const [bulkStatus, setBulkStatus] = useState<Order['status'] | ''>('');
+  const [showBulkShippingModal, setShowBulkShippingModal] = useState(false);
+  const [bulkCarrier, setBulkCarrier] = useState<'ups' | 'fedex' | 'dhl'>('ups');
 
   const [orders] = useState<Order[]>([
     {
@@ -212,6 +216,27 @@ const OrdersPage: React.FC = () => {
     }
   };
 
+  const toggleSelectOrder = (orderId: string) => {
+    setSelectedOrderIds((prev) =>
+      prev.includes(orderId) ? prev.filter((id) => id !== orderId) : [...prev, orderId]
+    );
+  };
+
+  const handleSelectAllVisible = () => {
+    const visibleIds = filteredOrders.map((order) => order.id);
+    const allSelected = visibleIds.every((id) => selectedOrderIds.includes(id));
+    if (allSelected) {
+      setSelectedOrderIds((prev) => prev.filter((id) => !visibleIds.includes(id)));
+    } else {
+      const merged = new Set([...selectedOrderIds, ...visibleIds]);
+      setSelectedOrderIds(Array.from(merged));
+    }
+  };
+
+  const clearSelection = () => {
+    setSelectedOrderIds([]);
+  };
+
   const handleViewOrder = (order: Order) => {
     setSelectedOrder(order);
     setShowOrderDetails(true);
@@ -252,6 +277,41 @@ const OrdersPage: React.FC = () => {
 
   const handlePrintPackingSlip = (order: Order) => {
     window.print();
+  };
+
+  const handleBatchPrintInvoices = () => {
+    if (!selectedOrderIds.length) return;
+    console.log('Batch print invoices for orders:', selectedOrderIds);
+    window.print();
+  };
+
+  const handleBatchPrintPackingSlips = () => {
+    if (!selectedOrderIds.length) return;
+    console.log('Batch print packing slips for orders:', selectedOrderIds);
+    window.print();
+  };
+
+  const handleBatchStatusUpdate = (status: Order['status']) => {
+    if (!selectedOrderIds.length) return;
+    console.log('Bulk status update to', status, 'for orders:', selectedOrderIds);
+    // In a real app, this would call your backend and then refresh local state.
+    setBulkStatus('');
+  };
+
+  const handleBatchGenerateLabels = () => {
+    if (!selectedOrderIds.length) return;
+    setShowBulkShippingModal(true);
+  };
+
+  const selectedOrders = orders.filter((order) => selectedOrderIds.includes(order.id));
+
+  const handleConfirmBulkShipping = () => {
+    if (!selectedOrders.length) return;
+    // This is a frontend-only stub for carrier API integration.
+    // Here you would call your shipping provider (UPS/FedEx/DHL, etc.)
+    // and sync tracking numbers back into your system.
+    console.log('Generate labels via carrier:', bulkCarrier, 'for orders:', selectedOrders);
+    setShowBulkShippingModal(false);
   };
 
   return (
@@ -298,36 +358,137 @@ const OrdersPage: React.FC = () => {
           </div>
         </div>
 
+        {/* Batch actions toolbar */}
+        {selectedOrderIds.length > 0 && (
+          <div className="mb-4 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 rounded-lg border border-red-200/60 dark:border-red-500/40 bg-red-50/40 dark:bg-red-900/10 px-4 py-3">
+            <div className="flex items-center gap-3 text-sm">
+              <input
+                type="checkbox"
+                className="rounded border-red-300 text-red-500 focus:ring-red-500"
+                onChange={handleSelectAllVisible}
+                checked={
+                  filteredOrders.length > 0 &&
+                  filteredOrders.every((order) => selectedOrderIds.includes(order.id))
+                }
+              />
+              <div>
+                <p className="font-medium text-red-800 dark:text-red-200">
+                  {selectedOrderIds.length} order{selectedOrderIds.length > 1 ? 's' : ''} selected
+                </p>
+                <p className="text-xs text-red-700/80 dark:text-red-200/80">
+                  Run batch operations like invoice printing, label generation, and status updates.
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="border-gray-300 dark:border-gray-700"
+                onClick={handleBatchPrintInvoices}
+              >
+                <Printer className="w-3 h-3 mr-2" />
+                Print Invoices
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="border-gray-300 dark:border-gray-700"
+                onClick={handleBatchPrintPackingSlips}
+              >
+                <Printer className="w-3 h-3 mr-2" />
+                Print Packing Slips
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="border-gray-300 dark:border-gray-700"
+                onClick={handleBatchGenerateLabels}
+              >
+                <Truck className="w-3 h-3 mr-2" />
+                Generate Labels
+              </Button>
+              <div className="flex items-center gap-2 text-xs">
+                <span className="text-gray-600 dark:text-gray-400">Update status to</span>
+                <select
+                  value={bulkStatus}
+                  onChange={(e) => setBulkStatus(e.target.value as Order['status'] | '')}
+                  className="bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg px-2 py-1 text-xs text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+                >
+                  <option value="">Select...</option>
+                  <option value="pending">Pending</option>
+                  <option value="processing">Processing</option>
+                  <option value="packed">Packed</option>
+                  <option value="shipped">Shipped</option>
+                  <option value="delivered">Delivered</option>
+                  <option value="cancelled">Cancelled</option>
+                </select>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={!bulkStatus}
+                  className="border-gray-300 dark:border-gray-700 text-xs"
+                  onClick={() => bulkStatus && handleBatchStatusUpdate(bulkStatus)}
+                >
+                  Apply
+                </Button>
+                <button
+                  type="button"
+                  onClick={clearSelection}
+                  className="ml-1 inline-flex items-center text-[11px] text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200"
+                >
+                  <X className="w-3 h-3 mr-1" />
+                  Clear
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Orders List */}
         <div className="space-y-4">
           {filteredOrders.map((order, index) => {
             const StatusIcon = getStatusIcon(order.status);
+            const isSelected = selectedOrderIds.includes(order.id);
             return (
               <motion.div
                 key={order.id}
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: index * 0.05 }}
-                className="bg-gray-50 dark:bg-gray-800/50 rounded-lg p-6 border border-gray-200 dark:border-gray-700/50 hover:border-red-500/50 transition-all"
+                className={`bg-gray-50 dark:bg-gray-800/50 rounded-lg p-6 border hover:border-red-500/50 transition-all ${
+                  isSelected
+                    ? 'border-red-400/70 dark:border-red-500/70 ring-1 ring-red-500/40'
+                    : 'border-gray-200 dark:border-gray-700/50'
+                }`}
               >
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between gap-4">
                   <div className="flex items-center gap-4 flex-1">
-                    <div className="p-3 bg-gradient-to-br from-red-500 to-orange-500 rounded-lg">
-                      <StatusIcon className="w-6 h-6 text-white" />
-                    </div>
-                    <div className="flex-1">
-                      <div className="flex items-center gap-3 mb-2">
-                        <h3 className="text-lg font-bold text-gray-900 dark:text-white transition-colors duration-300">{order.orderNumber}</h3>
-                        <span className={`text-xs px-2 py-1 rounded-full border ${getStatusColor(order.status)} font-medium capitalize`}>
-                          {order.status}
-                        </span>
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={() => toggleSelectOrder(order.id)}
+                      className="mt-1 rounded border-gray-300 dark:border-gray-600 text-red-500 focus:ring-red-500"
+                      aria-label={`Select order ${order.orderNumber}`}
+                    />
+                    <div className="flex items-center gap-4 flex-1">
+                      <div className="p-3 bg-gradient-to-br from-red-500 to-orange-500 rounded-lg">
+                        <StatusIcon className="w-6 h-6 text-white" />
                       </div>
-                      <p className="text-gray-600 dark:text-gray-400 text-sm transition-colors duration-300">
-                        {order.customer} • {order.items.length} items • {order.date}
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-2xl font-bold text-gray-900 dark:text-white transition-colors duration-300">${order.total.toFixed(2)}</p>
+                      <div className="flex-1">
+                        <div className="flex items-center gap-3 mb-2">
+                          <h3 className="text-lg font-bold text-gray-900 dark:text-white transition-colors duration-300">{order.orderNumber}</h3>
+                          <span className={`text-xs px-2 py-1 rounded-full border ${getStatusColor(order.status)} font-medium capitalize`}>
+                            {order.status}
+                          </span>
+                        </div>
+                        <p className="text-gray-600 dark:text-gray-400 text-sm transition-colors duration-300">
+                          {order.customer} • {order.items.length} items • {order.date}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-2xl font-bold text-gray-900 dark:text-white transition-colors duration-300">${order.total.toFixed(2)}</p>
+                      </div>
                     </div>
                   </div>
                   <Button 
@@ -531,6 +692,62 @@ const OrdersPage: React.FC = () => {
               >
                 <Upload className="w-4 h-4 mr-2" />
                 Submit
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk Shipping Labels Modal */}
+      <Dialog open={showBulkShippingModal} onOpenChange={setShowBulkShippingModal}>
+        <DialogContent className="bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold text-gray-900 dark:text-white">
+              Generate Shipping Labels
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 mt-4">
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              You are about to generate labels for{' '}
+              <span className="font-semibold text-gray-900 dark:text-white">
+                {selectedOrders.length} order{selectedOrders.length !== 1 ? 's' : ''}
+              </span>
+              . Choose a carrier to send the request to your shipping integration.
+            </p>
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Carrier
+              </label>
+              <select
+                value={bulkCarrier}
+                onChange={(e) => setBulkCarrier(e.target.value as 'ups' | 'fedex' | 'dhl')}
+                className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+              >
+                <option value="ups">UPS</option>
+                <option value="fedex">FedEx</option>
+                <option value="dhl">DHL</option>
+              </select>
+            </div>
+            <div className="space-y-2">
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                This demo uses a frontend-only stub. In production, this is where you'd call your
+                carrier API to create labels and sync tracking numbers back to each order.
+              </p>
+            </div>
+            <div className="flex justify-end gap-3 pt-2">
+              <Button
+                variant="outline"
+                onClick={() => setShowBulkShippingModal(false)}
+                className="border-gray-300 dark:border-gray-700"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleConfirmBulkShipping}
+                className="bg-gradient-to-r from-red-500 to-orange-500 hover:from-red-600 hover:to-orange-600"
+              >
+                <Truck className="w-4 h-4 mr-2" />
+                Generate Labels
               </Button>
             </div>
           </div>

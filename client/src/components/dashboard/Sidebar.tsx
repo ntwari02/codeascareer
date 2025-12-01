@@ -13,6 +13,8 @@ import {
   ShieldCheck,
   LucideIcon,
   FolderKanban,
+  MessageCircle,
+  LifeBuoy,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -38,17 +40,19 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, sidebarOpen,
     { id: 'inventory', label: 'Inventory', icon: Package },
     { id: 'orders', label: 'Orders', icon: ShoppingCart },
     { id: 'disputes', label: 'Disputes', icon: AlertTriangle },
+    { id: 'inbox', label: 'Inbox & RFQs', icon: MessageCircle },
     { id: 'products', label: 'Products', icon: Box },
     { id: 'collections', label: 'Collections', icon: FolderKanban },
     { id: 'analytics', label: 'Analytics', icon: BarChart3 },
     { id: 'subscription', label: 'Subscription', icon: Crown },
+    { id: 'support', label: 'Support Center', icon: LifeBuoy },
     { id: 'settings', label: 'Profile & Settings', icon: Settings },
   ];
 
   const itemsToRender = menuItems || defaultMenuItems;
 
   const sidebarContent = (
-    <div className="flex flex-col h-full bg-gradient-to-b from-white to-gray-50 dark:from-gray-900 dark:to-black border-r border-gray-200 dark:border-gray-700/30 transition-colors duration-300">
+  <div className="flex flex-col h-full overflow-y-auto bg-gradient-to-b from-white to-gray-50 dark:from-gray-900 dark:to-black border-r border-gray-200 dark:border-gray-700/30 transition-colors duration-300">
       <div className="p-6 border-b border-gray-200 dark:border-gray-700/30 flex items-center justify-between transition-colors duration-300">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 bg-gradient-to-br from-red-500 to-orange-500 rounded-lg flex items-center justify-center">
@@ -104,14 +108,10 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, sidebarOpen,
         </div>
       </nav>
 
-      <div className="p-4 border-t border-gray-200 dark:border-gray-700/30 transition-colors duration-300">
-        <div className="bg-gradient-to-r from-gray-100/50 to-gray-200/50 dark:from-gray-800/50 dark:to-gray-900/50 rounded-lg p-4 border border-gray-300 dark:border-gray-700/50 transition-colors duration-300">
-          <p className="text-sm font-semibold text-gray-900 dark:text-white mb-1 transition-colors duration-300">Need Help?</p>
-          <p className="text-xs text-gray-600 dark:text-gray-400 mb-3 transition-colors duration-300">Contact our support team</p>
-          <button className="w-full bg-red-600 hover:bg-red-700 text-white text-sm py-2 rounded-lg transition-colors">
-            Get Support
-          </button>
-        </div>
+      <div className="p-4 border-t border-gray-200 dark:border-gray-700/30 transition-colors duration-300 text-xs text-gray-500 dark:text-gray-400">
+        <p className="text-center">
+          Need help? Open <span className="font-semibold">Support Center</span> in the menu.
+        </p>
       </div>
     </div>
   );

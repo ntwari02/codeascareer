@@ -55,6 +55,26 @@ const DashboardOverview: React.FC = () => {
     },
   ];
 
+  // B2B-focused KPIs
+  const b2bStats: Stat[] = [
+    {
+      title: 'Pending RFQs',
+      value: '18',
+      change: '+6 new today',
+      trend: 'up',
+      icon: AlertTriangle,
+      color: 'from-amber-500 to-orange-500',
+    },
+    {
+      title: 'Avg. Order Value (AOV)',
+      value: timeRange === 'today' ? '$1,240' : timeRange === 'week' ? '$1,180' : '$1,095',
+      change: '+3.1%',
+      trend: 'up',
+      icon: DollarSign,
+      color: 'from-sky-500 to-indigo-500',
+    },
+  ];
+
   const orderStats = [
     { label: 'Pending', count: 12, color: 'bg-yellow-500', icon: Clock },
     { label: 'In Transit', count: 45, color: 'bg-blue-500', icon: Truck },
@@ -121,6 +141,22 @@ const DashboardOverview: React.FC = () => {
         {salesStats.map((stat, index) => (
           <StatCard key={index} {...stat} />
         ))}
+      </motion.div>
+
+      {/* B2B KPIs */}
+      <motion.div
+        variants={containerVariants}
+        initial="hidden"
+        animate="visible"
+        className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"
+      >
+        {b2bStats.map((stat, index) => (
+          <StatCard key={index} {...stat} />
+        ))}
+        {/* Spacer card to balance layout / future KPIs */}
+        <div className="hidden lg:block bg-gradient-to-r from-gray-50/60 to-gray-100/60 dark:from-gray-900/60 dark:to-gray-800/60 border border-dashed border-gray-300 dark:border-gray-700 rounded-xl p-4 text-sm text-gray-500 dark:text-gray-400 transition-colors duration-300">
+          Optimise for key B2B outcomes like RFQs won, contract value, and reorder cadence.
+        </div>
       </motion.div>
 
       {/* Main Content Grid */}
@@ -292,8 +328,81 @@ const DashboardOverview: React.FC = () => {
           </div>
         </div>
 
-        {/* Notifications & Account Status */}
+        {/* Notifications, Action Required & Account Status */}
         <div className="space-y-6">
+          {/* Action Required - B2B Task List */}
+          <div className="bg-white/50 dark:bg-gray-900/50 rounded-xl p-6 border border-gray-200 dark:border-gray-700/30 transition-colors duration-300">
+            <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4 transition-colors duration-300 flex items-center gap-2">
+              <AlertTriangle className="w-6 h-6 text-amber-500" />
+              Action Required
+            </h2>
+            <div className="space-y-3">
+              {[
+                {
+                  title: 'Review high-value RFQs',
+                  meta: '5 RFQs over $10k waiting for response',
+                  priority: 'High',
+                  due: 'Due in 2 hours',
+                },
+                {
+                  title: 'Approve new B2B buyer accounts',
+                  meta: '3 enterprise buyers pending verification',
+                  priority: 'Medium',
+                  due: 'Today',
+                },
+                {
+                  title: 'Follow up on expiring contracts',
+                  meta: '2 key accounts renew in the next 7 days',
+                  priority: 'High',
+                  due: 'This week',
+                },
+              ].map((task, index) => (
+                <motion.div
+                  key={task.title}
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.05 * index }}
+                  className="flex items-start justify-between gap-3 p-3 rounded-lg bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700/50 transition-colors duration-300"
+                >
+                  <div className="flex items-start gap-3">
+                    <div className="mt-1 flex h-6 w-6 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900/40">
+                      <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-gray-900 dark:text-white transition-colors duration-300">
+                        {task.title}
+                      </p>
+                      <p className="text-xs text-gray-600 dark:text-gray-400 mt-1 transition-colors duration-300">
+                        {task.meta}
+                      </p>
+                      <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                        <span
+                          className={`px-2 py-0.5 rounded-full font-medium ${
+                            task.priority === 'High'
+                              ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300'
+                              : 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300'
+                          }`}
+                        >
+                          {task.priority} Priority
+                        </span>
+                        <span className="flex items-center gap-1 text-gray-600 dark:text-gray-400 transition-colors duration-300">
+                          <Clock className="h-3 w-3" />
+                          {task.due}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    className="mt-1 inline-flex items-center justify-center rounded-full border border-gray-300 dark:border-gray-600 bg-white/70 dark:bg-gray-900/50 p-1.5 text-gray-500 hover:text-green-600 hover:border-green-500 hover:bg-green-50 dark:hover:bg-green-900/20 transition-colors duration-200"
+                    aria-label="Mark task as done"
+                  >
+                    <CheckCircle className="h-4 w-4" />
+                  </button>
+                </motion.div>
+              ))}
+            </div>
+          </div>
+
           {/* Notifications */}
           <div className="bg-white/50 dark:bg-gray-900/50 rounded-xl p-6 border border-gray-200 dark:border-gray-700/30 transition-colors duration-300">
             <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4 transition-colors duration-300 flex items-center gap-2">

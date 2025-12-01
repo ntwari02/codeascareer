@@ -790,10 +790,16 @@ export default function CollectionManagement() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 relative z-0">
           {filteredCollections.map((collection) => {
-            // Mock analytics data
+            // Mock analytics data (per collection) for the seller dashboard demo
+            const sales = Math.floor(Math.random() * 50000) + 1000;
+            const views = Math.floor(Math.random() * 10000) + 100;
+            const orders = Math.floor(Math.random() * 450) + 50;
+            const aov = orders > 0 ? sales / orders : 0;
             const analytics = {
-              sales: Math.floor(Math.random() * 50000) + 1000,
-              views: Math.floor(Math.random() * 10000) + 100,
+              sales,
+              views,
+              orders,
+              aov,
               conversionRate: (Math.random() * 5 + 1).toFixed(2),
               clickThroughRate: (Math.random() * 10 + 2).toFixed(1),
             };
@@ -889,22 +895,42 @@ export default function CollectionManagement() {
                 
                 {/* Analytics */}
                 <div className="mb-4 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-                  <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-xs">
                     <div>
                       <div className="text-gray-500 dark:text-gray-400">Sales</div>
-                      <div className="font-semibold text-gray-900 dark:text-white">${analytics.sales.toLocaleString()}</div>
+                      <div className="font-semibold text-gray-900 dark:text-white">
+                        ${analytics.sales.toLocaleString()}
+                      </div>
                     </div>
                     <div>
                       <div className="text-gray-500 dark:text-gray-400">Views</div>
-                      <div className="font-semibold text-gray-900 dark:text-white">{analytics.views.toLocaleString()}</div>
+                      <div className="font-semibold text-gray-900 dark:text-white">
+                        {analytics.views.toLocaleString()}
+                      </div>
                     </div>
                     <div>
                       <div className="text-gray-500 dark:text-gray-400">Conversion</div>
-                      <div className="font-semibold text-gray-900 dark:text-white">{analytics.conversionRate}%</div>
+                      <div className="font-semibold text-gray-900 dark:text-white">
+                        {analytics.conversionRate}%
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-gray-500 dark:text-gray-400">Avg. Order Value</div>
+                      <div className="font-semibold text-gray-900 dark:text-white">
+                        ${analytics.aov.toFixed(2)}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-gray-500 dark:text-gray-400">Orders (mock)</div>
+                      <div className="font-semibold text-gray-900 dark:text-white">
+                        {analytics.orders.toLocaleString()}
+                      </div>
                     </div>
                     <div>
                       <div className="text-gray-500 dark:text-gray-400">CTR</div>
-                      <div className="font-semibold text-gray-900 dark:text-white">{analytics.clickThroughRate}%</div>
+                      <div className="font-semibold text-gray-900 dark:text-white">
+                        {analytics.clickThroughRate}%
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1339,8 +1365,14 @@ function CollectionFormModal({
           {/* Smart Collection Conditions */}
           {formData.type === 'smart' && (
             <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4">
-              <div className="flex justify-between items-center mb-4">
-                <h3 className="font-semibold text-gray-900 dark:text-white">Conditions</h3>
+              <div className="flex justify-between items-center mb-2">
+                <div>
+                  <h3 className="font-semibold text-gray-900 dark:text-white">Smart Collection Rules</h3>
+                  <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                    Products are auto-included when they match <span className="font-semibold">all</span> of the rules below
+                    (e.g. price under $50 and tag contains &quot;B2B&quot;).
+                  </p>
+                </div>
                 <Button
                   type="button"
                   variant="outline"
@@ -1412,6 +1444,12 @@ function CollectionFormModal({
                             <option value="greater_than">Greater Than</option>
                             <option value="less_than">Less Than</option>
                             <option value="between">Between</option>
+                          </>
+                        )}
+                        {newCondition.type === 'category' && (
+                          <>
+                            <option value="equals">Is</option>
+                            <option value="not_equals">Is not</option>
                           </>
                         )}
                         {newCondition.type === 'stock' && (

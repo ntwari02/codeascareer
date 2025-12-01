@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { AlertTriangle, MessageSquare, CheckCircle, XCircle, Clock, Search, Filter, Upload, Send, Image as ImageIcon, FileText, TrendingUp, TrendingDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -17,6 +17,7 @@ interface Dispute {
   evidence?: { type: 'image' | 'video'; url: string }[];
   messages?: { sender: 'buyer' | 'seller' | 'platform'; text: string; date: string }[];
   platformDecision?: string;
+  resolutionDate?: string; // For calculating resolution timelines in this demo
 }
 
 const DisputeResolution: React.FC = () => {
@@ -26,6 +27,8 @@ const DisputeResolution: React.FC = () => {
   const [showDisputeDetails, setShowDisputeDetails] = useState(false);
   const [responseText, setResponseText] = useState('');
   const [showEvidenceModal, setShowEvidenceModal] = useState(false);
+  const [evidenceFiles, setEvidenceFiles] = useState<File[]>([]);
+  const [evidenceNotes, setEvidenceNotes] = useState('');
 
   const [disputes] = useState<Dispute[]>([
     {
@@ -71,6 +74,7 @@ const DisputeResolution: React.FC = () => {
       description: 'The item arrived damaged. The packaging was torn and the product inside was broken.',
       status: 'resolved',
       date: '2024-01-10',
+      resolutionDate: '2024-01-15',
       priority: 'high',
       evidence: [
         { type: 'image', url: 'https://via.placeholder.com/300' },
@@ -99,6 +103,25 @@ const DisputeResolution: React.FC = () => {
   const rejected = disputes.filter(d => d.status === 'rejected').length;
   const disputeRate = ((disputes.length / 100) * 100).toFixed(2); // Mock calculation
   const winRate = ((resolved / disputes.length) * 100).toFixed(1); // Mock calculation
+
+  const avgResolutionDays = useMemo(() => {
+    const resolvedWithDates = disputes.filter(
+      (d) => d.status === 'resolved' && d.resolutionDate
+    );
+    if (!resolvedWithDates.length) return '—';
+
+    const differences = resolvedWithDates.map((d) => {
+      const opened = new Date(d.date);
+      const resolvedAt = new Date(d.resolutionDate as string);
+      const diffMs = resolvedAt.getTime() - opened.getTime();
+      const diffDays = diffMs / (1000 * 60 * 60 * 24);
+      return Math.max(0, diffDays);
+    });
+
+    const avg =
+      differences.reduce((sum, val) => sum + val, 0) / differences.length;
+    return avg.toFixed(1);
+  }, [disputes]);
 
   const getStatusIcon = (status: string) => {
     switch (status) {
@@ -151,6 +174,27 @@ const DisputeResolution: React.FC = () => {
     console.log('Request platform support');
   };
 
+  const handleEvidenceFileChange = (files: FileList | null) => {
+    if (!files) return;
+    const next: File[] = [];
+    for (let i = 0; i < files.length; i++) {
+      next.push(files.item(i)!);
+    }
+    setEvidenceFiles(next);
+  };
+
+  const handleSubmitEvidence = () => {
+    if (!selectedDispute || (!evidenceFiles.length && !evidenceNotes.trim())) return;
+    // In a real app this would securely upload to your backend or storage bucket
+    console.log('Submitting evidence for dispute', selectedDispute.id, {
+      files: evidenceFiles.map((f) => ({ name: f.name, size: f.size })),
+      notes: evidenceNotes,
+    });
+    setEvidenceFiles([]);
+    setEvidenceNotes('');
+    setShowEvidenceModal(false);
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -185,7 +229,7 @@ const DisputeResolution: React.FC = () => {
       </div>
 
       {/* Resolution Metrics */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
         <div className="bg-white/50 dark:bg-gray-900/50 rounded-xl p-4 border border-gray-200 dark:border-gray-700/30 transition-colors duration-300">
           <div className="flex items-center justify-between">
             <div>
@@ -211,6 +255,17 @@ const DisputeResolution: React.FC = () => {
               <p className="text-2xl font-bold text-gray-900 dark:text-white transition-colors duration-300">{disputes.length}</p>
             </div>
             <AlertTriangle className="w-8 h-8 text-orange-500" />
+          </div>
+        </div>
+        <div className="bg-white/50 dark:bg-gray-900/50 rounded-xl p-4 border border-gray-200 dark:border-gray-700/30 transition-colors duration-300">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-gray-600 dark:text-gray-400 text-sm mb-1 transition-colors duration-300">Avg. Resolution Time</p>
+              <p className="text-2xl font-bold text-gray-900 dark:text-white transition-colors duration-300">
+                {avgResolutionDays} <span className="text-sm font-normal text-gray-500 dark:text-gray-400">days</span>
+              </p>
+            </div>
+            <Clock className="w-8 h-8 text-purple-500" />
           </div>
         </div>
       </div>
@@ -411,30 +466,82 @@ const DisputeResolution: React.FC = () => {
 
       {/* Add Evidence Modal */}
       <Dialog open={showEvidenceModal} onOpenChange={setShowEvidenceModal}>
-        <DialogContent className="bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700">
+        <DialogContent className="bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 max-w-lg">
           <DialogHeader>
-            <DialogTitle className="text-xl font-bold text-gray-900 dark:text-white">Add Evidence</DialogTitle>
+            <DialogTitle className="text-xl font-bold text-gray-900 dark:text-white">
+              Add Evidence
+            </DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 mt-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                Upload Photos/Videos
+          <div className="space-y-5 mt-4">
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Upload Files
               </label>
-              <div className="border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-lg p-8 text-center">
-                <Upload className="w-12 h-12 mx-auto text-gray-400 mb-4" />
-                <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">Drag and drop files here, or click to browse</p>
-                <Button variant="outline" className="border-gray-300 dark:border-gray-700">
-                  Select Files
-                </Button>
+              <div className="border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-lg p-6 text-center bg-gray-50 dark:bg-gray-900/40">
+                <Upload className="w-10 h-10 mx-auto text-gray-400 mb-3" />
+                <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">
+                  Drag and drop files here, or click to browse. Supported types: images, PDFs, videos.
+                </p>
+                <label className="inline-flex items-center px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-700 text-sm text-gray-700 dark:text-gray-200 cursor-pointer bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
+                  <span>Select Files</span>
+                  <input
+                    type="file"
+                    multiple
+                    className="hidden"
+                    onChange={(e) => handleEvidenceFileChange(e.target.files)}
+                  />
+                </label>
+                {evidenceFiles.length > 0 && (
+                  <div className="mt-4 text-left text-xs text-gray-600 dark:text-gray-400 space-y-1 max-h-24 overflow-y-auto">
+                    {evidenceFiles.map((file) => (
+                      <p key={file.name}>
+                        {file.name}{' '}
+                        <span className="text-gray-400">
+                          ({(file.size / 1024).toFixed(1)} KB)
+                        </span>
+                      </p>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
-            <div className="flex justify-end gap-3">
-              <Button variant="outline" onClick={() => setShowEvidenceModal(false)}>
-                Cancel
-              </Button>
-              <Button className="bg-gradient-to-r from-red-500 to-orange-500 hover:from-red-600 hover:to-orange-600">
-                Upload
-              </Button>
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Notes for Reviewer (optional)
+              </label>
+              <textarea
+                value={evidenceNotes}
+                onChange={(e) => setEvidenceNotes(e.target.value)}
+                placeholder="Explain what this evidence shows, e.g. 'Unboxing video showing damage on arrival'."
+                rows={3}
+                className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+              />
+            </div>
+            <div className="flex justify-between items-center pt-2">
+              <p className="text-xs text-gray-500 dark:text-gray-400 max-w-xs">
+                Files are uploaded securely and only visible to the buyer, seller, and platform
+                support team for this dispute.
+              </p>
+              <div className="flex gap-3">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setShowEvidenceModal(false);
+                    setEvidenceFiles([]);
+                    setEvidenceNotes('');
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={handleSubmitEvidence}
+                  disabled={!evidenceFiles.length && !evidenceNotes.trim()}
+                  className="bg-gradient-to-r from-red-500 to-orange-500 hover:from-red-600 hover:to-orange-600"
+                >
+                  <Upload className="w-4 h-4 mr-2" />
+                  Submit Evidence
+                </Button>
+              </div>
             </div>
           </div>
         </DialogContent>

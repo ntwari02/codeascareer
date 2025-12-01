@@ -1,15 +1,26 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { User, Mail, Phone, MapPin, Save, Edit, Lock, Shield, Bell, FileText, Building2, Clock, CreditCard, Landmark, Smartphone, Upload, X, Package, CheckCircle } from 'lucide-react';
+import { User, Mail, Phone, MapPin, Save, Edit, Lock, Shield, Bell, FileText, Building2, Clock, CreditCard, Landmark, Smartphone, Upload, X, Package, CheckCircle, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 const ProfilePage: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'profile' | 'security' | 'payout' | 'notifications' | 'policies'>('profile');
+  const [activeTab, setActiveTab] = useState<'profile' | 'security' | 'payout' | 'notifications' | 'policies' | 'team'>('profile');
   const [isEditing, setIsEditing] = useState(false);
   const [show2FAModal, setShow2FAModal] = useState(false);
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [showAddBank, setShowAddBank] = useState(false);
+  const [teamMembers, setTeamMembers] = useState([
+    { id: '1', name: 'Alice Johnson', role: 'Sales Rep', email: 'alice@example.com', access: ['orders', 'rfqs', 'customers'] },
+    { id: '2', name: 'Bob Smith', role: 'Warehouse', email: 'bob@example.com', access: ['inventory', 'fulfilment'] },
+    { id: '3', name: 'Carol White', role: 'Admin', email: 'carol@example.com', access: ['everything'] },
+  ]);
+  const [showInviteModal, setShowInviteModal] = useState(false);
+  const [verificationDocs, setVerificationDocs] = useState({
+    businessLicense: '',
+    isoCert: '',
+    auditReport: '',
+  });
 
   const [profile, setProfile] = useState({
     storeName: 'Seller Co.',
@@ -122,6 +133,7 @@ const ProfilePage: React.FC = () => {
           { id: 'payout', label: 'Payout Settings', icon: CreditCard },
           { id: 'notifications', label: 'Notifications', icon: Bell },
           { id: 'policies', label: 'Policy Pages', icon: FileText },
+          { id: 'team', label: 'Team & Permissions', icon: Users },
         ].map(tab => {
           const Icon = tab.icon;
           return (
@@ -525,6 +537,155 @@ const ProfilePage: React.FC = () => {
         </div>
       )}
 
+      {/* Team & Permissions Tab */}
+      {activeTab === 'team' && (
+        <div className="space-y-6">
+          <div className="bg-white/50 dark:bg-gray-900/50 rounded-xl p-6 border border-gray-200 dark:border-gray-700/30 transition-colors duration-300">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2 transition-colors duration-300">
+                <Users className="w-6 h-6 text-red-400" />
+                Team & Permissions
+              </h2>
+              <Button
+                className="bg-gradient-to-r from-red-500 to-orange-500 hover:from-red-600 hover:to-orange-600"
+                onClick={() => setShowInviteModal(true)}
+              >
+                Invite Team Member
+              </Button>
+            </div>
+            <p className="text-sm text-gray-600 dark:text-gray-400 mb-4 transition-colors duration-300">
+              Define roles for staff accounts (e.g., Warehouse, Sales Rep, Finance) and control what each person
+              can access inside the seller hub.
+            </p>
+            <div className="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-700/60 bg-gray-50/60 dark:bg-gray-900/40">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-100 dark:bg-gray-800/80">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300">
+                      Team member
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300">
+                      Role
+                    </th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 dark:text-gray-300">
+                      Access
+                    </th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 dark:text-gray-300">
+                      Actions
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {teamMembers.map((member, index) => (
+                    <motion.tr
+                      key={member.id}
+                      initial={{ opacity: 0, y: 12 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: index * 0.05 }}
+                      className="border-t border-gray-200 dark:border-gray-700/60 hover:bg-gray-100/70 dark:hover:bg-gray-800/50 transition-colors"
+                    >
+                      <td className="px-4 py-3">
+                        <div>
+                          <p className="font-medium text-gray-900 dark:text-white">{member.name}</p>
+                          <p className="text-xs text-gray-500 dark:text-gray-400">{member.email}</p>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-xs text-gray-800 dark:text-gray-200">{member.role}</td>
+                      <td className="px-4 py-3">
+                        <div className="flex flex-wrap gap-1">
+                          {member.access.map((scope) => (
+                            <span
+                              key={scope}
+                              className="px-2 py-0.5 rounded-full bg-gray-100 dark:bg-gray-800 text-[11px] text-gray-700 dark:text-gray-200 border border-gray-200 dark:border-gray-700"
+                            >
+                              {scope}
+                            </span>
+                          ))}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-xs text-gray-600 dark:text-gray-300"
+                        >
+                          Manage Access
+                        </Button>
+                      </td>
+                    </motion.tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Verification Documents */}
+          <div className="bg-white/50 dark:bg-gray-900/50 rounded-xl p-6 border border-gray-200 dark:border-gray-700/30 transition-colors duration-300">
+            <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2 transition-colors duration-300">
+              <FileText className="w-6 h-6 text-red-400" />
+              Verification Documents
+            </h2>
+            <p className="text-sm text-gray-600 dark:text-gray-400 mb-4 transition-colors duration-300">
+              Upload official documents to strengthen your B2B profile. These are only visible to the platform
+              and used for verification and compliance checks.
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {[
+                {
+                  key: 'businessLicense',
+                  label: 'Business License',
+                  helper: 'Trade / commercial registration document.',
+                },
+                {
+                  key: 'isoCert',
+                  label: 'ISO Certification',
+                  helper: 'e.g., ISO 9001, ISO 27001 certificates.',
+                },
+                {
+                  key: 'auditReport',
+                  label: 'Audit Report',
+                  helper: 'Recent financial or process audit summary.',
+                },
+              ].map(({ key, label, helper }) => (
+                <div
+                  key={key}
+                  className="p-4 rounded-lg bg-gray-50 dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700/60"
+                >
+                  <p className="text-sm font-semibold text-gray-900 dark:text-white mb-1 transition-colors duration-300">
+                    {label}
+                  </p>
+                  <p className="text-xs text-gray-600 dark:text-gray-400 mb-3 transition-colors duration-300">
+                    {helper}
+                  </p>
+                  <label className="inline-flex items-center px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 text-xs text-gray-700 dark:text-gray-200 cursor-pointer bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
+                    <Upload className="w-3 h-3 mr-2" />
+                    {verificationDocs[key as keyof typeof verificationDocs] ? 'Replace file' : 'Upload file'}
+                    <input
+                      type="file"
+                      className="hidden"
+                      onChange={(e) =>
+                        setVerificationDocs((prev) => ({
+                          ...prev,
+                          [key]:
+                            e.target.files && e.target.files[0]
+                              ? e.target.files[0].name
+                              : prev[key as keyof typeof prev],
+                        }))
+                      }
+                    />
+                  </label>
+                  {verificationDocs[key as keyof typeof verificationDocs] && (
+                    <p className="mt-2 text-[11px] text-gray-600 dark:text-gray-300 truncate transition-colors duration-300">
+                      {verificationDocs[key as keyof typeof verificationDocs]}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Notifications Settings Tab */}
       {activeTab === 'notifications' && (
         <div className="space-y-6">
@@ -775,6 +936,54 @@ const ProfilePage: React.FC = () => {
               </Button>
               <Button className="bg-gradient-to-r from-red-500 to-orange-500 hover:from-red-600 hover:to-orange-600">
                 Add Bank Account
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Invite Team Member Modal (UI only) */}
+      <Dialog open={showInviteModal} onOpenChange={setShowInviteModal}>
+        <DialogContent className="bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold text-gray-900 dark:text-white">
+              Invite Team Member
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 mt-4">
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              Send an invitation to a staff member and assign a default role. You can fine-tune permissions
+              later from the Team &amp; Permissions tab.
+            </p>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Work Email
+                </label>
+                <input
+                  type="email"
+                  placeholder="staff@company.com"
+                  className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg px-4 py-2 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Role
+                </label>
+                <select className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500">
+                  <option>Sales Rep (orders, RFQs, customers)</option>
+                  <option>Warehouse (inventory, fulfilment)</option>
+                  <option>Finance (payouts, invoices)</option>
+                  <option>Admin (full access)</option>
+                </select>
+              </div>
+            </div>
+            <div className="flex justify-end gap-3">
+              <Button variant="outline" onClick={() => setShowInviteModal(false)}>
+                Cancel
+              </Button>
+              <Button className="bg-gradient-to-r from-red-500 to-orange-500 hover:from-red-600 hover:to-orange-600">
+                Send Invite
               </Button>
             </div>
           </div>

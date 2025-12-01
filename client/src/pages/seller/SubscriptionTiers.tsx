@@ -24,6 +24,12 @@ interface Invoice {
   amount: number;
   status: 'paid' | 'pending' | 'failed';
   plan: string;
+  period: string;
+  commission: number;
+  processingFees: number;
+  otherFees: number;
+  netPayout: number;
+  payoutDate: string;
 }
 
 const SubscriptionTiers: React.FC = () => {
@@ -31,6 +37,7 @@ const SubscriptionTiers: React.FC = () => {
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [selectedTier, setSelectedTier] = useState<string | null>(null);
   const [showAddCard, setShowAddCard] = useState(false);
+  const [expandedInvoice, setExpandedInvoice] = useState<string | null>(null);
 
   const tiers: Tier[] = [
     {
@@ -94,9 +101,45 @@ const SubscriptionTiers: React.FC = () => {
   const renewalDate = '2024-02-15';
 
   const [invoices] = useState<Invoice[]>([
-    { id: 'INV-001', date: '2024-01-15', amount: 29.99, status: 'paid', plan: 'Premium' },
-    { id: 'INV-002', date: '2023-12-15', amount: 29.99, status: 'paid', plan: 'Premium' },
-    { id: 'INV-003', date: '2023-11-15', amount: 29.99, status: 'paid', plan: 'Premium' },
+    {
+      id: 'INV-001',
+      date: '2024-01-15',
+      amount: 29.99,
+      status: 'paid',
+      plan: 'Premium',
+      period: 'Jan 2024 (Monthly subscription)',
+      commission: 1280.45,
+      processingFees: 145.22,
+      otherFees: 32.15,
+      netPayout: 1103.08,
+      payoutDate: '2024-01-22',
+    },
+    {
+      id: 'INV-002',
+      date: '2023-12-15',
+      amount: 29.99,
+      status: 'paid',
+      plan: 'Premium',
+      period: 'Dec 2023 (Monthly subscription)',
+      commission: 1134.1,
+      processingFees: 132.08,
+      otherFees: 18.5,
+      netPayout: 983.52,
+      payoutDate: '2023-12-22',
+    },
+    {
+      id: 'INV-003',
+      date: '2023-11-15',
+      amount: 29.99,
+      status: 'paid',
+      plan: 'Premium',
+      period: 'Nov 2023 (Monthly subscription)',
+      commission: 980.73,
+      processingFees: 120.34,
+      otherFees: 12.0,
+      netPayout: 848.39,
+      payoutDate: '2023-11-22',
+    },
   ]);
 
   const [paymentMethods] = useState([
@@ -245,11 +288,50 @@ const SubscriptionTiers: React.FC = () => {
 
       {/* Billing History Tab */}
       {activeTab === 'billing' && (
-        <div className="bg-white/50 dark:bg-gray-900/50 rounded-xl p-6 border border-gray-200 dark:border-gray-700/30 transition-colors duration-300">
-          <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4 transition-colors duration-300 flex items-center gap-2">
-            <FileText className="w-6 h-6 text-red-400" />
-            Billing History
-          </h2>
+        <div className="bg-white/50 dark:bg-gray-900/50 rounded-xl p-6 border border-gray-200 dark:border-gray-700/30 transition-colors duration-300 space-y-6">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <div className="flex items-center gap-2">
+              <FileText className="w-6 h-6 text-red-400" />
+              <div>
+                <h2 className="text-xl font-bold text-gray-900 dark:text-white transition-colors duration-300">
+                  Billing & Payout History
+                </h2>
+                <p className="text-xs text-gray-600 dark:text-gray-400 mt-1 transition-colors duration-300">
+                  Transparent breakdown of subscription charges, commissions, fees, and seller payouts.
+                </p>
+              </div>
+            </div>
+            <Button
+              variant="outline"
+              className="border-gray-300 dark:border-gray-700 text-xs"
+            >
+              <Download className="w-4 h-4 mr-2" />
+              Export CSV
+            </Button>
+          </div>
+
+          {/* Summary strip */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+            <div className="p-3 rounded-lg bg-gray-50 dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700/60">
+              <p className="text-gray-500 dark:text-gray-400">Total subscription fees (last 3 months)</p>
+              <p className="mt-1 text-lg font-semibold text-gray-900 dark:text-white">
+                ${invoices.reduce((sum, inv) => sum + inv.amount, 0).toFixed(2)}
+              </p>
+            </div>
+            <div className="p-3 rounded-lg bg-gray-50 dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700/60">
+              <p className="text-gray-500 dark:text-gray-400">Total net payouts (mock)</p>
+              <p className="mt-1 text-lg font-semibold text-gray-900 dark:text-white">
+                ${invoices.reduce((sum, inv) => sum + inv.netPayout, 0).toFixed(2)}
+              </p>
+            </div>
+            <div className="p-3 rounded-lg bg-gray-50 dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700/60">
+              <p className="text-gray-500 dark:text-gray-400">Next scheduled payout</p>
+              <p className="mt-1 text-lg font-semibold text-gray-900 dark:text-white">
+                {invoices[0]?.payoutDate}
+              </p>
+            </div>
+          </div>
+
           <div className="space-y-3">
             {invoices.map((invoice, index) => (
               <motion.div
@@ -257,30 +339,90 @@ const SubscriptionTiers: React.FC = () => {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: index * 0.05 }}
-                className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700/50 transition-colors duration-300"
+                className="p-4 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700/50 transition-colors duration-300"
               >
-                <div className="flex items-center gap-4">
-                  <FileText className="w-8 h-8 text-gray-400" />
-                  <div>
-                    <p className="font-semibold text-gray-900 dark:text-white transition-colors duration-300">{invoice.id}</p>
-                    <p className="text-sm text-gray-600 dark:text-gray-400 transition-colors duration-300">{invoice.date} • {invoice.plan}</p>
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-4">
+                    <FileText className="w-8 h-8 text-gray-400" />
+                    <div>
+                      <p className="font-semibold text-gray-900 dark:text-white transition-colors duration-300">
+                        {invoice.id} • {invoice.plan}
+                      </p>
+                      <p className="text-xs text-gray-600 dark:text-gray-400 transition-colors duration-300">
+                        {invoice.date} • {invoice.period}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <div className="text-right">
+                      <p className="font-bold text-gray-900 dark:text-white transition-colors duration-300">
+                        ${invoice.amount.toFixed(2)}
+                      </p>
+                      <span
+                        className={`text-xs px-2 py-1 rounded ${
+                          invoice.status === 'paid'
+                            ? 'bg-green-100 dark:bg-green-900/20 text-green-600 dark:text-green-400'
+                            : invoice.status === 'pending'
+                            ? 'bg-yellow-100 dark:bg-yellow-900/20 text-yellow-600 dark:text-yellow-400'
+                            : 'bg-red-100 dark:bg-red-900/20 text-red-600 dark:text-red-400'
+                        }`}
+                      >
+                        {invoice.status}
+                      </span>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="text-gray-600 dark:text-gray-400"
+                    >
+                      <Download className="w-4 h-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-xs text-gray-600 dark:text-gray-300"
+                      onClick={() =>
+                        setExpandedInvoice(
+                          expandedInvoice === invoice.id ? null : invoice.id
+                        )
+                      }
+                    >
+                      {expandedInvoice === invoice.id ? 'Hide breakdown' : 'View breakdown'}
+                    </Button>
                   </div>
                 </div>
-                <div className="flex items-center gap-4">
-                  <div className="text-right">
-                    <p className="font-bold text-gray-900 dark:text-white transition-colors duration-300">${invoice.amount.toFixed(2)}</p>
-                    <span className={`text-xs px-2 py-1 rounded ${
-                      invoice.status === 'paid' ? 'bg-green-100 dark:bg-green-900/20 text-green-600 dark:text-green-400' :
-                      invoice.status === 'pending' ? 'bg-yellow-100 dark:bg-yellow-900/20 text-yellow-600 dark:text-yellow-400' :
-                      'bg-red-100 dark:bg-red-900/20 text-red-600 dark:text-red-400'
-                    }`}>
-                      {invoice.status}
-                    </span>
+
+                {expandedInvoice === invoice.id && (
+                  <div className="mt-4 grid grid-cols-1 md:grid-cols-4 gap-3 text-xs">
+                    <div className="p-3 rounded-lg bg-white/70 dark:bg-gray-900/60 border border-gray-200 dark:border-gray-700/60">
+                      <p className="text-gray-500 dark:text-gray-400">Gross marketplace commissions</p>
+                      <p className="mt-1 font-semibold text-gray-900 dark:text-white">
+                        ${invoice.commission.toFixed(2)}
+                      </p>
+                    </div>
+                    <div className="p-3 rounded-lg bg-white/70 dark:bg-gray-900/60 border border-gray-200 dark:border-gray-700/60">
+                      <p className="text-gray-500 dark:text-gray-400">Payment processing fees</p>
+                      <p className="mt-1 font-semibold text-gray-900 dark:text-white">
+                        -${invoice.processingFees.toFixed(2)}
+                      </p>
+                    </div>
+                    <div className="p-3 rounded-lg bg-white/70 dark:bg-gray-900/60 border border-gray-200 dark:border-gray-700/60">
+                      <p className="text-gray-500 dark:text-gray-400">Other fees & adjustments</p>
+                      <p className="mt-1 font-semibold text-gray-900 dark:text-white">
+                        -${invoice.otherFees.toFixed(2)}
+                      </p>
+                    </div>
+                    <div className="p-3 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700/60">
+                      <p className="text-gray-600 dark:text-gray-300">Net payout to seller</p>
+                      <p className="mt-1 font-semibold text-green-700 dark:text-green-300">
+                        ${invoice.netPayout.toFixed(2)}
+                      </p>
+                      <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                        Scheduled payout: {invoice.payoutDate} (standard payout schedule)
+                      </p>
+                    </div>
                   </div>
-                  <Button variant="ghost" size="icon" className="text-gray-600 dark:text-gray-400">
-                    <Download className="w-4 h-4" />
-                  </Button>
-                </div>
+                )}
               </motion.div>
             ))}
           </div>
@@ -342,16 +484,44 @@ const SubscriptionTiers: React.FC = () => {
             </div>
           </div>
 
-          {/* Mobile Money Payout (UI only) */}
+          {/* B2B Payment Options & Payouts */}
           <div className="bg-white/50 dark:bg-gray-900/50 rounded-xl p-6 border border-gray-200 dark:border-gray-700/30 transition-colors duration-300">
-            <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4 transition-colors duration-300">Mobile Money Payout</h2>
-            <div className="p-4 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700/50">
-              <p className="text-sm text-gray-600 dark:text-gray-400 mb-3 transition-colors duration-300">
-                Configure your mobile money account for payouts
-              </p>
-              <Button variant="outline" className="border-gray-300 dark:border-gray-700">
-                Configure Mobile Money
-              </Button>
+            <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4 transition-colors duration-300">
+              B2B Payment Options
+            </h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="p-4 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700/50">
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-2 transition-colors duration-300">
+                  ACH Bank Transfer (Annual Enterprise)
+                </h3>
+                <p className="text-xs text-gray-600 dark:text-gray-400 mb-3 transition-colors duration-300">
+                  Lock in annual enterprise plans via ACH with reduced processing fees and auto-renewal options.
+                </p>
+                <div className="space-y-1 text-xs text-gray-600 dark:text-gray-400 mb-3 transition-colors duration-300">
+                  <p>• Currency: USD</p>
+                  <p>• Settlement window: 3–5 business days</p>
+                  <p>• Ideal for contracts ≥ $5,000 / year</p>
+                </div>
+                <Button variant="outline" className="border-gray-300 dark:border-gray-700 text-xs">
+                  Request ACH Details
+                </Button>
+              </div>
+              <div className="p-4 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700/50">
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-2 transition-colors duration-300">
+                  Wire Transfer (Enterprise Contracts)
+                </h3>
+                <p className="text-xs text-gray-600 dark:text-gray-400 mb-3 transition-colors duration-300">
+                  Support one-off or annual enterprise invoices via domestic or international wire transfer.
+                </p>
+                <div className="space-y-1 text-xs text-gray-600 dark:text-gray-400 mb-3 transition-colors duration-300">
+                  <p>• Currency: Multi-currency support</p>
+                  <p>• Settlement window: Same-day / next-day (bank dependent)</p>
+                  <p>• Recommended for large B2B deals</p>
+                </div>
+                <Button variant="outline" className="border-gray-300 dark:border-gray-700 text-xs">
+                  Request Wire Instructions
+                </Button>
+              </div>
             </div>
           </div>
 
