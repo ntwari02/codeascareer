@@ -6,6 +6,7 @@ import helmet from 'helmet';
 import compression from 'compression';
 import cookieParser from 'cookie-parser';
 import mongoose from 'mongoose';
+import authRoutes from './src/routes/authRoutes';
 
 dotenv.config();
 
@@ -31,6 +32,9 @@ app.get('/api/health', (_req: Request, res: Response) => {
   res.json({ status: 'ok', message: 'Reaglex API is running' });
 });
 
+// Auth routes
+app.use('/api/auth', authRoutes);
+
 // 404 handler
 app.use((req: Request, res: Response) => {
   res.status(404).json({ message: 'Route not found', path: req.path });
@@ -44,17 +48,32 @@ app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
 });
 
 // Connect to MongoDB, then start server
-mongoose
-  .connect(MONGO_URI)
-  .then(() => {
+const connectDB = async () => {
+  try {
+    const options: mongoose.ConnectOptions = {
+      serverSelectionTimeoutMS: 10000,
+      socketTimeoutMS: 45000,
+    };
+
+    // For development: allow invalid certificates to resolve TLS handshake issues
+    // Remove this in production and ensure proper SSL certificates are configured
+    if (process.env.NODE_ENV !== 'production') {
+      options.tlsAllowInvalidCertificates = true;
+    }
+
+    await mongoose.connect(MONGO_URI, options);
+    
     console.log('✅ Connected to MongoDB');
     app.listen(PORT, () => {
       console.log(`🚀 Server listening on port ${PORT}`);
     });
-  })
-  .catch((err) => {
+  } catch (err) {
     console.error('❌ MongoDB connection error:', err);
     process.exit(1);
-  });
+  }
+};
+
+connectDB();
+
 
 

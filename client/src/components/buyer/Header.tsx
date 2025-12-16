@@ -465,6 +465,8 @@ export function Header() {
   const cartTotal = getTotal();
 
   const isSeller = user?.role === 'seller' || user?.role === 'admin';
+  // A seller is only considered "verified" once explicitly approved by admin/government
+  const isVerifiedSeller = user?.role === 'seller' && user?.seller_status === 'approved';
 
   return (
     <>
@@ -1429,7 +1431,7 @@ export function Header() {
                     ) : (
                       <div className="w-7 h-7 sm:w-8 sm:h-8 bg-gradient-to-br from-orange-400 to-teal-500 rounded-full flex items-center justify-center text-white relative">
                         <User className="h-4 w-4 sm:h-5 sm:w-5 text-white" />
-                        {isSeller && (
+                        {isVerifiedSeller && (
                           <div className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 sm:w-3 sm:h-3 bg-green-500 rounded-full border-2 border-white dark:border-dark-card" title="Verified Seller" />
                         )}
                       </div>
@@ -1450,7 +1452,7 @@ export function Header() {
                           <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
                             {user.email}
                           </p>
-                          {isSeller && (
+                          {isVerifiedSeller && (
                             <div className="mt-1.5 flex items-center gap-1 text-xs text-green-600 dark:text-green-400">
                               <CheckCircle className="h-3 w-3" />
                               Verified Seller

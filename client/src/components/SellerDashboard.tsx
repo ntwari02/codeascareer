@@ -15,10 +15,12 @@ import InboxPage from '@/pages/seller/InboxPage';
 import SupportCenter from '@/pages/seller/SupportCenter';
 import NotificationsPage from '@/pages/seller/NotificationsPage';
 import Notifications from '@/components/dashboard/Notifications';
+import { useAuthStore } from '../stores/authStore';
 
 const SellerDashboard: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
+  const { user } = useAuthStore();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   
@@ -29,6 +31,22 @@ const SellerDashboard: React.FC = () => {
     ? pathSegments[sellerIndex + 1] 
     : 'dashboard';
   
+  // Ensure user is a seller and (optionally) approved
+  useEffect(() => {
+    if (!user) {
+      navigate('/login');
+      return;
+    }
+
+    if (user.role !== 'seller') {
+      navigate('/');
+      return;
+    }
+
+    // Optionally, you can block access entirely for non-approved sellers.
+    // For now, we allow access but mark them as pending in the UI.
+  }, [user, navigate]);
+
   // Ensure we're on a valid route
   useEffect(() => {
     const validRoutes = ['dashboard', 'inventory', 'orders', 'disputes', 'products', 'collections', 'analytics', 'subscription', 'settings', 'inbox', 'support', 'notifications'];
@@ -41,7 +59,7 @@ const SellerDashboard: React.FC = () => {
       // Invalid route, redirect to dashboard
       navigate('/seller', { replace: true });
     }
-  }, [location.pathname, navigate, pathSegments, sellerIndex]);
+  }, [location.pathname, navigate, pathSegments, sellerIndex, navigate]);
 
   const setActiveTab = (tabId: string) => {
     if (tabId === 'dashboard') {
@@ -68,8 +86,14 @@ const SellerDashboard: React.FC = () => {
           setSidebarOpen={setSidebarOpen}
           notificationsOpen={notificationsOpen}
           setNotificationsOpen={setNotificationsOpen}
-          userName="John Seller"
-          userRole="Premium Account"
+          userName={user?.full_name || user?.email || 'Seller'}
+          userRole={
+            user?.seller_status === 'approved'
+              ? 'Verified Seller'
+              : user?.seller_status === 'rejected'
+              ? 'Seller (Verification Rejected)'
+              : 'Seller (Pending Government & Admin Approval)'
+          }
           accentVariant="orange"
         />
         

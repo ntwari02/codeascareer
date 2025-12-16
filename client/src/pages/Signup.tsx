@@ -1,8 +1,14 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { supabase } from '../lib/supabase';
 import { useTheme } from '../contexts/ThemeContext';
-import { User, Mail, Lock, RotateCw, Chrome, Apple, Sun, Moon, Home, Briefcase } from 'lucide-react';
+import { User, Mail, Lock, RotateCw, Chrome, Apple, Sun, Moon, Home, Briefcase, Eye, EyeOff } from 'lucide-react';
+
+// Basic guard against obvious SQL injection-style patterns.
+// Real protection is still handled on the backend with validation and ORM.
+function hasSQLInjectionRisk(value: string): boolean {
+  const pattern = /(;|--|\/\*|\*\/|\b(OR|AND)\b\s+\d+=\d+|\bxp_)/i;
+  return pattern.test(value);
+}
 
 export function Signup() {
   const navigate = useNavigate();
@@ -14,6 +20,8 @@ export function Signup() {
     confirmPassword: '',
     role: 'buyer' as 'buyer' | 'seller',
   });
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [agreedToTerms, setAgreedToTerms] = useState(false);
@@ -22,6 +30,32 @@ export function Signup() {
     e.preventDefault();
     setLoading(true);
     setError('');
+
+    // Basic front-end validation
+    if (!formData.fullName.trim()) {
+      setError('Full name is required');
+      setLoading(false);
+      return;
+    }
+
+    if (formData.fullName.trim().length < 2) {
+      setError('Full name must be at least 2 characters');
+      setLoading(false);
+      return;
+    }
+
+    const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailPattern.test(formData.email)) {
+      setError('Please enter a valid email address');
+      setLoading(false);
+      return;
+    }
+
+    if (formData.password.length < 6) {
+      setError('Password must be at least 6 characters long');
+      setLoading(false);
+      return;
+    }
 
     if (formData.password !== formData.confirmPassword) {
       setError('Passwords do not match');
@@ -35,26 +69,46 @@ export function Signup() {
       return;
     }
 
-    const { data, error: signUpError } = await supabase.auth.signUp({
-      email: formData.email,
-      password: formData.password,
-    });
-
-    if (signUpError) {
-      setError(signUpError.message);
+    // Very simple SQL-injection-style guard
+    if (
+      hasSQLInjectionRisk(formData.fullName) ||
+      hasSQLInjectionRisk(formData.email) ||
+      hasSQLInjectionRisk(formData.password)
+    ) {
+      setError('Input contains invalid characters');
       setLoading(false);
       return;
     }
 
-    if (data.user) {
-      await supabase.from('profiles').insert({
-        id: data.user.id,
-        email: formData.email,
-        full_name: formData.fullName,
-        role: formData.role,
+    try {
+      const response = await fetch('http://localhost:5000/api/auth/register', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify({
+          fullName: formData.fullName,
+          email: formData.email,
+          password: formData.password,
+          role: formData.role,
+        }),
       });
 
-      navigate('/');
+      const data = await response.json();
+
+      if (!response.ok) {
+        setError(data.message || 'Failed to create account');
+        setLoading(false);
+        return;
+      }
+
+      // Redirect to login page after successful registration
+      navigate('/login');
+    } catch (err) {
+      setError('Network error. Please try again.');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -175,14 +229,26 @@ export function Signup() {
               <div className="relative">
                 <Lock className="absolute left-3 sm:left-4 top-1/2 transform -translate-y-1/2 h-4 w-4 sm:h-5 sm:w-5 text-gray-400 dark:text-gray-500" />
                 <input
-                  type="password"
+                  type={showPassword ? 'text' : 'password'}
                   required
                   minLength={6}
                   value={formData.password}
                   onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                   placeholder="Create a strong password"
-                  className="w-full pl-10 sm:pl-12 pr-3 sm:pr-4 py-3 sm:py-4 text-sm sm:text-base bg-white dark:bg-[#1a1a2e]/80 border border-gray-300 dark:border-gray-700/50 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/50 focus:border-orange-500/50 transition"
+                  className="w-full pl-10 sm:pl-12 pr-10 sm:pr-12 py-3 sm:py-4 text-sm sm:text-base bg-white dark:bg-[#1a1a2e]/80 border border-gray-300 dark:border-gray-700/50 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/50 focus:border-orange-500/50 transition"
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 sm:right-4 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                >
+                  {showPassword ? (
+                    <EyeOff className="h-4 w-4 sm:h-5 sm:w-5" />
+                  ) : (
+                    <Eye className="h-4 w-4 sm:h-5 sm:w-5" />
+                  )}
+                </button>
               </div>
             </div>
 
@@ -193,13 +259,25 @@ export function Signup() {
               <div className="relative">
                 <RotateCw className="absolute left-3 sm:left-4 top-1/2 transform -translate-y-1/2 h-4 w-4 sm:h-5 sm:w-5 text-gray-400 dark:text-gray-500" />
                 <input
-                  type="password"
+                  type={showConfirmPassword ? 'text' : 'password'}
                   required
                   value={formData.confirmPassword}
                   onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
                   placeholder="Confirm your password"
-                  className="w-full pl-10 sm:pl-12 pr-3 sm:pr-4 py-3 sm:py-4 text-sm sm:text-base bg-white dark:bg-[#1a1a2e]/80 border border-gray-300 dark:border-gray-700/50 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/50 focus:border-orange-500/50 transition"
+                  className="w-full pl-10 sm:pl-12 pr-10 sm:pr-12 py-3 sm:py-4 text-sm sm:text-base bg-white dark:bg-[#1a1a2e]/80 border border-gray-300 dark:border-gray-700/50 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/50 focus:border-orange-500/50 transition"
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                  className="absolute right-3 sm:right-4 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                  aria-label={showConfirmPassword ? 'Hide password' : 'Show password'}
+                >
+                  {showConfirmPassword ? (
+                    <EyeOff className="h-4 w-4 sm:h-5 sm:w-5" />
+                  ) : (
+                    <Eye className="h-4 w-4 sm:h-5 sm:w-5" />
+                  )}
+                </button>
               </div>
             </div>
 

@@ -2,14 +2,22 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
 import { useTheme } from '../contexts/ThemeContext';
-import { Mail, Lock, Chrome, Apple, Sun, Moon, Home } from 'lucide-react';
+import { Mail, Lock, Chrome, Apple, Sun, Moon, Home, Eye, EyeOff } from 'lucide-react';
+
+// Basic guard against obvious SQL injection-style patterns.
+// Real protection is still handled on the backend with parameterized queries / ORMs.
+function hasSQLInjectionRisk(value: string): boolean {
+  const pattern = /(;|--|\/\*|\*\/|\b(OR|AND)\b\s+\d+=\d+|\bxp_)/i;
+  return pattern.test(value);
+}
 
 export function Login() {
   const navigate = useNavigate();
   const { theme, toggleTheme } = useTheme();
-  const { demoLogin } = useAuthStore();
+  const { login } = useAuthStore();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -18,27 +26,50 @@ export function Login() {
     setLoading(true);
     setError('');
 
-    // Demo mode: Allow login without database check
-    // Extract name from email if provided
-    const name = email.split('@')[0];
-    demoLogin(email, name);
-    navigate('/');
-    setLoading(false);
-    
-    // Original database login (commented out for demo)
-    /*
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+     // Basic front-end validation
+     if (!email || !password) {
+       setError('Please enter both email and password');
+       setLoading(false);
+       return;
+     }
 
-    if (error) {
-      setError(error.message);
-      setLoading(false);
-    } else {
+     const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+     if (!emailPattern.test(email)) {
+       setError('Please enter a valid email address');
+       setLoading(false);
+       return;
+     }
+
+     if (password.length < 6) {
+       setError('Password must be at least 6 characters long');
+       setLoading(false);
+       return;
+     }
+
+     // Very simple SQL-injection-style guard
+     if (hasSQLInjectionRisk(email) || hasSQLInjectionRisk(password)) {
+       setError('Input contains invalid characters');
+       setLoading(false);
+       return;
+     }
+
+    // Validate against database
+    try {
+      const result = await login(email, password);
+      
+      if (!result.success) {
+        setError(result.error || 'Login failed. Please check your credentials.');
+        setLoading(false);
+        return;
+      }
+
+      // Login successful, redirect to home
       navigate('/');
+    } catch (err: any) {
+      setError(err.message || 'An unexpected error occurred. Please try again.');
+    } finally {
+      setLoading(false);
     }
-    */
   };
 
   return (
@@ -108,11 +139,6 @@ export function Login() {
             <p className="text-gray-600 dark:text-gray-400 text-sm sm:text-base lg:text-lg">
               Sign in to your Reaglex account to continue.
             </p>
-            <div className="mt-3 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
-              <p className="text-xs sm:text-sm text-blue-700 dark:text-blue-300">
-                <strong>Demo Mode:</strong> Enter any email and password to login without database verification.
-              </p>
-            </div>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4 sm:space-y-5">
@@ -146,13 +172,25 @@ export function Login() {
               <div className="relative">
                 <Lock className="absolute left-3 sm:left-4 top-1/2 transform -translate-y-1/2 h-4 w-4 sm:h-5 sm:w-5 text-gray-400 dark:text-gray-500" />
                 <input
-                  type="password"
+                  type={showPassword ? 'text' : 'password'}
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="Enter your password"
-                  className="w-full pl-10 sm:pl-12 pr-3 sm:pr-4 py-3 sm:py-4 text-sm sm:text-base bg-white dark:bg-[#1a1a2e]/80 border border-gray-300 dark:border-gray-700/50 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/50 focus:border-orange-500/50 transition"
+                  className="w-full pl-10 sm:pl-12 pr-10 sm:pr-12 py-3 sm:py-4 text-sm sm:text-base bg-white dark:bg-[#1a1a2e]/80 border border-gray-300 dark:border-gray-700/50 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/50 focus:border-orange-500/50 transition"
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 sm:right-4 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                >
+                  {showPassword ? (
+                    <EyeOff className="h-4 w-4 sm:h-5 sm:w-5" />
+                  ) : (
+                    <Eye className="h-4 w-4 sm:h-5 sm:w-5" />
+                  )}
+                </button>
               </div>
             </div>
 

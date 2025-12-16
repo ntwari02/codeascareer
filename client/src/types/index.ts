@@ -5,6 +5,9 @@ export interface Profile {
   phone?: string;
   avatar_url?: string;
   role: 'buyer' | 'seller' | 'admin';
+  // Seller-specific fields (for MongoDB-backed auth)
+  seller_status?: 'pending' | 'approved' | 'rejected';
+  seller_verified?: boolean;
   created_at: string;
   updated_at: string;
 }
