@@ -45,6 +45,12 @@
   .border-dark {
     border-color: #2a2a35;
   }
+
+  .font-script {
+    font-family: 'Dancing Script', 'Great Vibes', 'Allura', 'Playball', cursive;
+    letter-spacing: 0.05em;
+    font-weight: 600;
+  }
 }
 
 @keyframes slideDown {
@@ -89,6 +95,17 @@
   }
 }
 
+@keyframes slideInRight {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
 @keyframes pulse {
   0%, 100% {
     opacity: 1;
@@ -114,6 +131,10 @@
   animation: scaleIn 0.3s ease-out;
 }
 
+.animate-slideInRight {
+  animation: slideInRight 0.3s ease-out;
+}
+
 .animate-pulse {
   animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
@@ -125,4 +146,134 @@
 .scrollbar-hide {
   -ms-overflow-style: none;
   scrollbar-width: none;
+}
+
+/* Glass morphism effect */
+.glass {
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.dark .glass {
+  background: rgba(26, 26, 36, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* High contrast mode */
+.high-contrast {
+  filter: contrast(1.2) brightness(1.1);
+}
+
+.high-contrast * {
+  border-color: currentColor !important;
+}
+
+/* Smooth transitions */
+.transition-smooth {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Focus visible for accessibility */
+*:focus-visible {
+  outline: 2px solid #f97316;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Keyboard navigation styles */
+.keyboard-nav:focus {
+  outline: 2px solid #f97316;
+  outline-offset: 2px;
+}
+
+/* Screen reader only */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+/* Smooth scroll for filter bar */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+/* Filter transition animations */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fadeInUp {
+  animation: fadeInUp 0.3s ease-out;
+}
+
+/* Price Slider Styles */
+input[type="range"].slider {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 8px;
+  border-radius: 4px;
+  outline: none;
+}
+
+input[type="range"].slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #f97316;
+  cursor: pointer;
+  border: 2px solid white;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  transition: all 0.2s;
+}
+
+input[type="range"].slider::-webkit-slider-thumb:hover {
+  transform: scale(1.1);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+}
+
+input[type="range"].slider::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #f97316;
+  cursor: pointer;
+  border: 2px solid white;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  transition: all 0.2s;
+}
+
+input[type="range"].slider::-moz-range-thumb:hover {
+  transform: scale(1.1);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+}
+
+.dark input[type="range"].slider::-webkit-slider-thumb {
+  border-color: #1a1a24;
+}
+
+.dark input[type="range"].slider::-moz-range-thumb {
+  border-color: #1a1a24;
 }

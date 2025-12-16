@@ -32,9 +32,19 @@ interface SidebarProps {
   menuItems?: MenuItem[];
   title: string;
   tier: string;
+  accentVariant?: 'emerald' | 'orange';
 }
 
-const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, sidebarOpen, setSidebarOpen, menuItems, title, tier }) => {
+const Sidebar: React.FC<SidebarProps> = ({
+  activeTab,
+  setActiveTab,
+  sidebarOpen,
+  setSidebarOpen,
+  menuItems,
+  title,
+  tier,
+  accentVariant = 'emerald',
+}) => {
   const defaultMenuItems: MenuItem[] = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'inventory', label: 'Inventory', icon: Package },
@@ -51,11 +61,23 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, sidebarOpen,
 
   const itemsToRender = menuItems || defaultMenuItems;
 
+  const accentClasses = accentVariant === 'emerald'
+    ? {
+        badgeBg: 'bg-gradient-to-br from-emerald-500 via-teal-500 to-cyan-500',
+        activeBg: 'bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500',
+        activeShadow: 'shadow-emerald-500/30',
+      }
+    : {
+        badgeBg: 'bg-gradient-to-br from-red-500 to-orange-500',
+        activeBg: 'bg-gradient-to-r from-red-500 to-orange-500',
+        activeShadow: 'shadow-red-500/40',
+      };
+
   const sidebarContent = (
-  <div className="flex flex-col h-full overflow-y-auto bg-gradient-to-b from-white to-gray-50 dark:from-gray-900 dark:to-black border-r border-gray-200 dark:border-gray-700/30 transition-colors duration-300">
+  <div className="flex flex-col h-full overflow-y-auto overflow-x-hidden scroll-smooth bg-gradient-to-b from-white to-gray-50 dark:from-gray-900 dark:to-black border-r border-gray-200 dark:border-gray-700/30 transition-colors duration-300 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:dark:bg-gray-700 hover:[&::-webkit-scrollbar-thumb]:bg-gray-400 dark:hover:[&::-webkit-scrollbar-thumb]:bg-gray-600">
       <div className="p-6 border-b border-gray-200 dark:border-gray-700/30 flex items-center justify-between transition-colors duration-300">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-gradient-to-br from-red-500 to-orange-500 rounded-lg flex items-center justify-center">
+          <div className={`w-10 h-10 ${accentClasses.badgeBg} rounded-lg flex items-center justify-center`}>
             <ShieldCheck className="w-6 h-6 text-white" />
           </div>
           <div>
@@ -87,7 +109,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, sidebarOpen,
                 className={cn(
                   "w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200 relative overflow-hidden group",
                   isActive 
-                    ? "bg-gradient-to-r from-red-500 to-orange-500 text-white shadow-lg shadow-red-500/40" 
+                    ? `text-white shadow-lg ${accentClasses.activeBg} ${accentClasses.activeShadow}`
                     : "text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800/50 hover:text-gray-900 dark:hover:text-white"
                 )}
                 whileHover={{ scale: 1.02 }}
@@ -96,7 +118,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, sidebarOpen,
                 {isActive && (
                   <motion.div
                     layoutId={`activeTab-${title}`}
-                    className="absolute inset-0 bg-gradient-to-r from-red-500 to-orange-500"
+                    className={`absolute inset-0 ${accentClasses.activeBg}`}
                     transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
                   />
                 )}

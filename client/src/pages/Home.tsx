@@ -1,223 +1,129 @@
-import { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
-import { ProductCard } from '../components/ProductCard';
+import { useState, useEffect, useMemo } from 'react';
+import { useSearchParams, useNavigate } from 'react-router-dom';
+import { Header } from '../components/buyer/Header';
+import { usePerformanceOptimization } from '../hooks/usePerformance';
+import { AnnouncementBar } from '../components/buyer/AnnouncementBar';
+import { ProductFilters, type FilterState } from '../components/buyer/ProductFilters';
+import { FlashSaleSection } from '../components/buyer/FlashSaleSection';
+import { FeaturedCollections } from '../components/buyer/FeaturedCollections';
+import { ProductSection } from '../components/buyer/ProductSection';
+import { AIRecommendations } from '../components/buyer/AIRecommendations';
+import { BrandSpotlight } from '../components/buyer/BrandSpotlight';
+import { SponsoredAds } from '../components/buyer/SponsoredAds';
+import { ShopByCategory } from '../components/buyer/ShopByCategory';
+import { LocalStores } from '../components/buyer/LocalStores';
+import { TrustSection } from '../components/buyer/TrustSection';
+import { Testimonials } from '../components/buyer/Testimonials';
+import { RecentlyViewed } from '../components/buyer/RecentlyViewed';
+import { Footer } from '../components/buyer/Footer';
+import { TrendingUp, Sparkles, Award, Filter } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { getCollections } from '../lib/collections';
-import { ChevronDown, ChevronUp, ChevronLeft, ChevronRight } from 'lucide-react';
 import type { Product, Collection } from '../types';
 
-const CATEGORY_FILTERS = [
-  { id: 'all', name: 'All', slug: 'all' },
-  { id: 'electronics', name: 'Electronics', slug: 'electronics' },
-  { id: 'fashion', name: 'Fashion & Apparel', slug: 'fashion' },
-  { id: 'beauty', name: 'Beauty & Personal Care', slug: 'beauty' },
-  { id: 'home', name: 'Home & Living', slug: 'home' },
-  { id: 'sports', name: 'Sports & Outdoors', slug: 'sports' },
-  { id: 'health', name: 'Health & Wellness', slug: 'health' },
-  { id: 'baby', name: 'Baby & Kids', slug: 'baby' },
-  { id: 'automotive', name: 'Automotive & Motorcycles', slug: 'automotive' },
-  { id: 'tools', name: 'Tools & Hardware', slug: 'tools' },
-  { id: 'groceries', name: 'Groceries', slug: 'groceries' },
-  { id: 'office', name: 'Office & School Supplies', slug: 'office' },
-  { id: 'pets', name: 'Pets Supplies', slug: 'pets' },
-  { id: 'gaming', name: 'Gaming', slug: 'gaming' },
-  { id: 'jewelry', name: 'Jewelry & Watches', slug: 'jewelry' },
-  { id: 'books', name: 'Books & Media', slug: 'books' },
-  { id: 'smart-home', name: 'Smart Home', slug: 'smart-home' },
-  { id: 'appliances', name: 'Appliances', slug: 'appliances' },
-];
-
-const HERO_IMAGES = [
-  {
-    id: 1,
-    type: 'B2B',
-    title: 'Business-to-Business Solutions',
-    description: 'Connect with suppliers, manage bulk orders, and streamline your business operations',
-    image: 'https://images.pexels.com/photos/3184465/pexels-photo-3184465.jpeg?auto=compress&cs=tinysrgb&w=1920',
-  },
-  {
-    id: 2,
-    type: 'B2C',
-    title: 'Shop for Everyone',
-    description: 'Discover amazing products for your home, family, and personal needs',
-    image: 'https://images.pexels.com/photos/5632402/pexels-photo-5632402.jpeg?auto=compress&cs=tinysrgb&w=1920',
-  },
-  {
-    id: 3,
-    type: 'B2B',
-    title: 'Wholesale & Distribution',
-    description: 'Access bulk pricing, manage inventory, and grow your business with trusted partners',
-    image: 'https://images.pexels.com/photos/7688336/pexels-photo-7688336.jpeg?auto=compress&cs=tinysrgb&w=1920',
-  },
-  {
-    id: 4,
-    type: 'B2C',
-    title: 'Personal Shopping Experience',
-    description: 'Find the perfect products for your lifestyle with personalized recommendations',
-    image: 'https://images.pexels.com/photos/5650026/pexels-photo-5650026.jpeg?auto=compress&cs=tinysrgb&w=1920',
-  },
-  {
-    id: 5,
-    type: 'B2B',
-    title: 'Enterprise Solutions',
-    description: 'Scale your business with enterprise-grade tools and dedicated support',
-    image: 'https://images.pexels.com/photos/3183150/pexels-photo-3183150.jpeg?auto=compress&cs=tinysrgb&w=1920',
-  },
-  {
-    id: 6,
-    type: 'B2C',
-    title: 'Retail Shopping Made Easy',
-    description: 'Browse thousands of products, compare prices, and shop with confidence',
-    image: 'https://images.pexels.com/photos/3760263/pexels-photo-3760263.jpeg?auto=compress&cs=tinysrgb&w=1920',
-  },
-];
-
-const MOCK_TRENDING_PRODUCTS: Product[] = [
+// Mock products for demonstration
+const MOCK_PRODUCTS: Product[] = [
   {
     id: '1',
-    name: 'Wireless Noise-Cancelling Headphones',
-    description: 'Premium over-ear headphones with active noise cancellation and 30-hour battery life',
+    title: 'Wireless Noise-Cancelling Headphones',
+    description: 'Premium over-ear headphones with active noise cancellation',
     price: 299.99,
-    category: 'electronics',
+    category_id: 'electronics',
     status: 'active',
-    seller_id: 'mock',
+    seller_id: 'seller-1',
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
     stock_quantity: 50,
-    images: [{ url: 'https://images.pexels.com/photos/3394650/pexels-photo-3394650.jpeg?auto=compress&cs=tinysrgb&w=800', position: 0 }],
+    is_shippable: true,
+    low_stock_threshold: 10,
+    views_count: 0,
+    images: [{ id: 'img-1', product_id: '1', url: 'https://images.pexels.com/photos/3394650/pexels-photo-3394650.jpeg?auto=compress&cs=tinysrgb&w=800', position: 0, created_at: new Date().toISOString() }],
   },
   {
     id: '2',
-    name: 'Smart Fitness Watch',
-    description: 'Track your health and fitness with GPS, heart rate monitor, and sleep tracking',
+    title: 'Smart Fitness Watch',
+    description: 'Track your health and fitness with GPS and heart rate monitor',
     price: 249.99,
-    category: 'electronics',
+    category_id: 'electronics',
     status: 'active',
-    seller_id: 'mock',
+    seller_id: 'seller-2',
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
     stock_quantity: 75,
-    images: [{ url: 'https://images.pexels.com/photos/437037/pexels-photo-437037.jpeg?auto=compress&cs=tinysrgb&w=800', position: 0 }],
+    is_shippable: true,
+    low_stock_threshold: 10,
+    views_count: 0,
+    images: [{ id: 'img-2', product_id: '2', url: 'https://images.pexels.com/photos/437037/pexels-photo-437037.jpeg?auto=compress&cs=tinysrgb&w=800', position: 0, created_at: new Date().toISOString() }],
   },
   {
     id: '3',
-    name: 'Premium Leather Backpack',
-    description: 'Handcrafted genuine leather backpack with laptop compartment and multiple pockets',
+    title: 'Premium Leather Backpack',
+    description: 'Handcrafted genuine leather backpack with laptop compartment',
     price: 189.99,
-    category: 'fashion',
+    category_id: 'fashion',
     status: 'active',
-    seller_id: 'mock',
+    seller_id: 'seller-3',
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
     stock_quantity: 30,
-    images: [{ url: 'https://images.pexels.com/photos/2905238/pexels-photo-2905238.jpeg?auto=compress&cs=tinysrgb&w=800', position: 0 }],
+    is_shippable: true,
+    low_stock_threshold: 10,
+    views_count: 0,
+    images: [{ id: 'img-3', product_id: '3', url: 'https://images.pexels.com/photos/2905238/pexels-photo-2905238.jpeg?auto=compress&cs=tinysrgb&w=800', position: 0, created_at: new Date().toISOString() }],
   },
   {
     id: '4',
-    name: 'Minimalist Sneakers',
-    description: 'Comfortable all-day wear sneakers with eco-friendly materials and modern design',
+    title: 'Minimalist Sneakers',
+    description: 'Comfortable all-day wear sneakers with eco-friendly materials',
     price: 129.99,
-    category: 'fashion',
+    category_id: 'fashion',
     status: 'active',
-    seller_id: 'mock',
+    seller_id: 'seller-4',
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
     stock_quantity: 100,
-    images: [{ url: 'https://images.pexels.com/photos/1598505/pexels-photo-1598505.jpeg?auto=compress&cs=tinysrgb&w=800', position: 0 }],
-  },
-];
-
-const MOCK_NEW_ARRIVALS: Product[] = [
-  {
-    id: '5',
-    name: 'Portable Bluetooth Speaker',
-    description: 'Waterproof speaker with 360-degree sound and 12-hour playtime',
-    price: 79.99,
-    category: 'electronics',
-    status: 'active',
-    seller_id: 'mock',
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-    stock_quantity: 60,
-    images: [{ url: 'https://images.pexels.com/photos/1279330/pexels-photo-1279330.jpeg?auto=compress&cs=tinysrgb&w=800', position: 0 }],
-  },
-  {
-    id: '6',
-    name: 'Organic Cotton T-Shirt',
-    description: 'Soft, breathable t-shirt made from 100% organic cotton',
-    price: 34.99,
-    category: 'fashion',
-    status: 'active',
-    seller_id: 'mock',
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-    stock_quantity: 200,
-    images: [{ url: 'https://images.pexels.com/photos/8532616/pexels-photo-8532616.jpeg?auto=compress&cs=tinysrgb&w=800', position: 0 }],
-  },
-  {
-    id: '7',
-    name: 'Stainless Steel Water Bottle',
-    description: 'Insulated water bottle keeps drinks cold for 24 hours or hot for 12 hours',
-    price: 29.99,
-    category: 'home-goods',
-    status: 'active',
-    seller_id: 'mock',
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-    stock_quantity: 150,
-    images: [{ url: 'https://images.pexels.com/photos/4021262/pexels-photo-4021262.jpeg?auto=compress&cs=tinysrgb&w=800', position: 0 }],
-  },
-  {
-    id: '8',
-    name: 'Aromatherapy Diffuser',
-    description: 'Ultrasonic essential oil diffuser with LED lights and auto shut-off',
-    price: 49.99,
-    category: 'home-goods',
-    status: 'active',
-    seller_id: 'mock',
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-    stock_quantity: 80,
-    images: [{ url: 'https://images.pexels.com/photos/4207892/pexels-photo-4207892.jpeg?auto=compress&cs=tinysrgb&w=800', position: 0 }],
+    is_shippable: true,
+    low_stock_threshold: 10,
+    views_count: 0,
+    images: [{ id: 'img-4', product_id: '4', url: 'https://images.pexels.com/photos/1598505/pexels-photo-1598505.jpeg?auto=compress&cs=tinysrgb&w=800', position: 0, created_at: new Date().toISOString() }],
   },
 ];
 
 export function Home() {
-  const [trendingProducts, setTrendingProducts] = useState<Product[]>([]);
-  const [newArrivals, setNewArrivals] = useState<Product[]>([]);
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const [allProductsData, setAllProductsData] = useState<Product[]>([]);
   const [featuredCollections, setFeaturedCollections] = useState<Collection[]>([]);
-  const [selectedCategory, setSelectedCategory] = useState('all');
-  const [showAllCategories, setShowAllCategories] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [currentSlide, setCurrentSlide] = useState(0);
+  const [productFilters, setProductFilters] = useState<FilterState>({
+    sort: 'relevance',
+    category: [],
+    brand: [],
+    priceRange: [0, 2000],
+    color: [],
+    size: [],
+    rating: null,
+    seller: [],
+    delivery: [],
+    stock: [],
+    quickFilters: [],
+  });
+
+  // Performance optimizations
+  usePerformanceOptimization();
+
+  // Get filter from URL
+  const categoryFilter = searchParams.get('category') || 'all';
+  const subcategoryFilter = searchParams.get('subcategory') || null;
 
   useEffect(() => {
-    loadProducts();
+    loadData();
   }, []);
 
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setCurrentSlide((prev) => (prev + 1) % HERO_IMAGES.length);
-    }, 5000); // Change slide every 5 seconds
-
-    return () => clearInterval(interval);
-  }, []);
-
-  const goToSlide = (index: number) => {
-    setCurrentSlide(index);
-  };
-
-  const goToPrevious = () => {
-    setCurrentSlide((prev) => (prev - 1 + HERO_IMAGES.length) % HERO_IMAGES.length);
-  };
-
-  const goToNext = () => {
-    setCurrentSlide((prev) => (prev + 1) % HERO_IMAGES.length);
-  };
-
-  const loadProducts = async () => {
-    const [productsRes, collectionsRes] = await Promise.all([
-      supabase
+  const loadData = async () => {
+    try {
+      // Load products
+      const productsRes = await supabase
         .from('products')
         .select(`
           *,
@@ -225,344 +131,256 @@ export function Home() {
         `)
         .eq('status', 'active')
         .order('created_at', { ascending: false })
-        .limit(12),
-      getCollections({ featured: true, active: true, includeProducts: true }),
-    ]);
+        .limit(50);
 
-    if (productsRes.data && productsRes.data.length > 0) {
-      productsRes.data.forEach((product: any) => {
-        if (product.images) {
-          product.images.sort((a: any, b: any) => a.position - b.position);
-        }
-      });
+      if (productsRes.data && productsRes.data.length > 0) {
+        productsRes.data.forEach((product: any) => {
+          if (product.images) {
+            product.images.sort((a: any, b: any) => a.position - b.position);
+          }
+        });
+        setAllProductsData(productsRes.data);
+      } else {
+        // Use mock data if no products found
+        setAllProductsData(MOCK_PRODUCTS);
+      }
 
-      setTrendingProducts(productsRes.data.slice(0, 4));
-      setNewArrivals(productsRes.data.slice(4, 8));
-    } else {
-      setTrendingProducts(MOCK_TRENDING_PRODUCTS);
-      setNewArrivals(MOCK_NEW_ARRIVALS);
+      // Load collections
+      const collectionsRes = await getCollections({ featured: true, active: true });
+      if (collectionsRes.data) {
+        setFeaturedCollections(collectionsRes.data.slice(0, 3));
+      }
+    } catch (error) {
+      console.error('Error loading data:', error);
+      // Use mock data on error
+      setAllProductsData(MOCK_PRODUCTS);
+    } finally {
+      setLoading(false);
     }
-
-    if (collectionsRes.data) {
-      setFeaturedCollections(collectionsRes.data.slice(0, 3));
-    }
-
-    setLoading(false);
   };
 
+  // Filter products based on category, subcategory, and product filters
+  const filteredProducts = useMemo(() => {
+    let filtered = [...allProductsData];
+
+    // Apply category filter
+    if (categoryFilter !== 'all') {
+      const categoryMap: Record<string, string> = {
+        'electronics': 'electronics',
+        'fashion': 'fashion',
+        'groceries': 'groceries',
+        'baby': 'baby',
+        'automotive': 'automotive',
+        'appliances': 'appliances',
+      };
+      
+      const expectedCategoryId = categoryMap[categoryFilter];
+      if (expectedCategoryId) {
+        filtered = filtered.filter(product => product.category_id === expectedCategoryId);
+      }
+    }
+
+    // Apply category filter
+    if (productFilters.category.length > 0) {
+      filtered = filtered.filter(product => 
+        productFilters.category.includes(product.category_id || '')
+      );
+    }
+
+    // Apply brand filter
+    if (productFilters.brand.length > 0) {
+      // In production, filter by actual brand field
+      filtered = filtered.filter(product => 
+        productFilters.brand.some(brand => product.title.toLowerCase().includes(brand.toLowerCase()))
+      );
+    }
+
+    // Apply price range filter
+    if (productFilters.priceRange[0] !== 0 || productFilters.priceRange[1] !== 2000) {
+      filtered = filtered.filter(product => 
+        product.price >= productFilters.priceRange[0] && product.price <= productFilters.priceRange[1]
+      );
+    }
+
+    // Apply stock filter
+    if (productFilters.stock.length > 0) {
+      if (productFilters.stock.includes('in_stock')) {
+        filtered = filtered.filter(product => product.stock_quantity > 0);
+      }
+      if (productFilters.stock.includes('out_of_stock')) {
+        filtered = filtered.filter(product => product.stock_quantity === 0);
+      }
+    }
+
+    // Apply quick filters
+    if (productFilters.quickFilters.includes('in_stock')) {
+      filtered = filtered.filter(product => product.stock_quantity > 0);
+    }
+    if (productFilters.quickFilters.includes('discounted')) {
+      filtered = filtered.filter(product => product.compare_at_price && product.compare_at_price > product.price);
+    }
+
+    // Apply sorting
+    if (productFilters.sort !== 'relevance') {
+      filtered.sort((a, b) => {
+        switch (productFilters.sort) {
+          case 'price_asc':
+            return a.price - b.price;
+          case 'price_desc':
+            return b.price - a.price;
+          case 'newest':
+            return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+          case 'oldest':
+            return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+          case 'rating':
+            // Would need rating data
+            return 0;
+          case 'popular':
+            return (b.views_count || 0) - (a.views_count || 0);
+          default:
+            return 0;
+        }
+      });
+    }
+
+    return filtered;
+  }, [allProductsData, categoryFilter, subcategoryFilter, productFilters]);
+
+  // Split filtered products into sections
+  const trendingProducts = useMemo(() => {
+    return filteredProducts.slice(0, 4);
+  }, [filteredProducts]);
+
+  const newArrivals = useMemo(() => {
+    return filteredProducts.slice(4, 8);
+  }, [filteredProducts]);
+
+  const topRated = useMemo(() => {
+    return filteredProducts.slice(8, 12);
+  }, [filteredProducts]);
+
+  const allProducts = useMemo(() => {
+    return filteredProducts;
+  }, [filteredProducts]);
+
+  // Show loading state
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 dark:bg-dark-primary">
+        <AnnouncementBar />
+        <Header />
+        <div className="flex items-center justify-center py-12 sm:py-16 lg:py-20 px-4">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-10 w-10 sm:h-12 sm:w-12 border-b-2 border-orange-600 mx-auto mb-3 sm:mb-4"></div>
+            <p className="text-sm sm:text-base text-gray-600 dark:text-gray-400">Loading products...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen">
-      <section className="relative h-[600px] md:h-[700px] lg:h-[800px] overflow-hidden">
-        {/* Image Carousel */}
-        <div className="absolute inset-0">
-          {HERO_IMAGES.map((hero, index) => (
-            <div
-              key={hero.id}
-              className={`absolute inset-0 transition-opacity duration-1000 ${
-                index === currentSlide ? 'opacity-100' : 'opacity-0'
-              }`}
-            >
-              <img
-                src={hero.image}
-                alt={hero.title}
-                className="w-full h-full object-cover"
-              />
-              <div className="absolute inset-0 bg-gradient-to-br from-orange-600/80 via-teal-600/80 to-teal-800/80" />
-              <div className="absolute inset-0 bg-black/30" />
-            </div>
-          ))}
-        </div>
+    <div className="min-h-screen bg-gray-50 dark:bg-dark-primary">
+      <AnnouncementBar />
+      <Header />
+      <ProductFilters products={allProductsData} onFilterChange={setProductFilters} />
+      
+      <main className="transition-all duration-300">
+        {/* Flash Sale Section */}
+        {allProducts.length > 0 && <FlashSaleSection products={allProducts} />}
 
-        {/* Navigation Arrows */}
-        <button
-          onClick={goToPrevious}
-          className="absolute left-4 top-1/2 -translate-y-1/2 z-20 bg-white/20 hover:bg-white/30 backdrop-blur-sm text-white p-3 rounded-full transition-all hover:scale-110 active:scale-95 shadow-lg"
-          aria-label="Previous slide"
-        >
-          <ChevronLeft className="h-6 w-6" />
-        </button>
-        <button
-          onClick={goToNext}
-          className="absolute right-4 top-1/2 -translate-y-1/2 z-20 bg-white/20 hover:bg-white/30 backdrop-blur-sm text-white p-3 rounded-full transition-all hover:scale-110 active:scale-95 shadow-lg"
-          aria-label="Next slide"
-        >
-          <ChevronRight className="h-6 w-6" />
-        </button>
+        {/* Featured Collections */}
+        {featuredCollections.length > 0 && (
+          <FeaturedCollections collections={featuredCollections} />
+        )}
 
-        {/* Slide Indicators */}
-        <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-20 flex gap-2">
-          {HERO_IMAGES.map((_, index) => (
-            <button
-              key={index}
-              onClick={() => goToSlide(index)}
-              className={`h-2 rounded-full transition-all ${
-                index === currentSlide
-                  ? 'w-8 bg-white'
-                  : 'w-2 bg-white/50 hover:bg-white/75'
-              }`}
-              aria-label={`Go to slide ${index + 1}`}
-            />
-          ))}
-        </div>
-
-        {/* Content Overlay */}
-        <div className="relative z-10 h-full flex items-center">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 w-full">
-            <div className="text-center text-white">
-              <div
-                key={currentSlide}
-                className="animate-fadeIn"
-              >
-                <div className="inline-block mb-4 px-4 py-1.5 bg-white/20 backdrop-blur-sm rounded-full text-sm font-semibold border border-white/30">
-                  {HERO_IMAGES[currentSlide].type}
-                </div>
-                <h1 className="text-4xl md:text-5xl lg:text-6xl xl:text-7xl font-bold mb-6 leading-tight">
-                  {HERO_IMAGES[currentSlide].title}
-                </h1>
-                <p className="text-lg md:text-xl lg:text-2xl text-white/90 mb-10 max-w-3xl mx-auto">
-                  {HERO_IMAGES[currentSlide].description}
-                </p>
-              </div>
-
-              <div className="flex flex-wrap items-center justify-center gap-4">
-                <Link
-                  to="/products"
-                  className="bg-orange-600 hover:bg-orange-700 text-white px-8 py-4 rounded-lg font-semibold transition-all hover:scale-105 active:scale-95 shadow-xl"
-                >
-                  Explore Products
-                </Link>
-                <Link
-                  to="/deals"
-                  className="bg-white/20 hover:bg-white/30 backdrop-blur-sm text-white px-8 py-4 rounded-lg font-semibold transition-all hover:scale-105 active:scale-95 border-2 border-white/30"
-                >
-                  Shop Deals
-                </Link>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Bottom Gradient */}
-        <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-gray-50 dark:from-dark-primary to-transparent z-10" />
-      </section>
-
-      <section className="py-12 bg-gray-50 dark:bg-dark-primary">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-center gap-3 flex-wrap">
-            {CATEGORY_FILTERS.slice(0, showAllCategories ? CATEGORY_FILTERS.length : 9).map((category) => (
-              <button
-                key={category.id}
-                onClick={() => setSelectedCategory(category.id)}
-                className={`px-6 py-2 rounded-full font-medium transition-all hover:scale-105 ${
-                  selectedCategory === category.id
-                    ? 'bg-orange-600 text-white shadow-lg'
-                    : 'bg-white dark:bg-dark-card text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-secondary'
-                }`}
-              >
-                {category.name}
-              </button>
-            ))}
-            <button
-              onClick={() => setShowAllCategories(!showAllCategories)}
-              className="px-6 py-2 rounded-full font-medium bg-white dark:bg-dark-card text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-secondary transition-all hover:scale-105 flex items-center gap-2"
-            >
-              {showAllCategories ? (
-                <>
-                  Less
-                  <ChevronUp className="h-4 w-4" />
-                </>
-              ) : (
-                <>
-                  More
-                  <ChevronDown className="h-4 w-4" />
-                </>
-              )}
-            </button>
-          </div>
-        </div>
-      </section>
-
-      <section className="py-16 bg-gray-50 dark:bg-dark-primary">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-8">
-            Trending Now
-          </h2>
-
-          {loading ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-              {[...Array(4)].map((_, i) => (
-                <div key={i} className="bg-gray-200 dark:bg-dark-card rounded-xl h-96 animate-pulse" />
-              ))}
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-              {trendingProducts.map((product) => (
-                <div key={product.id} className="relative">
-                  <ProductCard product={product} />
-                  <div className="absolute top-4 left-4 bg-red-500 text-white text-xs font-bold px-3 py-1 rounded-full shadow-lg z-10">
-                    Hot
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </section>
-
-      <section className="py-16 bg-white dark:bg-dark-secondary">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-8">
-            New Arrivals
-          </h2>
-
-          {loading ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-              {[...Array(4)].map((_, i) => (
-                <div key={i} className="bg-gray-200 dark:bg-dark-card rounded-xl h-96 animate-pulse" />
-              ))}
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-              {newArrivals.map((product) => (
-                <div key={product.id} className="relative">
-                  <ProductCard product={product} />
-                  <div className="absolute top-4 left-4 bg-green-500 text-white text-xs font-bold px-3 py-1 rounded-full shadow-lg z-10">
-                    New
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </section>
-
-      {/* Featured Collections Section */}
-      {featuredCollections.length > 0 && (
-        <section className="py-16 bg-gray-50 dark:bg-dark-primary">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="flex items-center justify-between mb-8">
-              <h2 className="text-3xl font-bold text-gray-900 dark:text-white">
-                Featured Collections
-              </h2>
-              <Link
-                to="/collections"
-                className="text-orange-600 hover:text-orange-700 dark:text-orange-400 font-semibold"
-              >
-                View All →
-              </Link>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              {featuredCollections.map((collection) => (
-                <Link
-                  key={collection.id}
-                  to={`/collection/${collection.seller_id}/${collection.slug || collection.id}`}
-                  className="group block bg-white dark:bg-dark-card rounded-xl shadow-md hover:shadow-xl transition-all duration-300 overflow-hidden"
-                >
-                  {collection.cover_image_url || collection.image_url ? (
-                    <div className="relative h-48 overflow-hidden">
-                      <img
-                        src={collection.cover_image_url || collection.image_url}
-                        alt={collection.name}
-                        className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
-                      />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/70 to-transparent" />
-                      <div className="absolute bottom-4 left-4 right-4">
-                        <h3 className="text-white font-bold text-lg mb-1">{collection.name}</h3>
-                        <p className="text-white/90 text-sm">
-                          {collection.product_count || 0} products
-                        </p>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="h-48 bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center">
-                      <span className="text-6xl text-white font-bold">
-                        {collection.name.charAt(0).toUpperCase()}
-                      </span>
-                    </div>
-                  )}
-                  {collection.description && (
-                    <div className="p-4">
-                      <p className="text-sm text-gray-600 dark:text-gray-400 line-clamp-2">
-                        {collection.description}
-                      </p>
-                    </div>
-                  )}
-                </Link>
-              ))}
-            </div>
-          </div>
-        </section>
-      )}
-
-      <section className="py-20 bg-gradient-to-br from-orange-600 via-orange-700 to-orange-900 text-white">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="grid md:grid-cols-2 gap-12 items-center">
-            <div>
-              <h2 className="text-4xl md:text-5xl font-bold mb-6">
-                Start Selling Today
-              </h2>
-              <p className="text-xl text-orange-100 mb-8">
-                Join thousands of sellers on REAGLE-X and reach millions of customers worldwide. It's free to get started!
+        {/* No Products Found Message */}
+        {filteredProducts.length === 0 && !loading && (
+          <div className="py-12 sm:py-16 lg:py-20 text-center px-4">
+            <div className="max-w-md mx-auto">
+              <Filter className="h-12 w-12 sm:h-16 sm:w-16 text-gray-300 dark:text-gray-600 mx-auto mb-4" />
+              <h3 className="text-lg sm:text-xl font-semibold text-gray-900 dark:text-white mb-2">
+                No products found
+              </h3>
+              <p className="text-sm sm:text-base text-gray-500 dark:text-gray-400 mb-6">
+                Try adjusting your filters or browse all categories
               </p>
-              <div className="flex flex-wrap gap-4">
-                <Link
-                  to="/signup"
-                  className="bg-white text-orange-600 px-8 py-4 rounded-lg font-semibold hover:bg-orange-50 transition-all hover:scale-105 active:scale-95"
-                >
-                  Get Started
-                </Link>
-                <Link
-                  to="/about"
-                  className="bg-white/20 backdrop-blur-sm text-white px-8 py-4 rounded-lg font-semibold hover:bg-white/30 transition-all hover:scale-105 active:scale-95 border-2 border-white/30"
-                >
-                  Learn More
-                </Link>
-              </div>
-            </div>
-
-            <div className="hidden md:block">
-              <div className="bg-white/10 backdrop-blur-sm rounded-2xl p-8 border border-white/20">
-                <div className="space-y-6">
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center">
-                      <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                      </svg>
-                    </div>
-                    <div>
-                      <h3 className="font-semibold text-lg">Free Registration</h3>
-                      <p className="text-orange-100 text-sm">No setup fees or hidden costs</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center">
-                      <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                      </svg>
-                    </div>
-                    <div>
-                      <h3 className="font-semibold text-lg">Secure Payments</h3>
-                      <p className="text-orange-100 text-sm">Get paid safely and on time</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center">
-                      <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                      </svg>
-                    </div>
-                    <div>
-                      <h3 className="font-semibold text-lg">Powerful Tools</h3>
-                      <p className="text-orange-100 text-sm">Manage your store with ease</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
+              <button
+                onClick={() => {
+                  const params = new URLSearchParams();
+                  navigate(`/?${params.toString()}`, { replace: true });
+                }}
+                className="px-4 sm:px-6 py-2 sm:py-3 bg-orange-600 hover:bg-orange-700 text-white text-sm sm:text-base font-semibold rounded-lg transition-colors"
+              >
+                Clear Filters
+              </button>
             </div>
           </div>
-        </div>
-      </section>
+        )}
+
+        {/* Popular/Trending Products */}
+        {trendingProducts.length > 0 && (
+          <ProductSection
+            title="Popular Products"
+            products={trendingProducts}
+            icon={TrendingUp}
+            link={`/products?sort=popular${categoryFilter !== 'all' ? `&category=${categoryFilter}` : ''}${productFilters.category.length > 0 ? `&categories=${productFilters.category.join(',')}` : ''}`}
+            badge="Trending"
+            showQuickView
+          />
+        )}
+
+        {/* New Arrivals */}
+        {newArrivals.length > 0 && (
+          <ProductSection
+            title="New Arrivals"
+            products={newArrivals}
+            icon={Sparkles}
+            link={`/products?new=true${categoryFilter !== 'all' ? `&category=${categoryFilter}` : ''}${productFilters.category.length > 0 ? `&categories=${productFilters.category.join(',')}` : ''}`}
+            badge="New"
+            showQuickView
+          />
+        )}
+
+        {/* Top Rated Products */}
+        {topRated.length > 0 && (
+          <ProductSection
+            title="Top Rated Products"
+            products={topRated}
+            icon={Award}
+            link={`/products?sort=rating${categoryFilter !== 'all' ? `&category=${categoryFilter}` : ''}${productFilters.category.length > 0 ? `&categories=${productFilters.category.join(',')}` : ''}`}
+            badge="4.8+"
+            showQuickView
+          />
+        )}
+
+        {/* AI Recommendations */}
+        {allProducts.length > 0 && <AIRecommendations products={allProducts} />}
+
+        {/* Brand Spotlight */}
+        <BrandSpotlight />
+
+        {/* Sponsored Ads */}
+        <SponsoredAds />
+
+        {/* Shop by Category */}
+        <ShopByCategory />
+
+        {/* Local Stores */}
+        <LocalStores />
+
+        {/* Trust Section */}
+        <TrustSection />
+
+        {/* Testimonials */}
+        <Testimonials />
+
+        {/* Recently Viewed */}
+        <RecentlyViewed />
+      </main>
+
+      {/* Footer */}
+      <Footer />
     </div>
   );
 }

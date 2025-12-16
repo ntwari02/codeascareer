@@ -1,489 +1,923 @@
-import { useState, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
-import { Heart, ShoppingCart, Truck, MapPin, Star, ChevronLeft, Package, Shield, MessageCircle, FolderKanban } from 'lucide-react';
-import { supabase } from '../lib/supabase';
-import { getProductCollections } from '../lib/collections';
+import { useEffect, useState } from 'react';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
 import { useCartStore } from '../stores/cartStore';
 import { useWishlistStore } from '../stores/wishlistStore';
-import { ProductGallery } from '../components/ProductGallery';
-import type { Product, ProductVariant, Review, QuestionAnswer, Collection } from '../types';
-import { MOCK_PRODUCTS, type ProductWithImages } from './Products';
+import { useTheme } from '../contexts/ThemeContext';
+import { Header } from '../components/buyer/Header';
+import { Footer } from '../components/buyer/Footer';
+import { AnnouncementBar } from '../components/buyer/AnnouncementBar';
+import { Button } from '../components/ui/button';
+import type { Product } from '../types';
+import { formatCurrency } from '../lib/utils';
+import {
+  ShoppingCart,
+  Heart,
+  Star,
+  Truck,
+  Shield,
+  CheckCircle2,
+  AlertCircle,
+  Package,
+  ArrowLeft,
+  Share2,
+  Minus,
+  Plus,
+  Loader2,
+  TrendingUp,
+  Flame,
+  Clock
+} from 'lucide-react';
+
+// Mock Products Data (same as Products.tsx)
+const MOCK_PRODUCTS: Product[] = [
+  {
+    id: '1',
+    title: 'Wireless Noise-Cancelling Headphones',
+    description: 'Premium over-ear headphones with active noise cancellation and 30-hour battery life',
+    price: 299.99,
+    compare_at_price: 399.99,
+    category_id: 'electronics',
+    status: 'active',
+    seller_id: 'seller-1',
+    created_at: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
+    updated_at: new Date().toISOString(),
+    stock_quantity: 50,
+    is_shippable: true,
+    low_stock_threshold: 10,
+    views_count: 1234,
+    sku: 'WH-001',
+    images: [
+      { id: 'img-1-1', product_id: '1', url: 'https://images.pexels.com/photos/3394650/pexels-photo-3394650.jpeg?auto=compress&cs=tinysrgb&w=800', position: 0, is_primary: true, created_at: new Date().toISOString() },
+      { id: 'img-1-2', product_id: '1', url: 'https://images.pexels.com/photos/1649771/pexels-photo-1649771.jpeg?auto=compress&cs=tinysrgb&w=800', position: 1, created_at: new Date().toISOString() }
+    ],
+    tags: ['new', 'trending']
+  },
+  {
+    id: '2',
+    title: 'Smart Fitness Watch',
+    description: 'Track your health and fitness with GPS, heart rate monitor, and sleep tracking',
+    price: 249.99,
+    compare_at_price: 299.99,
+    category_id: 'electronics',
+    status: 'active',
+    seller_id: 'seller-2',
+    created_at: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
+    updated_at: new Date().toISOString(),
+    stock_quantity: 75,
+    is_shippable: true,
+    low_stock_threshold: 10,
+    views_count: 987,
+    sku: 'SW-002',
+    images: [
+      { id: 'img-2-1', product_id: '2', url: 'https://images.pexels.com/photos/437037/pexels-photo-437037.jpeg?auto=compress&cs=tinysrgb&w=800', position: 0, is_primary: true, created_at: new Date().toISOString() }
+    ],
+    tags: ['trending']
+  },
+  {
+    id: '3',
+    title: 'Premium Leather Backpack',
+    description: 'Handcrafted genuine leather backpack with laptop compartment and multiple pockets',
+    price: 189.99,
+    category_id: 'fashion',
+    status: 'active',
+    seller_id: 'seller-3',
+    created_at: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString(),
+    updated_at: new Date().toISOString(),
+    stock_quantity: 30,
+    is_shippable: true,
+    low_stock_threshold: 5,
+    views_count: 654,
+    sku: 'LB-003',
+    images: [
+      { id: 'img-3-1', product_id: '3', url: 'https://images.pexels.com/photos/2905238/pexels-photo-2905238.jpeg?auto=compress&cs=tinysrgb&w=800', position: 0, is_primary: true, created_at: new Date().toISOString() }
+    ]
+  },
+  {
+    id: '4',
+    title: 'Minimalist Sneakers',
+    description: 'Comfortable all-day wear sneakers with eco-friendly materials and cushioned sole',
+    price: 129.99,
+    compare_at_price: 179.99,
+    category_id: 'fashion',
+    status: 'active',
+    seller_id: 'seller-4',
+    created_at: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
+    updated_at: new Date().toISOString(),
+    stock_quantity: 100,
+    is_shippable: true,
+    low_stock_threshold: 20,
+    views_count: 1456,
+    sku: 'MS-004',
+    images: [
+      { id: 'img-4-1', product_id: '4', url: 'https://images.pexels.com/photos/1598505/pexels-photo-1598505.jpeg?auto=compress&cs=tinysrgb&w=800', position: 0, is_primary: true, created_at: new Date().toISOString() }
+    ],
+    tags: ['new']
+  },
+  {
+    id: '5',
+    title: 'Portable Phone Charger 10000mAh',
+    description: 'Fast charging power bank with USB-C and wireless charging support',
+    price: 39.99,
+    compare_at_price: 59.99,
+    category_id: 'electronics',
+    status: 'active',
+    seller_id: 'seller-1',
+    created_at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+    updated_at: new Date().toISOString(),
+    stock_quantity: 4,
+    is_shippable: true,
+    low_stock_threshold: 5,
+    views_count: 2341,
+    sku: 'PC-005',
+    images: [
+      { id: 'img-5-1', product_id: '5', url: 'https://images.pexels.com/photos/163117/keyboard-old-antique-vintage-163117.jpeg?auto=compress&cs=tinysrgb&w=800', position: 0, is_primary: true, created_at: new Date().toISOString() }
+    ],
+    tags: ['trending']
+  },
+  {
+    id: '6',
+    title: 'Wireless Bluetooth Earbuds',
+    description: 'True wireless earbuds with noise cancellation and 24-hour battery',
+    price: 79.99,
+    category_id: 'electronics',
+    status: 'active',
+    seller_id: 'seller-2',
+    created_at: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString(),
+    updated_at: new Date().toISOString(),
+    stock_quantity: 0,
+    is_shippable: true,
+    low_stock_threshold: 10,
+    views_count: 567,
+    sku: 'EB-006',
+    images: [
+      { id: 'img-6-1', product_id: '6', url: 'https://images.pexels.com/photos/1649771/pexels-photo-1649771.jpeg?auto=compress&cs=tinysrgb&w=800', position: 0, is_primary: true, created_at: new Date().toISOString() }
+    ]
+  },
+  {
+    id: '7',
+    title: 'Designer Sunglasses',
+    description: 'UV protection sunglasses with polarized lenses and premium frame',
+    price: 149.99,
+    compare_at_price: 199.99,
+    category_id: 'fashion',
+    status: 'active',
+    seller_id: 'seller-3',
+    created_at: new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toISOString(),
+    updated_at: new Date().toISOString(),
+    stock_quantity: 25,
+    is_shippable: true,
+    low_stock_threshold: 5,
+    views_count: 789,
+    sku: 'SG-007',
+    images: [
+      { id: 'img-7-1', product_id: '7', url: 'https://images.pexels.com/photos/157675/fashion-men-s-individuality-black-and-white-157675.jpeg?auto=compress&cs=tinysrgb&w=800', position: 0, is_primary: true, created_at: new Date().toISOString() }
+    ]
+  },
+  {
+    id: '8',
+    title: 'Mechanical Keyboard RGB',
+    description: 'Gaming mechanical keyboard with RGB backlighting and cherry switches',
+    price: 129.99,
+    category_id: 'electronics',
+    status: 'active',
+    seller_id: 'seller-1',
+    created_at: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(),
+    updated_at: new Date().toISOString(),
+    stock_quantity: 60,
+    is_shippable: true,
+    low_stock_threshold: 15,
+    views_count: 1890,
+    sku: 'KB-008',
+    images: [
+      { id: 'img-8-1', product_id: '8', url: 'https://images.pexels.com/photos/163117/keyboard-old-antique-vintage-163117.jpeg?auto=compress&cs=tinysrgb&w=800', position: 0, is_primary: true, created_at: new Date().toISOString() }
+    ],
+    tags: ['new', 'trending']
+  },
+  {
+    id: '9',
+    title: 'Cotton T-Shirt Pack',
+    description: 'Pack of 3 premium cotton t-shirts in various colors',
+    price: 49.99,
+    compare_at_price: 69.99,
+    category_id: 'fashion',
+    status: 'active',
+    seller_id: 'seller-4',
+    created_at: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString(),
+    updated_at: new Date().toISOString(),
+    stock_quantity: 120,
+    is_shippable: true,
+    low_stock_threshold: 30,
+    views_count: 432,
+    sku: 'TS-009',
+    images: [
+      { id: 'img-9-1', product_id: '9', url: 'https://images.pexels.com/photos/996329/pexels-photo-996329.jpeg?auto=compress&cs=tinysrgb&w=800', position: 0, is_primary: true, created_at: new Date().toISOString() }
+    ]
+  },
+  {
+    id: '10',
+    title: 'Wireless Mouse',
+    description: 'Ergonomic wireless mouse with precision tracking and long battery life',
+    price: 29.99,
+    category_id: 'electronics',
+    status: 'active',
+    seller_id: 'seller-2',
+    created_at: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString(),
+    updated_at: new Date().toISOString(),
+    stock_quantity: 200,
+    is_shippable: true,
+    low_stock_threshold: 50,
+    views_count: 2103,
+    sku: 'WM-010',
+    images: [
+      { id: 'img-10-1', product_id: '10', url: 'https://images.pexels.com/photos/163117/keyboard-old-antique-vintage-163117.jpeg?auto=compress&cs=tinysrgb&w=800', position: 0, is_primary: true, created_at: new Date().toISOString() }
+    ]
+  },
+  {
+    id: '11',
+    title: 'Leather Wallet',
+    description: 'Genuine leather wallet with RFID blocking and multiple card slots',
+    price: 59.99,
+    compare_at_price: 89.99,
+    category_id: 'fashion',
+    status: 'active',
+    seller_id: 'seller-3',
+    created_at: new Date(Date.now() - 12 * 24 * 60 * 60 * 1000).toISOString(),
+    updated_at: new Date().toISOString(),
+    stock_quantity: 45,
+    is_shippable: true,
+    low_stock_threshold: 10,
+    views_count: 678,
+    sku: 'LW-011',
+    images: [
+      { id: 'img-11-1', product_id: '11', url: 'https://images.pexels.com/photos/2905238/pexels-photo-2905238.jpeg?auto=compress&cs=tinysrgb&w=800', position: 0, is_primary: true, created_at: new Date().toISOString() }
+    ]
+  },
+  {
+    id: '12',
+    title: 'Laptop Stand Adjustable',
+    description: 'Ergonomic aluminum laptop stand with adjustable height and ventilation',
+    price: 49.99,
+    category_id: 'electronics',
+    status: 'active',
+    seller_id: 'seller-1',
+    created_at: new Date(Date.now() - 9 * 24 * 60 * 60 * 1000).toISOString(),
+    updated_at: new Date().toISOString(),
+    stock_quantity: 35,
+    is_shippable: true,
+    low_stock_threshold: 8,
+    views_count: 1123,
+    sku: 'LS-012',
+    images: [
+      { id: 'img-12-1', product_id: '12', url: 'https://images.pexels.com/photos/163117/keyboard-old-antique-vintage-163117.jpeg?auto=compress&cs=tinysrgb&w=800', position: 0, is_primary: true, created_at: new Date().toISOString() }
+    ]
+  },
+  {
+    id: '13',
+    title: 'Running Shoes',
+    description: 'Lightweight running shoes with cushioned sole and breathable mesh',
+    price: 99.99,
+    compare_at_price: 129.99,
+    category_id: 'fashion',
+    status: 'active',
+    seller_id: 'seller-4',
+    created_at: new Date(Date.now() - 11 * 24 * 60 * 60 * 1000).toISOString(),
+    updated_at: new Date().toISOString(),
+    stock_quantity: 80,
+    is_shippable: true,
+    low_stock_threshold: 20,
+    views_count: 1567,
+    sku: 'RS-013',
+    images: [
+      { id: 'img-13-1', product_id: '13', url: 'https://images.pexels.com/photos/1598505/pexels-photo-1598505.jpeg?auto=compress&cs=tinysrgb&w=800', position: 0, is_primary: true, created_at: new Date().toISOString() }
+    ]
+  },
+  {
+    id: '14',
+    title: 'USB-C Hub',
+    description: 'Multi-port USB-C hub with HDMI, USB 3.0, and SD card reader',
+    price: 34.99,
+    category_id: 'electronics',
+    status: 'active',
+    seller_id: 'seller-2',
+    created_at: new Date(Date.now() - 15 * 24 * 60 * 60 * 1000).toISOString(),
+    updated_at: new Date().toISOString(),
+    stock_quantity: 90,
+    is_shippable: true,
+    low_stock_threshold: 25,
+    views_count: 2345,
+    sku: 'UH-014',
+    images: [
+      { id: 'img-14-1', product_id: '14', url: 'https://images.pexels.com/photos/163117/keyboard-old-antique-vintage-163117.jpeg?auto=compress&cs=tinysrgb&w=800', position: 0, is_primary: true, created_at: new Date().toISOString() }
+    ]
+  },
+  {
+    id: '15',
+    title: 'Denim Jacket',
+    description: 'Classic denim jacket with vintage wash and comfortable fit',
+    price: 79.99,
+    compare_at_price: 99.99,
+    category_id: 'fashion',
+    status: 'active',
+    seller_id: 'seller-3',
+    created_at: new Date(Date.now() - 13 * 24 * 60 * 60 * 1000).toISOString(),
+    updated_at: new Date().toISOString(),
+    stock_quantity: 55,
+    is_shippable: true,
+    low_stock_threshold: 15,
+    views_count: 890,
+    sku: 'DJ-015',
+    images: [
+      { id: 'img-15-1', product_id: '15', url: 'https://images.pexels.com/photos/996329/pexels-photo-996329.jpeg?auto=compress&cs=tinysrgb&w=800', position: 0, is_primary: true, created_at: new Date().toISOString() }
+    ]
+  },
+  {
+    id: '16',
+    title: 'Smartphone Case',
+    description: 'Protective smartphone case with shock absorption and clear design',
+    price: 19.99,
+    category_id: 'electronics',
+    status: 'active',
+    seller_id: 'seller-1',
+    created_at: new Date(Date.now() - 16 * 24 * 60 * 60 * 1000).toISOString(),
+    updated_at: new Date().toISOString(),
+    stock_quantity: 300,
+    is_shippable: true,
+    low_stock_threshold: 100,
+    views_count: 3456,
+    sku: 'SC-016',
+    images: [
+      { id: 'img-16-1', product_id: '16', url: 'https://images.pexels.com/photos/163117/keyboard-old-antique-vintage-163117.jpeg?auto=compress&cs=tinysrgb&w=800', position: 0, is_primary: true, created_at: new Date().toISOString() }
+    ]
+  },
+  {
+    id: '17',
+    title: 'Canvas Tote Bag',
+    description: 'Eco-friendly canvas tote bag with reinforced handles and spacious design',
+    price: 24.99,
+    category_id: 'fashion',
+    status: 'active',
+    seller_id: 'seller-4',
+    created_at: new Date(Date.now() - 17 * 24 * 60 * 60 * 1000).toISOString(),
+    updated_at: new Date().toISOString(),
+    stock_quantity: 150,
+    is_shippable: true,
+    low_stock_threshold: 40,
+    views_count: 890,
+    sku: 'TB-017',
+    images: [
+      { id: 'img-17-1', product_id: '17', url: 'https://images.pexels.com/photos/2905238/pexels-photo-2905238.jpeg?auto=compress&cs=tinysrgb&w=800', position: 0, is_primary: true, created_at: new Date().toISOString() }
+    ]
+  },
+  {
+    id: '18',
+    title: 'Wireless Charger',
+    description: 'Fast wireless charging pad compatible with all Qi-enabled devices',
+    price: 24.99,
+    compare_at_price: 39.99,
+    category_id: 'electronics',
+    status: 'active',
+    seller_id: 'seller-2',
+    created_at: new Date(Date.now() - 18 * 24 * 60 * 60 * 1000).toISOString(),
+    updated_at: new Date().toISOString(),
+    stock_quantity: 110,
+    is_shippable: true,
+    low_stock_threshold: 30,
+    views_count: 1789,
+    sku: 'WC-018',
+    images: [
+      { id: 'img-18-1', product_id: '18', url: 'https://images.pexels.com/photos/163117/keyboard-old-antique-vintage-163117.jpeg?auto=compress&cs=tinysrgb&w=800', position: 0, is_primary: true, created_at: new Date().toISOString() }
+    ]
+  },
+  {
+    id: '19',
+    title: 'Baseball Cap',
+    description: 'Classic baseball cap with adjustable strap and breathable fabric',
+    price: 29.99,
+    category_id: 'fashion',
+    status: 'active',
+    seller_id: 'seller-3',
+    created_at: new Date(Date.now() - 19 * 24 * 60 * 60 * 1000).toISOString(),
+    updated_at: new Date().toISOString(),
+    stock_quantity: 200,
+    is_shippable: true,
+    low_stock_threshold: 50,
+    views_count: 1234,
+    sku: 'BC-019',
+    images: [
+      { id: 'img-19-1', product_id: '19', url: 'https://images.pexels.com/photos/157675/fashion-men-s-individuality-black-and-white-157675.jpeg?auto=compress&cs=tinysrgb&w=800', position: 0, is_primary: true, created_at: new Date().toISOString() }
+    ]
+  },
+  {
+    id: '20',
+    title: 'HD Webcam',
+    description: '1080p HD webcam with auto-focus and built-in microphone',
+    price: 69.99,
+    compare_at_price: 99.99,
+    category_id: 'electronics',
+    status: 'active',
+    seller_id: 'seller-1',
+    created_at: new Date(Date.now() - 20 * 24 * 60 * 60 * 1000).toISOString(),
+    updated_at: new Date().toISOString(),
+    stock_quantity: 40,
+    is_shippable: true,
+    low_stock_threshold: 10,
+    views_count: 2678,
+    sku: 'WB-020',
+    images: [
+      { id: 'img-20-1', product_id: '20', url: 'https://images.pexels.com/photos/163117/keyboard-old-antique-vintage-163117.jpeg?auto=compress&cs=tinysrgb&w=800', position: 0, is_primary: true, created_at: new Date().toISOString() }
+    ],
+    tags: ['trending']
+  },
+  {
+    id: '21',
+    title: 'Yoga Mat',
+    description: 'Non-slip yoga mat with carrying strap and eco-friendly materials',
+    price: 39.99,
+    category_id: 'fashion',
+    status: 'active',
+    seller_id: 'seller-4',
+    created_at: new Date(Date.now() - 21 * 24 * 60 * 60 * 1000).toISOString(),
+    updated_at: new Date().toISOString(),
+    stock_quantity: 70,
+    is_shippable: true,
+    low_stock_threshold: 20,
+    views_count: 1456,
+    sku: 'YM-021',
+    images: [
+      { id: 'img-21-1', product_id: '21', url: 'https://images.pexels.com/photos/1598505/pexels-photo-1598505.jpeg?auto=compress&cs=tinysrgb&w=800', position: 0, is_primary: true, created_at: new Date().toISOString() }
+    ]
+  },
+  {
+    id: '22',
+    title: 'Tablet Stand',
+    description: 'Adjustable tablet stand with 360-degree rotation and foldable design',
+    price: 34.99,
+    category_id: 'electronics',
+    status: 'active',
+    seller_id: 'seller-2',
+    created_at: new Date(Date.now() - 22 * 24 * 60 * 60 * 1000).toISOString(),
+    updated_at: new Date().toISOString(),
+    stock_quantity: 85,
+    is_shippable: true,
+    low_stock_threshold: 25,
+    views_count: 987,
+    sku: 'TS-022',
+    images: [
+      { id: 'img-22-1', product_id: '22', url: 'https://images.pexels.com/photos/163117/keyboard-old-antique-vintage-163117.jpeg?auto=compress&cs=tinysrgb&w=800', position: 0, is_primary: true, created_at: new Date().toISOString() }
+    ]
+  },
+  {
+    id: '23',
+    title: 'Leather Belt',
+    description: 'Genuine leather belt with classic buckle and multiple size options',
+    price: 44.99,
+    compare_at_price: 64.99,
+    category_id: 'fashion',
+    status: 'active',
+    seller_id: 'seller-3',
+    created_at: new Date(Date.now() - 23 * 24 * 60 * 60 * 1000).toISOString(),
+    updated_at: new Date().toISOString(),
+    stock_quantity: 95,
+    is_shippable: true,
+    low_stock_threshold: 30,
+    views_count: 654,
+    sku: 'LB-023',
+    images: [
+      { id: 'img-23-1', product_id: '23', url: 'https://images.pexels.com/photos/2905238/pexels-photo-2905238.jpeg?auto=compress&cs=tinysrgb&w=800', position: 0, is_primary: true, created_at: new Date().toISOString() }
+    ]
+  },
+  {
+    id: '24',
+    title: 'Bluetooth Speaker',
+    description: 'Portable Bluetooth speaker with 360-degree sound and waterproof design',
+    price: 79.99,
+    compare_at_price: 119.99,
+    category_id: 'electronics',
+    status: 'active',
+    seller_id: 'seller-1',
+    created_at: new Date(Date.now() - 24 * 24 * 60 * 60 * 1000).toISOString(),
+    updated_at: new Date().toISOString(),
+    stock_quantity: 65,
+    is_shippable: true,
+    low_stock_threshold: 15,
+    views_count: 2234,
+    sku: 'BS-024',
+    images: [
+      { id: 'img-24-1', product_id: '24', url: 'https://images.pexels.com/photos/1649771/pexels-photo-1649771.jpeg?auto=compress&cs=tinysrgb&w=800', position: 0, is_primary: true, created_at: new Date().toISOString() }
+    ],
+    tags: ['new']
+  }
+];
 
 export function ProductDetail() {
-  const { id } = useParams();
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const { user } = useAuthStore();
+  const { currency: themeCurrency } = useTheme();
+  const currency = (themeCurrency as 'USD' | 'EUR' | 'RWF' | 'KES') || 'USD';
   const { addToCart } = useCartStore();
   const { addToWishlist, removeFromWishlist, isInWishlist } = useWishlistStore();
 
   const [product, setProduct] = useState<Product | null>(null);
-  const [images, setImages] = useState<any[]>([]);
-  const [variants, setVariants] = useState<ProductVariant[]>([]);
-  const [reviews, setReviews] = useState<Review[]>([]);
-  const [questions, setQuestions] = useState<QuestionAnswer[]>([]);
-  const [selectedVariant, setSelectedVariant] = useState<string | null>(null);
-  const [quantity, setQuantity] = useState(1);
-  const [activeTab, setActiveTab] = useState<'description' | 'reviews' | 'questions'>('description');
-  const [newQuestion, setNewQuestion] = useState('');
+  const [relatedProducts, setRelatedProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
-  const [collections, setCollections] = useState<Collection[]>([]);
+  const [quantity, setQuantity] = useState(1);
+  const [selectedImageIndex, setSelectedImageIndex] = useState(0);
+  const [addingToCart, setAddingToCart] = useState(false);
 
   useEffect(() => {
-    if (id) loadProduct();
+    if (id) {
+      loadProduct();
+    }
   }, [id]);
 
-  const applyMockFallback = (productId: string | undefined) => {
-    if (!productId) return false;
-    const mockProduct = MOCK_PRODUCTS.find((p) => p.id === productId) as ProductWithImages | undefined;
-    if (!mockProduct) return false;
-
-    setProduct(mockProduct);
-    setImages(mockProduct.images || []);
-    setVariants([]);
-    setReviews([]);
-    setQuestions([]);
-    return true;
-  };
-
   const loadProduct = async () => {
-    if (!id) {
-      setLoading(false);
-      return;
-    }
-
+    setLoading(true);
     try {
-      const [productRes, imagesRes, variantsRes, reviewsRes, questionsRes] = await Promise.all([
-        supabase.from('products').select('*').eq('id', id).single(),
-        supabase.from('product_images').select('*').eq('product_id', id).order('is_primary', { ascending: false }).order('position'),
-        supabase.from('product_variants').select('*').eq('product_id', id),
-        supabase.from('reviews').select('*').eq('product_id', id).order('created_at', { ascending: false }),
-        supabase.from('questions_answers').select('*').eq('product_id', id).order('created_at', { ascending: false }),
-      ]);
+      // Simulate API delay
+      await new Promise(resolve => setTimeout(resolve, 300));
+      
+      // Find product in mock data
+      const foundProduct = MOCK_PRODUCTS.find(p => p.id === id && p.status === 'active');
+      
+      if (foundProduct) {
+        // Sort images by position
+        if (foundProduct.images) {
+          foundProduct.images.sort((a: any, b: any) => (a.position || 0) - (b.position || 0));
+        }
+        setProduct(foundProduct);
 
-      if (productRes.data) {
-        setProduct(productRes.data);
-        setImages(imagesRes.data || []);
-        setVariants(variantsRes.data || []);
-        setReviews(reviewsRes.data || []);
-        setQuestions(questionsRes.data || []);
-        
-        // Load collections for this product
-        const productCollections = await getProductCollections(id);
-        setCollections(productCollections);
-        
-        await supabase.rpc('increment', { row_id: id, table_name: 'products', column_name: 'views_count' });
-      } else if (!applyMockFallback(id)) {
-        setProduct(null);
+        // Load related products (same category)
+        if (foundProduct.category_id) {
+          const related = MOCK_PRODUCTS
+            .filter(p => p.category_id === foundProduct.category_id && p.id !== id && p.status === 'active')
+            .slice(0, 8);
+          
+          related.forEach((p: any) => {
+            if (p.images) {
+              p.images.sort((a: any, b: any) => (a.position || 0) - (b.position || 0));
+            }
+          });
+          setRelatedProducts(related);
+        }
       }
     } catch (error) {
-      if (!applyMockFallback(id)) {
-        setProduct(null);
-      }
+      console.error('Error loading product:', error);
     } finally {
       setLoading(false);
     }
   };
 
   const handleAddToCart = async () => {
-    if (product) {
-      const variant = selectedVariant
-        ? variants.find(v => v.id === selectedVariant)
-        : undefined;
-      await addToCart(user?.id || null, product, variant, quantity);
+    if (!product) return;
+    setAddingToCart(true);
+    try {
+      await addToCart(user?.id || null, product, undefined, quantity);
+      // Show success message (you can add a toast here)
+    } catch (error) {
+      console.error('Failed to add to cart:', error);
+    } finally {
+      setAddingToCart(false);
     }
   };
 
   const handleToggleWishlist = async () => {
     if (!product) return;
-
-    if (isInWishlist(product.id)) {
-      const item = useWishlistStore.getState().items.find(i => i.product_id === product.id);
-      if (item) await removeFromWishlist(item.id);
-    } else {
-      await addToWishlist(user?.id || null, product);
+    try {
+      if (isInWishlist(product.id)) {
+        const wishlistItems = useWishlistStore.getState().items;
+        const item = wishlistItems.find(w => w.product_id === product.id);
+        if (item) {
+          await removeFromWishlist(item.id);
+        }
+      } else {
+        await addToWishlist(user?.id || null, product);
+      }
+    } catch (error) {
+      console.error('Failed to toggle wishlist:', error);
     }
   };
 
-  const handleAskQuestion = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!user || !product || !newQuestion.trim()) return;
-
-    await supabase.from('questions_answers').insert({
-      product_id: product.id,
-      user_id: user.id,
-      question: newQuestion.trim(),
-    });
-
-    setNewQuestion('');
-    loadProduct();
+  const handleShare = async () => {
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: product?.title,
+          text: product?.description,
+          url: window.location.href,
+        });
+      } catch (error) {
+        // User cancelled or error occurred
+      }
+    } else {
+      // Fallback: copy to clipboard
+      navigator.clipboard.writeText(window.location.href);
+    }
   };
+
+  const images = product?.images || [];
+  const primaryImage = images[selectedImageIndex]?.url || images[0]?.url || 'https://images.pexels.com/photos/90946/pexels-photo-90946.jpeg';
+  const stock = product?.stock_quantity || 0;
+  const isOutOfStock = stock === 0;
+  const stockWarning = stock > 0 && stock < 5;
+  const price = product?.price || 0;
+  const comparePrice = product?.compare_at_price;
+  const hasDiscount = comparePrice && comparePrice > price;
+  const discountPercent = hasDiscount ? Math.round(((comparePrice - price) / comparePrice) * 100) : 0;
+  const rating = 4.5; // Mock - in production, fetch from reviews
+  const reviewCount = 128; // Mock
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 dark:bg-dark-primary flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      <div className="min-h-screen bg-gray-50 dark:bg-dark-primary">
+        <AnnouncementBar />
+        <Header />
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="w-12 h-12 animate-spin text-orange-600" />
+        </div>
+        <Footer />
       </div>
     );
   }
 
   if (!product) {
     return (
-      <div className="min-h-screen bg-gray-50 dark:bg-dark-primary flex items-center justify-center">
-        <div className="text-center">
-          <h2 className="text-2xl font-bold text-gray-900 mb-4">Product not found</h2>
-          <Link to="/products" className="text-blue-600 hover:text-blue-700">
-            Browse all products
-          </Link>
+      <div className="min-h-screen bg-gray-50 dark:bg-dark-primary">
+        <AnnouncementBar />
+        <Header />
+        <div className="w-full px-4 py-12 text-center">
+          <Package className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">Product Not Found</h1>
+          <p className="text-gray-600 dark:text-gray-400 mb-6">The product you're looking for doesn't exist or has been removed.</p>
+          <Button onClick={() => navigate('/')}>
+            <ArrowLeft className="w-4 h-4 mr-2" />
+            Back to Home
+          </Button>
         </div>
+        <Footer />
       </div>
     );
   }
 
-  const currentPrice = selectedVariant
-    ? variants.find(v => v.id === selectedVariant)?.price || product.price
-    : product.price;
-
-  const currentStock = selectedVariant
-    ? variants.find(v => v.id === selectedVariant)?.stock_quantity || 0
-    : product.stock_quantity;
-
-  const averageRating = reviews.length > 0
-    ? reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length
-    : 0;
-
-  // Ensure we have at least one image for the gallery
-  const displayImages = images.length > 0
-    ? images
-    : [{ 
-        id: 'placeholder',
-        product_id: product?.id || '',
-        url: 'https://images.pexels.com/photos/90946/pexels-photo-90946.jpeg', 
-        alt_text: product?.title || 'Product image',
-        position: 0,
-        is_primary: true,
-        created_at: new Date().toISOString()
-      }];
-
   return (
-    <div className="bg-gray-50 dark:bg-dark-primary min-h-screen py-8">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <Link to="/products" className="inline-flex items-center text-blue-600 hover:text-blue-700 mb-6">
-          <ChevronLeft className="h-5 w-5" />
-          Back to Products
-        </Link>
+    <div className="min-h-screen bg-gray-50 dark:bg-dark-primary">
+      <AnnouncementBar />
+      <Header />
 
-        <div className="grid md:grid-cols-2 gap-8 mb-12">
-          <div>
-            <ProductGallery 
-              images={displayImages} 
-              productTitle={product?.title || ''}
-            />
-          </div>
+      <main className="w-full px-3 sm:px-4 lg:px-6 xl:px-8 py-4 sm:py-6 lg:py-8">
+        {/* Back Button */}
+        <Button
+          variant="ghost"
+          onClick={() => navigate(-1)}
+          className="mb-4"
+        >
+          <ArrowLeft className="w-4 h-4 mr-2" />
+          Back
+        </Button>
 
-          <div className="bg-white dark:bg-dark-card rounded-xl p-6 shadow-sm">
-            <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">{product.title}</h1>
-
-            <div className="flex items-center gap-4 mb-4">
-              <div className="flex items-center gap-1">
-                {[...Array(5)].map((_, i) => (
-                  <Star
-                    key={i}
-                    className={`h-5 w-5 ${
-                      i < Math.floor(averageRating) ? 'fill-yellow-400 text-yellow-400' : 'text-gray-300'
-                    }`}
-                  />
-                ))}
-              </div>
-              <span className="text-sm text-gray-600">
-                {averageRating.toFixed(1)} ({reviews.length} reviews)
-              </span>
-            </div>
-
-            <div className="flex items-baseline gap-3 mb-6">
-              <span className="text-4xl font-bold text-gray-900 dark:text-white">${currentPrice.toFixed(2)}</span>
-              {product.compare_at_price && (
-                <>
-                  <span className="text-xl text-gray-500 dark:text-gray-400 line-through">${product.compare_at_price.toFixed(2)}</span>
-                  <span className="bg-red-100 text-red-600 px-3 py-1 rounded-full text-sm font-semibold">
-                    Save {Math.round(((product.compare_at_price - currentPrice) / product.compare_at_price) * 100)}%
-                  </span>
-                </>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-12 mb-12">
+          {/* Product Images */}
+          <div className="space-y-4">
+            {/* Main Image */}
+            <div className="relative aspect-square overflow-hidden rounded-xl bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
+              <img
+                src={primaryImage}
+                alt={product.title}
+                className="w-full h-full object-cover"
+              />
+              {hasDiscount && (
+                <div className="absolute top-4 left-4 bg-red-600 text-white px-3 py-1.5 rounded-lg text-sm font-bold shadow-lg flex items-center gap-1">
+                  <Flame className="w-4 h-4" />
+                  {discountPercent}% OFF
+                </div>
               )}
             </div>
 
-            {/* Collections */}
-            {collections.length > 0 && (
-              <div className="mb-6 pb-6 border-b border-gray-200 dark:border-gray-700">
-                <div className="flex items-center gap-2 mb-3">
-                  <FolderKanban className="h-5 w-5 text-gray-600 dark:text-gray-400" />
-                  <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Part of Collections:</span>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {collections.map((collection) => (
-                    <Link
-                      key={collection.id}
-                      to={`/collection/${collection.seller_id}/${collection.slug || collection.id}`}
-                      className="inline-flex items-center px-3 py-1.5 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-full text-sm font-medium hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors"
-                    >
-                      {collection.name}
-                    </Link>
-                  ))}
-                </div>
+            {/* Thumbnail Images */}
+            {images.length > 1 && (
+              <div className="grid grid-cols-4 gap-2">
+                {images.slice(0, 4).map((img, index) => (
+                  <button
+                    key={index}
+                    onClick={() => setSelectedImageIndex(index)}
+                    className={`aspect-square overflow-hidden rounded-lg border-2 transition-all ${
+                      selectedImageIndex === index
+                        ? 'border-orange-600 ring-2 ring-orange-600'
+                        : 'border-gray-200 dark:border-gray-700 hover:border-orange-300'
+                    }`}
+                  >
+                    <img
+                      src={img.url}
+                      alt={img.alt_text || `${product.title} ${index + 1}`}
+                      className="w-full h-full object-cover"
+                    />
+                  </button>
+                ))}
               </div>
             )}
+          </div>
 
-            {/* Collections */}
-            {collections.length > 0 && (
-              <div className="mb-6 pb-6 border-b border-gray-200 dark:border-gray-700">
-                <div className="flex items-center gap-2 mb-3">
-                  <FolderKanban className="h-5 w-5 text-gray-600 dark:text-gray-400" />
-                  <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Part of Collections:</span>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {collections.map((collection) => (
-                    <Link
-                      key={collection.id}
-                      to={`/collection/${collection.seller_id}/${collection.slug || collection.id}`}
-                      className="inline-flex items-center px-3 py-1.5 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-full text-sm font-medium hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors"
-                    >
-                      {collection.name}
-                    </Link>
+          {/* Product Info */}
+          <div className="space-y-6">
+            {/* Title & Actions */}
+            <div>
+              <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold text-gray-900 dark:text-white mb-4">
+                {product.title}
+              </h1>
+              
+              {/* Rating */}
+              <div className="flex items-center gap-2 mb-4">
+                <div className="flex items-center gap-1">
+                  {[...Array(5)].map((_, i) => (
+                    <Star
+                      key={i}
+                      className={`w-5 h-5 ${
+                        i < Math.floor(rating)
+                          ? 'fill-amber-400 text-amber-400'
+                          : 'text-gray-300 dark:text-gray-600'
+                      }`}
+                    />
                   ))}
                 </div>
-              </div>
-            )}
-
-            <div className="space-y-4 mb-6">
-              <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400">
-                {product.is_shippable ? (
-                  <>
-                    <Truck className="h-5 w-5 text-green-600" />
-                    <span>Free shipping available</span>
-                  </>
-                ) : (
-                  <>
-                    <MapPin className="h-5 w-5 text-blue-600" />
-                    <span>Pickup only - {product.location}</span>
-                  </>
-                )}
-              </div>
-
-              <div className="flex items-center gap-2 text-gray-600">
-                <Package className="h-5 w-5" />
-                <span>
-                  {currentStock > 0 ? (
-                    currentStock <= product.low_stock_threshold ? (
-                      <span className="text-orange-600 font-semibold">Only {currentStock} left!</span>
-                    ) : (
-                      <span className="text-green-600">In Stock</span>
-                    )
-                  ) : (
-                    <span className="text-red-600">Out of Stock</span>
-                  )}
+                <span className="text-sm text-gray-600 dark:text-gray-400">
+                  {rating} ({reviewCount} reviews)
                 </span>
               </div>
 
-              <div className="flex items-center gap-2 text-gray-600">
-                <Shield className="h-5 w-5 text-blue-600" />
-                <span>Protected by escrow payment</span>
+              {/* Price */}
+              <div className="flex items-center gap-3 mb-4">
+                <span className="text-3xl sm:text-4xl font-bold text-gray-900 dark:text-white">
+                  {formatCurrency(price, currency)}
+                </span>
+                {hasDiscount && (
+                  <>
+                    <span className="text-xl text-gray-500 dark:text-gray-400 line-through">
+                      {formatCurrency(comparePrice, currency)}
+                    </span>
+                    <span className="bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 px-3 py-1 rounded-lg text-sm font-semibold">
+                      Save {formatCurrency(comparePrice - price, currency)}
+                    </span>
+                  </>
+                )}
+              </div>
+
+              {/* Stock Status */}
+              <div className="flex items-center gap-4 mb-6">
+                {isOutOfStock ? (
+                  <span className="text-red-600 dark:text-red-400 flex items-center gap-2">
+                    <AlertCircle className="w-5 h-5" />
+                    <span className="font-semibold">Out of Stock</span>
+                  </span>
+                ) : stockWarning ? (
+                  <span className="text-orange-600 dark:text-orange-400 flex items-center gap-2">
+                    <AlertCircle className="w-5 h-5" />
+                    <span className="font-semibold">Only {stock} left!</span>
+                  </span>
+                ) : (
+                  <span className="text-green-600 dark:text-green-400 flex items-center gap-2">
+                    <CheckCircle2 className="w-5 h-5" />
+                    <span className="font-semibold">In Stock</span>
+                  </span>
+                )}
               </div>
             </div>
 
-            {variants.length > 0 && (
-              <div className="mb-6">
-                <label className="block text-sm font-medium text-gray-700 mb-2">Select Variant</label>
-                <div className="grid grid-cols-2 gap-2">
-                  {variants.map((variant) => (
-                    <button
-                      key={variant.id}
-                      onClick={() => setSelectedVariant(variant.id)}
-                      disabled={variant.stock_quantity === 0}
-                      className={`p-3 rounded-lg border-2 text-sm font-medium transition ${
-                        selectedVariant === variant.id
-                          ? 'border-blue-600 bg-blue-50 text-blue-600'
-                          : variant.stock_quantity === 0
-                          ? 'border-gray-200 bg-gray-100 text-gray-400 cursor-not-allowed'
-                          : 'border-gray-200 hover:border-gray-300'
-                      }`}
-                    >
-                      {variant.name}
-                      {variant.stock_quantity === 0 && <span className="block text-xs">Out of stock</span>}
-                    </button>
-                  ))}
-                </div>
+            {/* Description */}
+            {product.description && (
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">Description</h2>
+                <p className="text-gray-600 dark:text-gray-400 leading-relaxed">
+                  {product.description}
+                </p>
               </div>
             )}
 
-            <div className="mb-6">
-              <label className="block text-sm font-medium text-gray-700 mb-2">Quantity</label>
-              <div className="flex items-center gap-3">
+            {/* Quantity Selector */}
+            <div className="flex items-center gap-4">
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Quantity:</span>
+              <div className="flex items-center gap-2 border border-gray-300 dark:border-gray-600 rounded-lg">
                 <button
-                  onClick={() => setQuantity(Math.max(1, quantity - 1))}
-                  className="w-10 h-10 rounded-lg border border-gray-300 flex items-center justify-center hover:bg-gray-50"
+                  onClick={() => setQuantity(q => Math.max(1, q - 1))}
+                  disabled={quantity === 1}
+                  className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  -
+                  <Minus className="w-4 h-4" />
                 </button>
-                <input
-                  type="number"
-                  min="1"
-                  max={currentStock}
-                  value={quantity}
-                  onChange={(e) => setQuantity(Math.max(1, Math.min(currentStock, parseInt(e.target.value) || 1)))}
-                  className="w-20 text-center px-3 py-2 border border-gray-300 dark:border-dark bg-white dark:bg-dark-primary text-gray-900 dark:text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
-                />
+                <span className="px-4 py-2 min-w-[3rem] text-center font-semibold">{quantity}</span>
                 <button
-                  onClick={() => setQuantity(Math.min(currentStock, quantity + 1))}
-                  className="w-10 h-10 rounded-lg border border-gray-300 flex items-center justify-center hover:bg-gray-50"
+                  onClick={() => setQuantity(q => Math.min(stock, q + 1))}
+                  disabled={quantity >= stock}
+                  className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  +
+                  <Plus className="w-4 h-4" />
                 </button>
               </div>
             </div>
 
-            <div className="flex gap-3">
-              <button
+            {/* Action Buttons */}
+            <div className="flex flex-col sm:flex-row gap-3">
+              <Button
+                size="lg"
                 onClick={handleAddToCart}
-                disabled={currentStock === 0}
-                className="flex-1 bg-blue-600 text-white py-3 rounded-lg font-semibold hover:bg-blue-700 transition disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                disabled={isOutOfStock || addingToCart}
+                className="flex-1 bg-orange-600 hover:bg-orange-700 text-white"
               >
-                <ShoppingCart className="h-5 w-5" />
-                Add to Cart
-              </button>
-              <button
+                {addingToCart ? (
+                  <>
+                    <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                    Adding...
+                  </>
+                ) : (
+                  <>
+                    <ShoppingCart className="w-5 h-5 mr-2" />
+                    Add to Cart
+                  </>
+                )}
+              </Button>
+              <Button
+                size="lg"
+                variant="outline"
                 onClick={handleToggleWishlist}
-                className="px-4 py-3 border-2 border-gray-300 rounded-lg hover:border-red-500 hover:text-red-500 transition"
+                className={`${
+                  isInWishlist(product.id)
+                    ? 'bg-red-50 dark:bg-red-900/20 border-red-500 text-red-600 dark:text-red-400'
+                    : ''
+                }`}
               >
-                <Heart className={`h-6 w-6 ${isInWishlist(product.id) ? 'fill-red-500 text-red-500' : ''}`} />
-              </button>
+                <Heart className={`w-5 h-5 mr-2 ${isInWishlist(product.id) ? 'fill-current' : ''}`} />
+                {isInWishlist(product.id) ? 'In Wishlist' : 'Add to Wishlist'}
+              </Button>
+              <Button
+                size="lg"
+                variant="outline"
+                onClick={handleShare}
+              >
+                <Share2 className="w-5 h-5 mr-2" />
+                Share
+              </Button>
+            </div>
+
+            {/* Trust Badges */}
+            <div className="grid grid-cols-2 gap-4 pt-6 border-t border-gray-200 dark:border-gray-700">
+              <div className="flex items-center gap-2">
+                <Truck className="w-5 h-5 text-green-600 dark:text-green-400" />
+                <span className="text-sm text-gray-600 dark:text-gray-400">Free Shipping</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Shield className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                <span className="text-sm text-gray-600 dark:text-gray-400">Secure Payment</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Package className="w-5 h-5 text-purple-600 dark:text-purple-400" />
+                <span className="text-sm text-gray-600 dark:text-gray-400">Easy Returns</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Clock className="w-5 h-5 text-orange-600 dark:text-orange-400" />
+                <span className="text-sm text-gray-600 dark:text-gray-400">2-3 Day Delivery</span>
+              </div>
             </div>
           </div>
         </div>
 
-        <div className="bg-white dark:bg-dark-card rounded-xl shadow-sm overflow-hidden">
-          <div className="border-b border-gray-200">
-            <div className="flex">
-              <button
-                onClick={() => setActiveTab('description')}
-                className={`flex-1 py-4 px-6 font-semibold transition ${
-                  activeTab === 'description'
-                    ? 'border-b-2 border-blue-600 text-blue-600'
-                    : 'text-gray-600 hover:text-gray-900'
-                }`}
-              >
-                Description
-              </button>
-              <button
-                onClick={() => setActiveTab('reviews')}
-                className={`flex-1 py-4 px-6 font-semibold transition ${
-                  activeTab === 'reviews'
-                    ? 'border-b-2 border-blue-600 text-blue-600'
-                    : 'text-gray-600 hover:text-gray-900'
-                }`}
-              >
-                Reviews ({reviews.length})
-              </button>
-              <button
-                onClick={() => setActiveTab('questions')}
-                className={`flex-1 py-4 px-6 font-semibold transition ${
-                  activeTab === 'questions'
-                    ? 'border-b-2 border-blue-600 text-blue-600'
-                    : 'text-gray-600 hover:text-gray-900'
-                }`}
-              >
-                Q&A ({questions.length})
-              </button>
-            </div>
-          </div>
-
-          <div className="p-6">
-            {activeTab === 'description' && (
-              <div className="prose max-w-none">
-                <p className="text-gray-700 whitespace-pre-wrap">{product.description || 'No description available.'}</p>
-              </div>
-            )}
-
-            {activeTab === 'reviews' && (
-              <div className="space-y-6">
-                {reviews.length > 0 ? (
-                  reviews.map((review) => (
-                    <div key={review.id} className="border-b border-gray-200 pb-6 last:border-0">
-                      <div className="flex items-center gap-2 mb-2">
-                        {[...Array(5)].map((_, i) => (
-                          <Star
-                            key={i}
-                            className={`h-4 w-4 ${
-                              i < review.rating ? 'fill-yellow-400 text-yellow-400' : 'text-gray-300'
-                            }`}
-                          />
-                        ))}
-                        {review.is_verified_purchase && (
-                          <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded">
-                            Verified Purchase
-                          </span>
-                        )}
-                      </div>
-                      {review.title && <h4 className="font-semibold mb-2">{review.title}</h4>}
-                      <p className="text-gray-700 mb-2">{review.comment}</p>
-                      <p className="text-sm text-gray-500">
-                        {new Date(review.created_at).toLocaleDateString()}
-                      </p>
-                    </div>
-                  ))
-                ) : (
-                  <p className="text-gray-500 text-center py-8">No reviews yet. Be the first to review!</p>
-                )}
-              </div>
-            )}
-
-            {activeTab === 'questions' && (
-              <div className="space-y-6">
-                {user && (
-                  <form onSubmit={handleAskQuestion} className="mb-6">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Ask a Question</label>
-                    <textarea
-                      value={newQuestion}
-                      onChange={(e) => setNewQuestion(e.target.value)}
-                      placeholder="What would you like to know about this product?"
-                      rows={3}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+        {/* Related Products */}
+        {relatedProducts.length > 0 && (
+          <div className="mt-12">
+            <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6 flex items-center gap-2">
+              <TrendingUp className="w-6 h-6 text-orange-600" />
+              Related Products
+            </h2>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6">
+              {relatedProducts.map((relatedProduct) => (
+                <Link
+                  key={relatedProduct.id}
+                  to={`/products/${relatedProduct.id}`}
+                  className="group bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden hover:shadow-xl transition-all"
+                >
+                  <div className="aspect-square overflow-hidden bg-gray-100 dark:bg-gray-700">
+                    <img
+                      src={relatedProduct.images?.[0]?.url || 'https://images.pexels.com/photos/90946/pexels-photo-90946.jpeg'}
+                      alt={relatedProduct.title}
+                      className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
                     />
-                    <button
-                      type="submit"
-                      disabled={!newQuestion.trim()}
-                      className="mt-2 bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition disabled:bg-gray-300"
-                    >
-                      Submit Question
-                    </button>
-                  </form>
-                )}
-
-                {questions.length > 0 ? (
-                  questions.map((qa) => (
-                    <div key={qa.id} className="border-b border-gray-200 pb-6 last:border-0">
-                      <div className="flex gap-2 mb-2">
-                        <MessageCircle className="h-5 w-5 text-blue-600 flex-shrink-0" />
-                        <div className="flex-1">
-                          <p className="font-semibold text-gray-900 mb-1">Q: {qa.question}</p>
-                          {qa.answer ? (
-                            <p className="text-gray-700 ml-7">A: {qa.answer}</p>
-                          ) : (
-                            <p className="text-gray-500 text-sm ml-7">No answer yet</p>
-                          )}
-                        </div>
-                      </div>
-                      <p className="text-sm text-gray-500 ml-7">
-                        {new Date(qa.created_at).toLocaleDateString()}
-                      </p>
-                    </div>
-                  ))
-                ) : (
-                  <p className="text-gray-500 text-center py-8">No questions yet. Be the first to ask!</p>
-                )}
-              </div>
-            )}
+                  </div>
+                  <div className="p-4">
+                    <h3 className="font-semibold text-gray-900 dark:text-white mb-2 line-clamp-2 text-sm">
+                      {relatedProduct.title}
+                    </h3>
+                    <p className="text-lg font-bold text-orange-600 dark:text-orange-400">
+                      {formatCurrency(relatedProduct.price || 0, currency)}
+                    </p>
+                  </div>
+                </Link>
+              ))}
+            </div>
           </div>
-        </div>
-      </div>
+        )}
+      </main>
+
+      <Footer />
     </div>
   );
 }
+

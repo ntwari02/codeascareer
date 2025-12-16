@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { User, Mail, Phone, MapPin, Save, Edit, Lock, Shield, Bell, FileText, Building2, Clock, CreditCard, Landmark, Smartphone, Upload, X, Package, CheckCircle, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -88,6 +88,10 @@ const ProfilePage: React.FC = () => {
 
   const [savingPolicy, setSavingPolicy] = useState<string | null>(null);
   const [savedPolicy, setSavedPolicy] = useState<string | null>(null);
+  const logoInputRef = useRef<HTMLInputElement | null>(null);
+  const bannerInputRef = useRef<HTMLInputElement | null>(null);
+  const [logoDragOver, setLogoDragOver] = useState(false);
+  const [bannerDragOver, setBannerDragOver] = useState(false);
 
   const handleSave = () => {
     setIsEditing(false);
@@ -110,6 +114,20 @@ const ProfilePage: React.FC = () => {
       ...prev,
       [policyKey]: value,
     }));
+  };
+
+  const handleImageUpload = (file: File, key: 'storeLogo' | 'storeBanner') => {
+    if (!file || !file.type.startsWith('image/')) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const result = e.target?.result as string | null;
+      if (!result) return;
+      setProfile(prev => ({
+        ...prev,
+        [key]: result,
+      }));
+    };
+    reader.readAsDataURL(file);
   };
 
   return (
@@ -192,37 +210,93 @@ const ProfilePage: React.FC = () => {
                 <div>
                   <label className="block text-gray-600 dark:text-gray-400 text-sm mb-2 transition-colors duration-300">Store Logo</label>
                   <div className="flex items-center gap-4">
-                    {profile.storeLogo ? (
-                      <img src={profile.storeLogo} alt="Store logo" className="w-20 h-20 rounded-lg object-cover" />
-                    ) : (
-                      <div className="w-20 h-20 rounded-lg bg-gray-200 dark:bg-gray-700 flex items-center justify-center">
+                    <div
+                      className={`w-20 h-20 rounded-lg border-2 border-dashed flex items-center justify-center cursor-pointer transition-colors duration-200
+                        ${logoDragOver ? 'border-red-400 bg-red-50 dark:bg-red-900/20' : 'border-gray-300 bg-gray-100 dark:bg-gray-800'}
+                        ${!isEditing ? 'opacity-70 cursor-default' : ''}`}
+                      onClick={() => {
+                        if (!isEditing) return;
+                        logoInputRef.current?.click();
+                      }}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        if (!isEditing) return;
+                        setLogoDragOver(true);
+                      }}
+                      onDragLeave={(e) => {
+                        e.preventDefault();
+                        setLogoDragOver(false);
+                      }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        setLogoDragOver(false);
+                        if (!isEditing) return;
+                        const file = e.dataTransfer.files?.[0];
+                        if (file) handleImageUpload(file, 'storeLogo');
+                      }}
+                    >
+                      {profile.storeLogo ? (
+                        <img src={profile.storeLogo} alt="Store logo" className="w-full h-full rounded-lg object-cover" />
+                      ) : (
                         <Upload className="w-8 h-8 text-gray-400" />
-                      </div>
-                    )}
-                    {isEditing && (
-                      <Button variant="outline" className="border-gray-300 dark:border-gray-700">
-                        <Upload className="w-4 h-4 mr-2" />
-                        Upload Logo
-                      </Button>
-                    )}
+                      )}
+                    </div>
+                    <input
+                      ref={logoInputRef}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) handleImageUpload(file, 'storeLogo');
+                      }}
+                    />
                   </div>
                 </div>
                 <div>
                   <label className="block text-gray-600 dark:text-gray-400 text-sm mb-2 transition-colors duration-300">Store Banner</label>
                   <div className="flex items-center gap-4">
-                    {profile.storeBanner ? (
-                      <img src={profile.storeBanner} alt="Store banner" className="w-full h-32 rounded-lg object-cover" />
-                    ) : (
-                      <div className="w-full h-32 rounded-lg bg-gray-200 dark:bg-gray-700 flex items-center justify-center">
+                    <div
+                      className={`w-full h-32 rounded-lg border-2 border-dashed flex items-center justify-center cursor-pointer transition-colors duration-200
+                        ${bannerDragOver ? 'border-red-400 bg-red-50 dark:bg-red-900/20' : 'border-gray-300 bg-gray-100 dark:bg-gray-800'}
+                        ${!isEditing ? 'opacity-70 cursor-default' : ''}`}
+                      onClick={() => {
+                        if (!isEditing) return;
+                        bannerInputRef.current?.click();
+                      }}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        if (!isEditing) return;
+                        setBannerDragOver(true);
+                      }}
+                      onDragLeave={(e) => {
+                        e.preventDefault();
+                        setBannerDragOver(false);
+                      }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        setBannerDragOver(false);
+                        if (!isEditing) return;
+                        const file = e.dataTransfer.files?.[0];
+                        if (file) handleImageUpload(file, 'storeBanner');
+                      }}
+                    >
+                      {profile.storeBanner ? (
+                        <img src={profile.storeBanner} alt="Store banner" className="w-full h-full rounded-lg object-cover" />
+                      ) : (
                         <Upload className="w-8 h-8 text-gray-400" />
-                      </div>
-                    )}
-                    {isEditing && (
-                      <Button variant="outline" className="border-gray-300 dark:border-gray-700">
-                        <Upload className="w-4 h-4 mr-2" />
-                        Upload Banner
-                      </Button>
-                    )}
+                      )}
+                    </div>
+                    <input
+                      ref={bannerInputRef}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) handleImageUpload(file, 'storeBanner');
+                      }}
+                    />
                   </div>
                 </div>
                 <div>
@@ -312,34 +386,6 @@ const ProfilePage: React.FC = () => {
               </div>
             </div>
 
-            {/* Working Hours */}
-            <div className="bg-white/50 dark:bg-gray-900/50 rounded-xl p-6 border border-gray-200 dark:border-gray-700/30 transition-colors duration-300">
-              <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-6 transition-colors duration-300 flex items-center gap-2">
-                <Clock className="w-6 h-6 text-red-400" />
-                Working Hours
-              </h2>
-              <div className="space-y-3">
-                {Object.entries(profile.workingHours).map(([day, hours]) => (
-                  <div key={day} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
-                    <span className="text-sm font-medium text-gray-900 dark:text-white capitalize transition-colors duration-300">{day}</span>
-                    {isEditing ? (
-                      <input
-                        type="text"
-                        value={hours}
-                        onChange={(e) => setProfile({
-                          ...profile,
-                          workingHours: { ...profile.workingHours, [day]: e.target.value }
-                        })}
-                        className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-lg px-3 py-1 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
-                      />
-                    ) : (
-                      <span className="text-sm text-gray-600 dark:text-gray-400 transition-colors duration-300">{hours}</span>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-
             {isEditing && (
               <div className="flex justify-end gap-3">
                 <Button variant="outline" onClick={() => setIsEditing(false)}>
@@ -356,7 +402,7 @@ const ProfilePage: React.FC = () => {
             )}
           </div>
 
-          <div>
+          <div className="space-y-6">
             <div className="bg-white/50 dark:bg-gray-900/50 rounded-xl p-6 border border-gray-200 dark:border-gray-700/30 transition-colors duration-300">
               <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4 transition-colors duration-300">Account Status</h2>
               <div className="space-y-4">
@@ -372,6 +418,36 @@ const ProfilePage: React.FC = () => {
                   <p className="text-gray-600 dark:text-gray-400 text-sm transition-colors duration-300">Total Sales</p>
                   <p className="text-green-500 dark:text-green-400 font-semibold transition-colors duration-300">$125,430</p>
                 </div>
+              </div>
+            </div>
+
+            {/* Working Hours */}
+            <div className="bg-white/50 dark:bg-gray-900/50 rounded-xl p-6 border border-gray-200 dark:border-gray-700/30 transition-colors duration-300">
+              <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-6 transition-colors duration-300 flex items-center gap-2">
+                <Clock className="w-6 h-6 text-red-400" />
+                Working Hours
+              </h2>
+              <div className="space-y-3">
+                {Object.entries(profile.workingHours).map(([day, hours]) => (
+                  <div key={day} className={`flex items-center justify-between p-3 rounded-lg ${
+                    day === 'sunday' ? 'bg-gray-50 dark:bg-gray-800/50' : 'bg-white dark:bg-gray-800/30'
+                  }`}>
+                    <span className="text-sm font-medium text-gray-900 dark:text-white capitalize transition-colors duration-300">{day}</span>
+                    {isEditing ? (
+                      <input
+                        type="text"
+                        value={hours}
+                        onChange={(e) => setProfile({
+                          ...profile,
+                          workingHours: { ...profile.workingHours, [day]: e.target.value }
+                        })}
+                        className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-lg px-3 py-1 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+                      />
+                    ) : (
+                      <span className="text-sm text-gray-600 dark:text-gray-400 transition-colors duration-300">{hours}</span>
+                    )}
+                  </div>
+                ))}
               </div>
             </div>
           </div>

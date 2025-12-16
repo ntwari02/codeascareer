@@ -508,7 +508,7 @@ const OrdersPage: React.FC = () => {
 
       {/* Order Details Dialog */}
       <Dialog open={showOrderDetails} onOpenChange={setShowOrderDetails}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700">
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto overflow-x-hidden scroll-smooth bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:dark:bg-gray-700 hover:[&::-webkit-scrollbar-thumb]:bg-gray-400 dark:hover:[&::-webkit-scrollbar-thumb]:bg-gray-600">
           <DialogHeader>
             <DialogTitle className="text-2xl font-bold text-gray-900 dark:text-white">
               Order Details - {selectedOrder?.orderNumber}

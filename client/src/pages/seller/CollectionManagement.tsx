@@ -1,13 +1,13 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
-  Plus, Filter, SortAsc, SortDesc, MoreVertical, Eye, Copy, 
-  Download, Upload, Trash2, Star, Calendar, Package, Search,
-  ChevronDown, X, Check, ExternalLink, BarChart3, TrendingUp, Edit,
+  Plus, Filter, MoreVertical, Eye, Copy, 
+  Download, Trash2, Star, Package, Search,
+  X, ExternalLink, Edit,
   Grid3x3, List
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import {
-  getCollections,
   createCollection,
   updateCollection,
   deleteCollection,
@@ -15,9 +15,7 @@ import {
   addProductToCollection,
   removeProductFromCollection,
   bulkAddProductsToCollection,
-  bulkRemoveProductsFromCollection,
   previewSmartCollection,
-  syncSmartCollection,
 } from '@/lib/collections';
 import type { Collection, CollectionCondition, Product } from '@/types';
 import { Button } from '@/components/ui/button';
@@ -60,7 +58,16 @@ const MOCK_SELLER_COLLECTIONS: Collection[] = [
     product_count: 18,
     products: Array.from({ length: 18 }).map((_, i) => ({
       id: `prod-${i + 1}`,
+      seller_id: 'current-seller',
       title: `Product ${i + 1}`,
+      price: 29.99 + i * 5,
+      is_shippable: true,
+      stock_quantity: 100 - i,
+      low_stock_threshold: 10,
+      status: 'active' as const,
+      views_count: 0,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
     })),
     created_at: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
     updated_at: new Date().toISOString(),
@@ -81,7 +88,16 @@ const MOCK_SELLER_COLLECTIONS: Collection[] = [
     product_count: 12,
     products: Array.from({ length: 12 }).map((_, i) => ({
       id: `prod-${i + 1}`,
+      seller_id: 'current-seller',
       title: `Product ${i + 1}`,
+      price: 29.99 + i * 5,
+      is_shippable: true,
+      stock_quantity: 100 - i,
+      low_stock_threshold: 10,
+      status: 'active' as const,
+      views_count: 0,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
     })),
     created_at: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString(),
     updated_at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
@@ -100,7 +116,16 @@ const MOCK_SELLER_COLLECTIONS: Collection[] = [
     product_count: 8,
     products: Array.from({ length: 8 }).map((_, i) => ({
       id: `prod-${i + 1}`,
+      seller_id: 'current-seller',
       title: `Product ${i + 1}`,
+      price: 29.99 + i * 5,
+      is_shippable: true,
+      stock_quantity: 100 - i,
+      low_stock_threshold: 10,
+      status: 'active' as const,
+      views_count: 0,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
     })),
     created_at: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString(),
     updated_at: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
@@ -121,7 +146,16 @@ const MOCK_SELLER_COLLECTIONS: Collection[] = [
     product_count: 35,
     products: Array.from({ length: 35 }).map((_, i) => ({
       id: `prod-${i + 1}`,
+      seller_id: 'current-seller',
       title: `Product ${i + 1}`,
+      price: 29.99 + i * 5,
+      is_shippable: true,
+      stock_quantity: 100 - i,
+      low_stock_threshold: 10,
+      status: 'active' as const,
+      views_count: 0,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
     })),
     created_at: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
     updated_at: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(),
@@ -140,7 +174,16 @@ const MOCK_SELLER_COLLECTIONS: Collection[] = [
     product_count: 15,
     products: Array.from({ length: 15 }).map((_, i) => ({
       id: `prod-${i + 1}`,
+      seller_id: 'current-seller',
       title: `Product ${i + 1}`,
+      price: 29.99 + i * 5,
+      is_shippable: true,
+      stock_quantity: 100 - i,
+      low_stock_threshold: 10,
+      status: 'active' as const,
+      views_count: 0,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
     })),
     created_at: new Date(Date.now() - 20 * 24 * 60 * 60 * 1000).toISOString(),
     updated_at: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
@@ -149,6 +192,17 @@ const MOCK_SELLER_COLLECTIONS: Collection[] = [
 
 export default function CollectionManagement() {
   const { toast } = useToast();
+  const [confirmDialog, setConfirmDialog] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void;
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    onConfirm: () => {},
+  });
   const [collections, setCollections] = useState<Collection[]>([]);
   const [loading, setLoading] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -250,23 +304,28 @@ export default function CollectionManagement() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this collection?')) return;
-
-    try {
-      const { error } = await deleteCollection(id);
-      if (error) throw error;
-      toast({
-        title: 'Success',
-        description: 'Collection deleted successfully',
-      });
-      loadCollections();
-    } catch (error: any) {
-      toast({
-        title: 'Error',
-        description: error.message || 'Failed to delete collection',
-        variant: 'destructive',
-      });
-    }
+    setConfirmDialog({
+      isOpen: true,
+      title: 'Delete Collection',
+      message: 'Are you sure you want to delete this collection?',
+      onConfirm: async () => {
+        try {
+          const { error } = await deleteCollection(id);
+          if (error) throw error;
+          toast({
+            title: 'Success',
+            description: 'Collection deleted successfully',
+          });
+          loadCollections();
+        } catch (error: any) {
+          toast({
+            title: 'Error',
+            description: error.message || 'Failed to delete collection',
+            variant: 'destructive',
+          });
+        }
+      },
+    });
   };
 
   // Apply filters and sorting
@@ -425,13 +484,20 @@ export default function CollectionManagement() {
     try {
       switch (action) {
         case 'delete':
-          if (!confirm(`Are you sure you want to delete ${selectedCollections.length} collection(s)?`)) return;
-          for (const id of selectedCollections) {
-            await deleteCollection(id);
-          }
-          toast({
-            title: 'Success',
-            description: `${selectedCollections.length} collection(s) deleted`,
+          setConfirmDialog({
+            isOpen: true,
+            title: 'Delete Collections',
+            message: `Are you sure you want to delete ${selectedCollections.length} collection(s)?`,
+            onConfirm: async () => {
+              for (const id of selectedCollections) {
+                await deleteCollection(id);
+              }
+              toast({
+                title: 'Success',
+                description: `${selectedCollections.length} collection(s) deleted`,
+              });
+              setSelectedCollections([]);
+            },
           });
           break;
         case 'feature':
@@ -1109,6 +1175,16 @@ export default function CollectionManagement() {
         />
       )}
 
+      {/* Confirm Dialog */}
+      <ConfirmDialog
+        isOpen={confirmDialog.isOpen}
+        onClose={() => setConfirmDialog({ ...confirmDialog, isOpen: false })}
+        onConfirm={confirmDialog.onConfirm}
+        title={confirmDialog.title}
+        message={confirmDialog.message}
+        variant="danger"
+      />
+
       {/* Collection Preview Modal */}
       {showPreviewModal && previewCollection && (
         <CollectionPreviewModal
@@ -1128,6 +1204,7 @@ export default function CollectionManagement() {
       {showProductModal && selectedProduct && (
         <ProductDetailModal
           product={selectedProduct}
+          isOpen={showProductModal}
           onClose={() => {
             setShowProductModal(false);
             setSelectedProduct(null);
@@ -1283,7 +1360,7 @@ function CollectionFormModal({
       }}
     >
       <div 
-        className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto"
+        className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto overflow-x-hidden scroll-smooth [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:dark:bg-gray-700 hover:[&::-webkit-scrollbar-thumb]:bg-gray-400 dark:hover:[&::-webkit-scrollbar-thumb]:bg-gray-600"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="p-6 border-b border-gray-200 dark:border-gray-700">
@@ -1513,7 +1590,7 @@ function CollectionFormModal({
                   <p className="text-sm font-medium mb-2">
                     Preview: {previewProducts.length} products match
                   </p>
-                  <div className="max-h-40 overflow-y-auto">
+                  <div className="max-h-40 overflow-y-auto overflow-x-hidden scroll-smooth [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:dark:bg-gray-600 hover:[&::-webkit-scrollbar-thumb]:bg-gray-400 dark:hover:[&::-webkit-scrollbar-thumb]:bg-gray-500">
                     {previewProducts.map((product) => (
                       <div key={product.id} className="text-sm p-2 bg-white dark:bg-gray-600 rounded">
                         {product.title}
@@ -1755,10 +1832,15 @@ function CollectionProductsModal({
       weight: 0.5,
       category_id: 'cat-1',
       images: [{
+        id: `img-${collection.id}-1`,
+        product_id: 'prod-1',
         url: 'https://images.pexels.com/photos/1649771/pexels-photo-1649771.jpeg?auto=compress&cs=tinysrgb&w=800',
         position: 0,
         is_primary: true,
+        created_at: new Date().toISOString(),
       }],
+      low_stock_threshold: 10,
+      views_count: 0,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     },
@@ -1776,10 +1858,15 @@ function CollectionProductsModal({
       weight: 0.3,
       category_id: 'cat-1',
       images: [{
+        id: `img-${collection.id}-2`,
+        product_id: 'prod-2',
         url: 'https://images.pexels.com/photos/437037/pexels-photo-437037.jpeg?auto=compress&cs=tinysrgb&w=800',
         position: 0,
         is_primary: true,
+        created_at: new Date().toISOString(),
       }],
+      low_stock_threshold: 10,
+      views_count: 0,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     },
@@ -1797,10 +1884,15 @@ function CollectionProductsModal({
       weight: 1.2,
       category_id: 'cat-2',
       images: [{
+        id: `img-${collection.id}-3`,
+        product_id: 'prod-3',
         url: 'https://images.pexels.com/photos/1181298/pexels-photo-1181298.jpeg?auto=compress&cs=tinysrgb&w=800',
         position: 0,
         is_primary: true,
+        created_at: new Date().toISOString(),
       }],
+      low_stock_threshold: 10,
+      views_count: 0,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     },
@@ -1818,10 +1910,15 @@ function CollectionProductsModal({
       weight: 1.0,
       category_id: 'cat-1',
       images: [{
+        id: `img-${collection.id}-4`,
+        product_id: 'prod-4',
         url: 'https://images.pexels.com/photos/163117/keyboard-white-computer-keyboard-desktop-163117.jpeg?auto=compress&cs=tinysrgb&w=800',
         position: 0,
         is_primary: true,
+        created_at: new Date().toISOString(),
       }],
+      low_stock_threshold: 10,
+      views_count: 0,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     },
@@ -1839,10 +1936,15 @@ function CollectionProductsModal({
       weight: 0.2,
       category_id: 'cat-1',
       images: [{
+        id: `img-${collection.id}-5`,
+        product_id: 'prod-5',
         url: 'https://images.pexels.com/photos/2115257/pexels-photo-2115257.jpeg?auto=compress&cs=tinysrgb&w=800',
         position: 0,
         is_primary: true,
+        created_at: new Date().toISOString(),
       }],
+      low_stock_threshold: 10,
+      views_count: 0,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     },
@@ -1860,10 +1962,15 @@ function CollectionProductsModal({
       weight: 0.15,
       category_id: 'cat-2',
       images: [{
+        id: `img-${collection.id}-4`,
+        product_id: 'prod-4',
         url: 'https://images.pexels.com/photos/163117/keyboard-white-computer-keyboard-desktop-163117.jpeg?auto=compress&cs=tinysrgb&w=800',
         position: 0,
         is_primary: true,
+        created_at: new Date().toISOString(),
       }],
+      low_stock_threshold: 10,
+      views_count: 0,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     },
@@ -1884,10 +1991,15 @@ function CollectionProductsModal({
       weight: 3.5,
       category_id: 'cat-2',
       images: [{
+        id: `img-${collection.id}-3`,
+        product_id: 'prod-3',
         url: 'https://images.pexels.com/photos/1181298/pexels-photo-1181298.jpeg?auto=compress&cs=tinysrgb&w=800',
         position: 0,
         is_primary: true,
+        created_at: new Date().toISOString(),
       }],
+      low_stock_threshold: 10,
+      views_count: 0,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     },
@@ -1905,10 +2017,15 @@ function CollectionProductsModal({
       weight: 0.3,
       category_id: 'cat-1',
       images: [{
+        id: `img-${collection.id}-4`,
+        product_id: 'prod-4',
         url: 'https://images.pexels.com/photos/163117/keyboard-white-computer-keyboard-desktop-163117.jpeg?auto=compress&cs=tinysrgb&w=800',
         position: 0,
         is_primary: true,
+        created_at: new Date().toISOString(),
       }],
+      low_stock_threshold: 10,
+      views_count: 0,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     },
@@ -1926,10 +2043,15 @@ function CollectionProductsModal({
       weight: 0.8,
       category_id: 'cat-2',
       images: [{
+        id: `img-${collection.id}-3`,
+        product_id: 'prod-3',
         url: 'https://images.pexels.com/photos/1181298/pexels-photo-1181298.jpeg?auto=compress&cs=tinysrgb&w=800',
         position: 0,
         is_primary: true,
+        created_at: new Date().toISOString(),
       }],
+      low_stock_threshold: 10,
+      views_count: 0,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     },
@@ -1947,10 +2069,15 @@ function CollectionProductsModal({
       weight: 0.4,
       category_id: 'cat-2',
       images: [{
+        id: `img-${collection.id}-4`,
+        product_id: 'prod-4',
         url: 'https://images.pexels.com/photos/163117/keyboard-white-computer-keyboard-desktop-163117.jpeg?auto=compress&cs=tinysrgb&w=800',
         position: 0,
         is_primary: true,
+        created_at: new Date().toISOString(),
       }],
+      low_stock_threshold: 10,
+      views_count: 0,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     },
@@ -2006,6 +2133,7 @@ function CollectionProductsModal({
         description: 'Product added to collection',
       });
       loadCollectionProducts();
+      onSuccess();
     } catch (error: any) {
       toast({
         title: 'Error',
@@ -2024,6 +2152,7 @@ function CollectionProductsModal({
         description: 'Product removed from collection',
       });
       loadCollectionProducts();
+      onSuccess();
     } catch (error: any) {
       toast({
         title: 'Error',
@@ -2101,7 +2230,7 @@ function CollectionProductsModal({
       }}
     >
       <div 
-        className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-6xl w-full max-h-[90vh] overflow-y-auto"
+        className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-6xl w-full max-h-[90vh] overflow-y-auto overflow-x-hidden scroll-smooth [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:dark:bg-gray-700 hover:[&::-webkit-scrollbar-thumb]:bg-gray-400 dark:hover:[&::-webkit-scrollbar-thumb]:bg-gray-600"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="p-6 border-b border-gray-200 dark:border-gray-700">
@@ -2171,7 +2300,7 @@ function CollectionProductsModal({
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full px-4 py-2 border rounded-lg mb-4 dark:bg-gray-700 dark:text-white"
             />
-            <div className="max-h-60 overflow-y-auto space-y-2">
+            <div className="max-h-60 overflow-y-auto overflow-x-hidden scroll-smooth space-y-2 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:dark:bg-gray-600 hover:[&::-webkit-scrollbar-thumb]:bg-gray-400 dark:hover:[&::-webkit-scrollbar-thumb]:bg-gray-500">
               {availableProducts.length === 0 ? (
                 <div className="text-center py-4 text-gray-500 text-sm">
                   {searchTerm ? 'No products found' : 'No available products to add'}
@@ -2318,6 +2447,7 @@ function CollectionProductsModal({
           <Button onClick={onClose}>Close</Button>
         </div>
       </div>
+
     </div>
   );
 }
@@ -2354,10 +2484,15 @@ function CollectionPreviewModal({
       weight: 0.5,
       category_id: 'cat-1',
       images: [{
+        id: `img-${collection.id}-1`,
+        product_id: 'prod-1',
         url: 'https://images.pexels.com/photos/1649771/pexels-photo-1649771.jpeg?auto=compress&cs=tinysrgb&w=800',
         position: 0,
         is_primary: true,
+        created_at: new Date().toISOString(),
       }],
+      low_stock_threshold: 10,
+      views_count: 0,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     },
@@ -2375,10 +2510,15 @@ function CollectionPreviewModal({
       weight: 0.3,
       category_id: 'cat-1',
       images: [{
+        id: `img-${collection.id}-2`,
+        product_id: 'prod-2',
         url: 'https://images.pexels.com/photos/437037/pexels-photo-437037.jpeg?auto=compress&cs=tinysrgb&w=800',
         position: 0,
         is_primary: true,
+        created_at: new Date().toISOString(),
       }],
+      low_stock_threshold: 10,
+      views_count: 0,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     },
@@ -2396,10 +2536,15 @@ function CollectionPreviewModal({
       weight: 1.2,
       category_id: 'cat-2',
       images: [{
+        id: `img-${collection.id}-3`,
+        product_id: 'prod-3',
         url: 'https://images.pexels.com/photos/1181298/pexels-photo-1181298.jpeg?auto=compress&cs=tinysrgb&w=800',
         position: 0,
         is_primary: true,
+        created_at: new Date().toISOString(),
       }],
+      low_stock_threshold: 10,
+      views_count: 0,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     },
@@ -2417,10 +2562,15 @@ function CollectionPreviewModal({
       weight: 1.0,
       category_id: 'cat-1',
       images: [{
+        id: `img-${collection.id}-4`,
+        product_id: 'prod-4',
         url: 'https://images.pexels.com/photos/163117/keyboard-white-computer-keyboard-desktop-163117.jpeg?auto=compress&cs=tinysrgb&w=800',
         position: 0,
         is_primary: true,
+        created_at: new Date().toISOString(),
       }],
+      low_stock_threshold: 10,
+      views_count: 0,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     },
@@ -2438,10 +2588,15 @@ function CollectionPreviewModal({
       weight: 0.2,
       category_id: 'cat-1',
       images: [{
+        id: `img-${collection.id}-5`,
+        product_id: 'prod-5',
         url: 'https://images.pexels.com/photos/2115257/pexels-photo-2115257.jpeg?auto=compress&cs=tinysrgb&w=800',
         position: 0,
         is_primary: true,
+        created_at: new Date().toISOString(),
       }],
+      low_stock_threshold: 10,
+      views_count: 0,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     },
@@ -2459,10 +2614,15 @@ function CollectionPreviewModal({
       weight: 0.15,
       category_id: 'cat-2',
       images: [{
+        id: `img-${collection.id}-4`,
+        product_id: 'prod-4',
         url: 'https://images.pexels.com/photos/163117/keyboard-white-computer-keyboard-desktop-163117.jpeg?auto=compress&cs=tinysrgb&w=800',
         position: 0,
         is_primary: true,
+        created_at: new Date().toISOString(),
       }],
+      low_stock_threshold: 10,
+      views_count: 0,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     },
@@ -2480,10 +2640,15 @@ function CollectionPreviewModal({
       weight: 3.5,
       category_id: 'cat-2',
       images: [{
+        id: `img-${collection.id}-3`,
+        product_id: 'prod-3',
         url: 'https://images.pexels.com/photos/1181298/pexels-photo-1181298.jpeg?auto=compress&cs=tinysrgb&w=800',
         position: 0,
         is_primary: true,
+        created_at: new Date().toISOString(),
       }],
+      low_stock_threshold: 10,
+      views_count: 0,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     },
@@ -2501,10 +2666,15 @@ function CollectionPreviewModal({
       weight: 0.3,
       category_id: 'cat-1',
       images: [{
+        id: `img-${collection.id}-4`,
+        product_id: 'prod-4',
         url: 'https://images.pexels.com/photos/163117/keyboard-white-computer-keyboard-desktop-163117.jpeg?auto=compress&cs=tinysrgb&w=800',
         position: 0,
         is_primary: true,
+        created_at: new Date().toISOString(),
       }],
+      low_stock_threshold: 10,
+      views_count: 0,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     },
@@ -2522,10 +2692,15 @@ function CollectionPreviewModal({
       weight: 0.8,
       category_id: 'cat-2',
       images: [{
+        id: `img-${collection.id}-3`,
+        product_id: 'prod-3',
         url: 'https://images.pexels.com/photos/1181298/pexels-photo-1181298.jpeg?auto=compress&cs=tinysrgb&w=800',
         position: 0,
         is_primary: true,
+        created_at: new Date().toISOString(),
       }],
+      low_stock_threshold: 10,
+      views_count: 0,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     },
@@ -2543,10 +2718,15 @@ function CollectionPreviewModal({
       weight: 0.4,
       category_id: 'cat-2',
       images: [{
+        id: `img-${collection.id}-4`,
+        product_id: 'prod-4',
         url: 'https://images.pexels.com/photos/163117/keyboard-white-computer-keyboard-desktop-163117.jpeg?auto=compress&cs=tinysrgb&w=800',
         position: 0,
         is_primary: true,
+        created_at: new Date().toISOString(),
       }],
+      low_stock_threshold: 10,
+      views_count: 0,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     },
@@ -2564,10 +2744,15 @@ function CollectionPreviewModal({
       weight: 0.1,
       category_id: 'cat-1',
       images: [{
+        id: `img-${collection.id}-4`,
+        product_id: 'prod-4',
         url: 'https://images.pexels.com/photos/163117/keyboard-white-computer-keyboard-desktop-163117.jpeg?auto=compress&cs=tinysrgb&w=800',
         position: 0,
         is_primary: true,
+        created_at: new Date().toISOString(),
       }],
+      low_stock_threshold: 10,
+      views_count: 0,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     },
@@ -2585,10 +2770,15 @@ function CollectionPreviewModal({
       weight: 0.6,
       category_id: 'cat-2',
       images: [{
+        id: `img-${collection.id}-3`,
+        product_id: 'prod-3',
         url: 'https://images.pexels.com/photos/1181298/pexels-photo-1181298.jpeg?auto=compress&cs=tinysrgb&w=800',
         position: 0,
         is_primary: true,
+        created_at: new Date().toISOString(),
       }],
+      low_stock_threshold: 10,
+      views_count: 0,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     },
@@ -2675,7 +2865,7 @@ function CollectionPreviewModal({
         }}
       >
         <div 
-          className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-7xl w-full max-h-[90vh] overflow-y-auto relative pointer-events-auto"
+          className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-7xl w-full max-h-[90vh] overflow-y-auto overflow-x-hidden scroll-smooth relative pointer-events-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:dark:bg-gray-700 hover:[&::-webkit-scrollbar-thumb]:bg-gray-400 dark:hover:[&::-webkit-scrollbar-thumb]:bg-gray-600"
           onClick={(e) => e.stopPropagation()}
           style={{ 
             zIndex: 10000

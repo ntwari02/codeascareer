@@ -8,14 +8,84 @@
 // Minimal "no-op" supabase object that matches the methods your code may call.
 // All methods just log a warning and return a safe placeholder.
 
-type AnyFn = (...args: any[]) => Promise<{ data: null; error: Error }>;
+type SupabaseResult<T = any> = {
+  data: T | null;
+  error: Error | null;
+  count?: number | null;
+};
+
+type AnyFn = (...args: any[]) => Promise<SupabaseResult>;
+
+const makeWarning = (method: string) =>
+  `[Supabase stub] Called ${method} but Supabase is not configured.`;
 
 const makeNoopFn =
   (name: string): AnyFn =>
   async () => {
-    console.warn(`[Supabase stub] Called ${name} but Supabase is not configured.`);
+    console.warn(makeWarning(name));
     return { data: null, error: new Error('Supabase is not configured (frontend-only mode).') };
   };
+
+type QueryBuilder<T = null> = Promise<SupabaseResult<T>> & {
+  select: (...args: any[]) => QueryBuilder<T>;
+  insert: (...args: any[]) => QueryBuilder<T>;
+  update: (...args: any[]) => QueryBuilder<T>;
+  delete: (...args: any[]) => QueryBuilder<T>;
+  eq: (...args: any[]) => QueryBuilder<T>;
+  in: (...args: any[]) => QueryBuilder<T>;
+  ilike: (...args: any[]) => QueryBuilder<T>;
+  gt: (...args: any[]) => QueryBuilder<T>;
+  not: (...args: any[]) => QueryBuilder<T>;
+  or: (...args: any[]) => QueryBuilder<T>;
+  contains: (...args: any[]) => QueryBuilder<T>;
+  lt: (...args: any[]) => QueryBuilder<T>;
+  gte: (...args: any[]) => QueryBuilder<T>;
+  lte: (...args: any[]) => QueryBuilder<T>;
+  limit: (...args: any[]) => QueryBuilder<T>;
+  order: (...args: any[]) => QueryBuilder<T>;
+  single: (...args: any[]) => QueryBuilder<T>;
+};
+
+const createQueryBuilder = <T = any>(name: string): QueryBuilder<T> => {
+  const warn = (method: string) => console.warn(makeWarning(method));
+  const makeChain =
+    (method: string) =>
+    (..._args: any[]) => {
+      warn(method);
+      return builder;
+    };
+
+  const promise = Promise.resolve<SupabaseResult<T>>({
+    data: null,
+    error: new Error('Supabase is not configured (frontend-only mode).'),
+    count: null,
+  });
+
+  const builder: Partial<QueryBuilder<T>> = {
+    select: makeChain(`${name}.select`),
+    insert: makeChain(`${name}.insert`),
+    update: makeChain(`${name}.update`),
+    delete: makeChain(`${name}.delete`),
+    eq: makeChain(`${name}.eq`),
+    in: makeChain(`${name}.in`),
+    ilike: makeChain(`${name}.ilike`),
+    gt: makeChain(`${name}.gt`),
+    not: makeChain(`${name}.not`),
+    or: makeChain(`${name}.or`),
+    contains: makeChain(`${name}.contains`),
+    lt: makeChain(`${name}.lt`),
+    gte: makeChain(`${name}.gte`),
+    lte: makeChain(`${name}.lte`),
+    limit: makeChain(`${name}.limit`),
+    order: makeChain(`${name}.order`),
+    single: makeChain(`${name}.single`),
+    then: promise.then.bind(promise),
+    catch: promise.catch.bind(promise),
+    finally: promise.finally.bind(promise),
+  };
+
+  return builder as QueryBuilder<T>;
+};
 
 export const supabase = {
   auth: {
@@ -28,19 +98,15 @@ export const supabase = {
     getUser: makeNoopFn('auth.getUser'),
     getSession: makeNoopFn('auth.getSession'),
   },
-  from(_table: string) {
-    // Return an object with common query methods as no-ops
-    return {
-      select: makeNoopFn('from().select'),
-      insert: makeNoopFn('from().insert'),
-      update: makeNoopFn('from().update'),
-      delete: makeNoopFn('from().delete'),
-      eq: makeNoopFn('from().eq'),
-      in: makeNoopFn('from().in'),
-      ilike: makeNoopFn('from().ilike'),
-      limit: makeNoopFn('from().limit'),
-      order: makeNoopFn('from().order'),
-      single: makeNoopFn('from().single'),
-    };
+  rpc(name: string, _params?: Record<string, any>) {
+    console.warn(makeWarning(`rpc(${name})`));
+    return Promise.resolve<SupabaseResult<any>>({
+      data: null,
+      error: new Error('Supabase RPC is not configured (frontend-only mode).'),
+      count: null,
+    });
+  },
+  from(table: string) {
+    return createQueryBuilder(`from(${table})`);
   },
 };

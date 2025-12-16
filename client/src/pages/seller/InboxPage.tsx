@@ -70,7 +70,7 @@ const InboxPage: React.FC = () => {
                 Filters
               </button>
             </div>
-            <div className="flex-1 overflow-y-auto">
+            <div className="flex-1 overflow-y-auto overflow-x-hidden scroll-smooth [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:dark:bg-gray-700 hover:[&::-webkit-scrollbar-thumb]:bg-gray-400 dark:hover:[&::-webkit-scrollbar-thumb]:bg-gray-600">
               {mockThreads.map((thread) => {
                 const isActive = thread.id === activeThread?.id;
                 return (
@@ -137,7 +137,7 @@ const InboxPage: React.FC = () => {
             </div>
 
             {/* Messages area */}
-            <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3 bg-gray-50/60 dark:bg-black/30">
+            <div className="flex-1 overflow-y-auto overflow-x-hidden scroll-smooth px-4 py-3 space-y-3 bg-gray-50/60 dark:bg-black/30 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:dark:bg-gray-700 hover:[&::-webkit-scrollbar-thumb]:bg-gray-400 dark:hover:[&::-webkit-scrollbar-thumb]:bg-gray-600">
               {/* Mock messages for layout demonstration */}
               <div className="flex items-start gap-2 max-w-xl">
                 <div className="w-7 h-7 rounded-full bg-gray-300 dark:bg-gray-700 flex items-center justify-center text-[11px] text-gray-800 dark:text-gray-100">

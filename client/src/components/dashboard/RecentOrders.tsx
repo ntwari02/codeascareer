@@ -43,7 +43,7 @@ const RecentOrders: React.FC = () => {
         </button>
       </div>
 
-      <div className="space-y-3 overflow-y-auto flex-1 pr-2">
+      <div className="space-y-3 overflow-y-auto overflow-x-hidden scroll-smooth flex-1 pr-2 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:dark:bg-gray-700 hover:[&::-webkit-scrollbar-thumb]:bg-gray-400 dark:hover:[&::-webkit-scrollbar-thumb]:bg-gray-600">
         {orders.map((order, index) => (
           <motion.div
             key={order.id}

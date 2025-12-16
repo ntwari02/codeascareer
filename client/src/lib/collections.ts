@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import type { Collection, CollectionCondition, Product, ProductCollection } from '@/types';
+import type { Collection, CollectionCondition, Product } from '@/types';
 
 /**
  * Collection Service - Handles all collection-related operations
@@ -47,7 +47,7 @@ export async function getCollections(options?: {
   // Get product counts if needed
   if (data && options?.includeProducts) {
     const collectionsWithCounts = await Promise.all(
-      data.map(async (collection) => {
+      data.map(async (collection: Collection) => {
         const count = await getCollectionProductCount(collection.id);
         return { ...collection, product_count: count };
       })

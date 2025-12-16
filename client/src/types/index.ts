@@ -247,3 +247,45 @@ export interface ProductCollection {
   product?: Product;
   collection?: Collection;
 }
+
+export interface Brand {
+  id: string;
+  name: string;
+  slug: string;
+  logo?: string;
+  banner_image?: string;
+  description?: string;
+  bio?: string;
+  country?: string;
+  country_code?: string;
+  website?: string;
+  email?: string;
+  phone?: string;
+  seller_id?: string;
+  seller_rating?: number;
+  product_count: number;
+  follower_count?: number;
+  is_verified: boolean;
+  is_top_brand: boolean;
+  is_trusted_seller: boolean;
+  is_featured: boolean;
+  is_trending?: boolean;
+  is_local?: boolean;
+  is_new?: boolean;
+  is_wholesale?: boolean;
+  offers_free_shipping?: boolean;
+  categories?: string[];
+  tags?: string[];
+  policies?: {
+    returns?: string;
+    warranty?: string;
+    shipping?: string;
+  };
+  performance_stats?: {
+    response_time?: string;
+    fulfillment_rate?: number;
+    on_time_delivery?: number;
+  };
+  created_at: string;
+  updated_at: string;
+}

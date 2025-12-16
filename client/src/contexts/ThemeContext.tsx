@@ -1,8 +1,8 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 
 type Theme = 'dark' | 'light';
-type Language = 'en' | 'es' | 'fr' | 'de' | 'zh';
-type Currency = 'USD' | 'EUR' | 'GBP' | 'JPY' | 'CNY';
+type Language = 'en' | 'fr' | 'rw' | 'sw';
+type Currency = 'USD' | 'EUR' | 'RWF' | 'KES';
 
 interface ThemeContextType {
   theme: Theme;
@@ -16,7 +16,7 @@ interface ThemeContextType {
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setTheme] = useState<Theme>('dark');
+  const [theme, setTheme] = useState<Theme>('light');
   const [language, setLanguage] = useState<Language>('en');
   const [currency, setCurrency] = useState<Currency>('USD');
 

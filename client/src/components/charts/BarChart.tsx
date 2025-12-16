@@ -50,16 +50,6 @@ export function BarChart({
     return (index * barSpacing) + (barSpacing / 2) - (barWidth / 2);
   };
 
-  const trendLinePoints = allData.map((point, index) => {
-    const x = getXPosition(index) + barWidth / 2;
-    const y = getYPosition(point.value);
-    const type: 'historical' | 'forecast' = index < data.length ? 'historical' : 'forecast';
-    return { x, y, point, type, index };
-  });
-
-  const trendLinePath = trendLinePoints
-    .map((p, idx) => (idx === 0 ? `M ${p.x} ${p.y}` : `L ${p.x} ${p.y}`))
-    .join(' ');
 
   const averageValue = allData.reduce((sum, point) => sum + point.value, 0) / allData.length;
   const averageLineY = getYPosition(averageValue);
@@ -80,67 +70,6 @@ export function BarChart({
           className="w-full h-full"
           preserveAspectRatio="xMidYMid meet"
         >
-          {/* Grid lines */}
-          {[0, 0.25, 0.5, 0.75, 1].map((ratio) => {
-            const y = chartHeight - (ratio * chartHeight);
-            const value = minValue + (range * ratio);
-            return (
-              <g key={ratio}>
-                <line
-                  x1="0"
-                  y1={y}
-                  x2={chartWidth}
-                  y2={y}
-                  stroke="currentColor"
-                  strokeWidth="0.5"
-                  className="text-gray-200 dark:text-gray-700"
-                  strokeDasharray="2,2"
-                />
-                <text
-                  x="-2"
-                  y={y + 3}
-                  textAnchor="end"
-                  className="text-xs fill-gray-600 dark:fill-gray-400"
-                  fontSize="8"
-                >
-                  ${(value / 1000).toFixed(0)}k
-                </text>
-              </g>
-            );
-          })}
-
-          {/* Y-axis label */}
-          <text
-            x="-25"
-            y={chartHeight / 2}
-            textAnchor="middle"
-            className="text-sm fill-gray-700 dark:fill-gray-300 font-medium"
-            fontSize="9"
-            transform={`rotate(-90 -25 ${chartHeight / 2})`}
-          >
-            {yAxisLabel}
-          </text>
-
-          {/* Average line */}
-          <line
-            x1="0"
-            y1={averageLineY}
-            x2={chartWidth}
-            y2={averageLineY}
-            stroke="currentColor"
-            strokeDasharray="4,4"
-            strokeWidth="0.8"
-            className="text-gray-400 dark:text-gray-500"
-          />
-          <text
-            x={chartWidth}
-            y={averageLineY - 2}
-            textAnchor="end"
-            className="text-[7px] fill-gray-500 dark:fill-gray-400"
-          >
-            Avg ${Math.round(averageValue).toLocaleString()}
-          </text>
-
           {/* Historical bars */}
           {data.map((point, index) => {
             const x = getXPosition(index);
@@ -197,33 +126,6 @@ export function BarChart({
             );
           })}
 
-          {/* Trend line */}
-          {trendLinePath && (
-            <path
-              d={trendLinePath}
-              fill="none"
-              stroke="url(#trendLineGradient)"
-              strokeWidth="1.3"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          )}
-
-          {/* Trend markers */}
-          {trendLinePoints.map(({ x, y, index, type, point }) => (
-            <circle
-              key={`trend-point-${index}`}
-              cx={x}
-              cy={y}
-              r={hoveredBar?.index === index ? 1.9 : 1.4}
-              fill={type === 'historical' ? '#f97316' : '#60a5fa'}
-              stroke="#fff"
-              strokeWidth="0.4"
-              className="cursor-pointer"
-              onMouseEnter={() => setHoveredBar({ index, type, point })}
-              onMouseLeave={() => setHoveredBar(null)}
-            />
-          ))}
 
           {/* Divider line between historical and forecast */}
           {forecastData.length > 0 && (
@@ -243,30 +145,15 @@ export function BarChart({
           {/* Gradients */}
           <defs>
             <linearGradient id="barGradient" x1="0%" y1="0%" x2="0%" y2="100%">
-              <stop offset="0%" stopColor="#ef4444" />
-              <stop offset="100%" stopColor="#f97316" />
+              <stop offset="0%" stopColor="#10b981" />
+              <stop offset="50%" stopColor="#14b8a6" />
+              <stop offset="100%" stopColor="#06b6d4" />
             </linearGradient>
             <linearGradient id="forecastBarGradient" x1="0%" y1="0%" x2="0%" y2="100%">
               <stop offset="0%" stopColor="#3b82f6" />
               <stop offset="100%" stopColor="#8b5cf6" />
             </linearGradient>
-            <linearGradient id="trendLineGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-              <stop offset="0%" stopColor="#ef4444" />
-              <stop offset="50%" stopColor="#f97316" />
-              <stop offset="100%" stopColor="#60a5fa" />
-            </linearGradient>
           </defs>
-
-          {/* X-axis line */}
-          <line
-            x1="0"
-            y1={chartHeight}
-            x2={chartWidth}
-            y2={chartHeight}
-            stroke="currentColor"
-            strokeWidth="1"
-            className="text-gray-300 dark:text-gray-600"
-          />
 
           {/* Annotation markers */}
           {annotations.map((annotation, idx) => {
@@ -309,7 +196,7 @@ export function BarChart({
         {/* Legend */}
         <div className="absolute top-0 right-0 flex gap-4 text-xs">
           <div className="flex items-center gap-2">
-            <div className="w-4 h-4 bg-gradient-to-br from-red-500 to-orange-500 rounded"></div>
+            <div className="w-4 h-4 bg-gradient-to-br from-emerald-500 via-teal-500 to-cyan-500 rounded"></div>
             <span className="text-gray-600 dark:text-gray-400">Historical</span>
           </div>
           {forecastData.length > 0 && (

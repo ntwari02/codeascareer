@@ -349,7 +349,7 @@ const DisputeResolution: React.FC = () => {
 
       {/* Dispute Details Dialog */}
       <Dialog open={showDisputeDetails} onOpenChange={setShowDisputeDetails}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700">
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto overflow-x-hidden scroll-smooth bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:dark:bg-gray-700 hover:[&::-webkit-scrollbar-thumb]:bg-gray-400 dark:hover:[&::-webkit-scrollbar-thumb]:bg-gray-600">
           <DialogHeader>
             <DialogTitle className="text-2xl font-bold text-gray-900 dark:text-white">
               Dispute Details - {selectedDispute?.orderNumber}
@@ -390,7 +390,7 @@ const DisputeResolution: React.FC = () => {
               {selectedDispute.messages && selectedDispute.messages.length > 0 && (
                 <div className="bg-gray-50 dark:bg-gray-800/50 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
                   <h3 className="font-semibold text-gray-900 dark:text-white mb-3">Messages</h3>
-                  <div className="space-y-3 max-h-60 overflow-y-auto">
+                  <div className="space-y-3 max-h-60 overflow-y-auto overflow-x-hidden scroll-smooth [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:dark:bg-gray-600 hover:[&::-webkit-scrollbar-thumb]:bg-gray-400 dark:hover:[&::-webkit-scrollbar-thumb]:bg-gray-500">
                     {selectedDispute.messages.map((msg, idx) => (
                       <div key={idx} className={`p-3 rounded-lg ${
                         msg.sender === 'seller' ? 'bg-red-50 dark:bg-red-900/20 ml-4' :
@@ -492,7 +492,7 @@ const DisputeResolution: React.FC = () => {
                   />
                 </label>
                 {evidenceFiles.length > 0 && (
-                  <div className="mt-4 text-left text-xs text-gray-600 dark:text-gray-400 space-y-1 max-h-24 overflow-y-auto">
+                  <div className="mt-4 text-left text-xs text-gray-600 dark:text-gray-400 space-y-1 max-h-24 overflow-y-auto overflow-x-hidden scroll-smooth [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:dark:bg-gray-600 hover:[&::-webkit-scrollbar-thumb]:bg-gray-400 dark:hover:[&::-webkit-scrollbar-thumb]:bg-gray-500">
                     {evidenceFiles.map((file) => (
                       <p key={file.name}>
                         {file.name}{' '}

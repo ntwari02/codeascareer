@@ -13,6 +13,7 @@ import SubscriptionTiers from '@/pages/seller/SubscriptionTiers';
 import ProfilePage from '@/pages/seller/ProfilePage';
 import InboxPage from '@/pages/seller/InboxPage';
 import SupportCenter from '@/pages/seller/SupportCenter';
+import NotificationsPage from '@/pages/seller/NotificationsPage';
 import Notifications from '@/components/dashboard/Notifications';
 
 const SellerDashboard: React.FC = () => {
@@ -30,7 +31,7 @@ const SellerDashboard: React.FC = () => {
   
   // Ensure we're on a valid route
   useEffect(() => {
-    const validRoutes = ['dashboard', 'inventory', 'orders', 'disputes', 'products', 'collections', 'analytics', 'subscription', 'settings', 'inbox', 'support'];
+    const validRoutes = ['dashboard', 'inventory', 'orders', 'disputes', 'products', 'collections', 'analytics', 'subscription', 'settings', 'inbox', 'support', 'notifications'];
     if (pathSegments.length === sellerIndex + 1) {
       // We're on /seller, which is fine (index route)
       return;
@@ -59,6 +60,7 @@ const SellerDashboard: React.FC = () => {
         setSidebarOpen={setSidebarOpen}
         title="Seller Hub"
         tier="Premium Tier"
+        accentVariant="orange"
       />
       
       <div className="flex-1 flex flex-col overflow-hidden">
@@ -68,9 +70,10 @@ const SellerDashboard: React.FC = () => {
           setNotificationsOpen={setNotificationsOpen}
           userName="John Seller"
           userRole="Premium Account"
+          accentVariant="orange"
         />
         
-        <main className="flex-1 overflow-y-auto bg-gray-50/50 dark:bg-black/30 p-4 md:p-6 lg:p-8 transition-colors duration-300">
+        <main className="flex-1 overflow-y-auto overflow-x-hidden scroll-smooth bg-gray-50/50 dark:bg-black/30 p-4 md:p-6 lg:p-8 transition-colors duration-300 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:dark:bg-gray-700 hover:[&::-webkit-scrollbar-thumb]:bg-gray-400 dark:hover:[&::-webkit-scrollbar-thumb]:bg-gray-600">
           <Routes>
             <Route index element={<DashboardOverview />} />
             <Route path="dashboard" element={<DashboardOverview />} />
@@ -84,6 +87,7 @@ const SellerDashboard: React.FC = () => {
             <Route path="settings" element={<ProfilePage />} />
             <Route path="inbox" element={<InboxPage />} />
             <Route path="support" element={<SupportCenter />} />
+            <Route path="notifications" element={<NotificationsPage />} />
           </Routes>
         </main>
       </div>

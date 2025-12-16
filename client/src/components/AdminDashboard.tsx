@@ -1,9 +1,19 @@
 import React, { useState, useEffect } from 'react';
 import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
-import { 
-  LayoutDashboard, Users, Store as StoreIcon, Package, ShoppingCart, DollarSign, 
-  AlertTriangle, Truck, Bell, Megaphone, Star, FolderKanban, FileText, 
-  BarChart3, Zap, RefreshCw, Settings, Code, Activity 
+import {
+  LayoutDashboard,
+  Users,
+  Store as StoreIcon,
+  Package,
+  ShoppingCart,
+  DollarSign,
+  AlertTriangle,
+  Truck,
+  Bell,
+  Megaphone,
+  Star,
+  FolderKanban,
+  Settings,
 } from 'lucide-react';
 import Sidebar from '@/components/dashboard/Sidebar';
 import Header from '@/components/dashboard/Header';
@@ -14,19 +24,13 @@ import SellerStoreManagement from '@/pages/admin/SellerStoreManagement';
 import ProductManagementAdmin from '@/pages/admin/ProductManagementAdmin';
 import OrderManagementAdmin from '@/pages/admin/OrderManagementAdmin';
 import PaymentsFinancial from '@/pages/admin/PaymentsFinancial';
-import DisputesSupport from '@/pages/admin/DisputesSupport';
-import LogisticsDelivery from '@/pages/admin/LogisticsDelivery';
-import NotificationsCommunication from '@/pages/admin/NotificationsCommunication';
-import MarketingTools from '@/pages/admin/MarketingTools';
-import ReviewsModeration from '@/pages/admin/ReviewsModeration';
-import PlatformSettings from '@/pages/admin/PlatformSettings';
-import DataInsights from '@/pages/admin/DataInsights';
-import DeveloperTools from '@/pages/admin/DeveloperTools';
-import CollectionsManagementAdmin from '@/pages/admin/CollectionsManagementAdmin';
-import CMSManagement from '@/pages/admin/CMSManagement';
-import TaskAutomation from '@/pages/admin/TaskAutomation';
-import RefundsSystem from '@/pages/admin/RefundsSystem';
-import PlatformHealth from '@/pages/admin/PlatformHealth';
+import SupportCenter from '@/pages/admin/support/SupportCenter';
+import LogisticsCenter from '@/pages/admin/logistics/LogisticsCenter';
+import NotificationsCenter from '@/pages/admin/notifications/NotificationsCenter';
+import MarketingCenter from '@/pages/admin/marketing/MarketingCenter';
+import ReviewsCenter from '@/pages/admin/reviews/ReviewsCenter';
+import CollectionsCenter from '@/pages/admin/collections/CollectionsCenter';
+import { AdminProfile } from '@/pages/admin/AdminProfile';
 
 const AdminDashboard: React.FC = () => {
   const navigate = useNavigate();
@@ -44,10 +48,19 @@ const AdminDashboard: React.FC = () => {
   // Ensure we're on a valid route
   useEffect(() => {
     const validRoutes = [
-      'dashboard', 'users', 'sellers', 'products', 'orders', 'payments', 
-      'disputes', 'logistics', 'notifications', 'marketing', 'reviews', 
-      'settings', 'analytics', 'developer', 'collections', 'cms', 
-      'automation', 'refunds', 'health'
+      'dashboard',
+      'users',
+      'sellers',
+      'products',
+      'orders',
+      'finance',
+      'support',
+      'logistics',
+      'notifications',
+      'marketing',
+      'reviews',
+      'collections',
+      'settings',
     ];
     if (pathSegments.length === adminIndex + 1) {
       // We're on /admin, which is fine (index route)
@@ -77,26 +90,21 @@ const AdminDashboard: React.FC = () => {
         setSidebarOpen={setSidebarOpen}
         title="Admin Panel"
         tier="Super Admin"
+        accentVariant="emerald"
         menuItems={[
           { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-          { id: 'users', label: 'User Management', icon: Users },
-          { id: 'sellers', label: 'Seller Stores', icon: StoreIcon },
+          { id: 'users', label: 'Users', icon: Users },
+          { id: 'sellers', label: 'Sellers', icon: StoreIcon },
           { id: 'products', label: 'Products', icon: Package },
           { id: 'orders', label: 'Orders', icon: ShoppingCart },
-          { id: 'payments', label: 'Payments & Finance', icon: DollarSign },
-          { id: 'disputes', label: 'Disputes & Support', icon: AlertTriangle },
+          { id: 'finance', label: 'Finance', icon: DollarSign },
+          { id: 'support', label: 'Support', icon: AlertTriangle },
           { id: 'logistics', label: 'Logistics', icon: Truck },
           { id: 'notifications', label: 'Notifications', icon: Bell },
           { id: 'marketing', label: 'Marketing', icon: Megaphone },
           { id: 'reviews', label: 'Reviews', icon: Star },
           { id: 'collections', label: 'Collections', icon: FolderKanban },
-          { id: 'cms', label: 'CMS', icon: FileText },
-          { id: 'analytics', label: 'Analytics', icon: BarChart3 },
-          { id: 'automation', label: 'Automation', icon: Zap },
-          { id: 'refunds', label: 'Refunds', icon: RefreshCw },
-          { id: 'settings', label: 'Settings', icon: Settings },
-          { id: 'developer', label: 'Developer', icon: Code },
-          { id: 'health', label: 'System Health', icon: Activity },
+          { id: 'settings', label: 'Profile & Settings', icon: Settings },
         ]}
       />
       
@@ -107,9 +115,10 @@ const AdminDashboard: React.FC = () => {
           setNotificationsOpen={setNotificationsOpen}
           userName="Admin User"
           userRole="Super Admin"
+          accentVariant="emerald"
         />
         
-        <main className="flex-1 overflow-y-auto bg-gray-50/50 dark:bg-black/30 p-4 md:p-6 lg:p-8 transition-colors duration-300">
+        <main className="flex-1 overflow-y-auto overflow-x-hidden scroll-smooth bg-gray-50/50 dark:bg-black/30 p-4 md:p-6 lg:p-8 transition-colors duration-300 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:dark:bg-gray-700 hover:[&::-webkit-scrollbar-thumb]:bg-gray-400 dark:hover:[&::-webkit-scrollbar-thumb]:bg-gray-600">
           <Routes>
             <Route index element={<AdminOverview />} />
             <Route path="dashboard" element={<AdminOverview />} />
@@ -117,20 +126,14 @@ const AdminDashboard: React.FC = () => {
             <Route path="sellers" element={<SellerStoreManagement />} />
             <Route path="products" element={<ProductManagementAdmin />} />
             <Route path="orders" element={<OrderManagementAdmin />} />
-            <Route path="payments" element={<PaymentsFinancial />} />
-            <Route path="disputes" element={<DisputesSupport />} />
-            <Route path="logistics" element={<LogisticsDelivery />} />
-            <Route path="notifications" element={<NotificationsCommunication />} />
-            <Route path="marketing" element={<MarketingTools />} />
-            <Route path="reviews" element={<ReviewsModeration />} />
-            <Route path="collections" element={<CollectionsManagementAdmin />} />
-            <Route path="cms" element={<CMSManagement />} />
-            <Route path="analytics" element={<DataInsights />} />
-            <Route path="automation" element={<TaskAutomation />} />
-            <Route path="refunds" element={<RefundsSystem />} />
-            <Route path="settings" element={<PlatformSettings />} />
-            <Route path="developer" element={<DeveloperTools />} />
-            <Route path="health" element={<PlatformHealth />} />
+            <Route path="finance" element={<PaymentsFinancial />} />
+            <Route path="support" element={<SupportCenter />} />
+            <Route path="logistics" element={<LogisticsCenter />} />
+            <Route path="notifications" element={<NotificationsCenter />} />
+            <Route path="marketing" element={<MarketingCenter />} />
+            <Route path="reviews" element={<ReviewsCenter />} />
+            <Route path="collections" element={<CollectionsCenter />} />
+            <Route path="settings" element={<AdminProfile />} />
           </Routes>
         </main>
       </div>

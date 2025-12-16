@@ -1,14 +1,12 @@
 import { useState, useEffect } from 'react';
-import { Link, useNavigate, useLocation } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useTheme } from '../contexts/ThemeContext';
 import { Lock, RotateCw, CheckCircle, XCircle, Sun, Moon, Home } from 'lucide-react';
 
 export function ResetPassword() {
   const navigate = useNavigate();
-  const location = useLocation();
   const { theme, toggleTheme } = useTheme();
-  const email = location.state?.email || '';
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);

@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
 import { Settings, Globe, Shield, FileText, Palette, DollarSign, Clock, Save } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { ToastContainer, useToast } from '@/components/ui/toast';
 
 export default function PlatformSettings() {
+  const { toasts, showToast, removeToast } = useToast();
   const [activeTab, setActiveTab] = useState<'general' | 'security' | 'legal' | 'payment'>('general');
   const [settings, setSettings] = useState({
     // General
@@ -30,7 +32,7 @@ export default function PlatformSettings() {
   const handleSave = () => {
     // Implement save logic
     console.log('Saving settings:', settings);
-    alert('Settings saved successfully!');
+    showToast('Settings saved successfully!', 'success');
   };
 
   return (
@@ -368,6 +370,7 @@ export default function PlatformSettings() {
           </div>
         </div>
       </div>
+      <ToastContainer toasts={toasts} onRemove={removeToast} />
     </div>
   );
 }

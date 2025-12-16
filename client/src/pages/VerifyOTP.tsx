@@ -3,11 +3,13 @@ import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useTheme } from '../contexts/ThemeContext';
 import { ArrowLeft, Sun, Moon, Home } from 'lucide-react';
+import { ToastContainer, useToast } from '../components/ui/toast';
 
 export function VerifyOTP() {
   const navigate = useNavigate();
   const location = useLocation();
   const { theme, toggleTheme } = useTheme();
+  const { toasts, showToast, removeToast } = useToast();
   const email = location.state?.email || '';
   const [otp, setOtp] = useState(['', '', '', '', '', '']);
   const [loading, setLoading] = useState(false);
@@ -98,7 +100,7 @@ export function VerifyOTP() {
       setError('Failed to resend OTP. Please try again.');
     } else {
       setError('');
-      alert('New OTP sent to your email!');
+      showToast('New OTP sent to your email!', 'success');
     }
   };
 
@@ -228,6 +230,7 @@ export function VerifyOTP() {
           </form>
         </div>
       </div>
+      <ToastContainer toasts={toasts} onRemove={removeToast} />
     </div>
   );
 }
