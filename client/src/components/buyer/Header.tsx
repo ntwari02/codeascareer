@@ -196,6 +196,7 @@ export function Header() {
   const cartPreviewTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const cartRef = useRef<HTMLDivElement>(null);
   const notificationsRef = useRef<HTMLDivElement>(null);
+  const userMenuRef = useRef<HTMLDivElement>(null);
 
 
   // Fetch notifications
@@ -332,6 +333,9 @@ export function Header() {
       }
       if (notificationsRef.current && !notificationsRef.current.contains(target)) {
         setShowNotifications(false);
+      }
+      if (userMenuRef.current && !userMenuRef.current.contains(target)) {
+        setShowUserMenu(false);
       }
       
     };
@@ -1412,7 +1416,7 @@ export function Header() {
 
               {/* User Menu */}
               {user ? (
-                <div className="relative">
+                <div className="relative" ref={userMenuRef}>
                   <button
                     onClick={() => {
                       setShowUserMenu(!showUserMenu);

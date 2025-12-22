@@ -50,6 +50,11 @@ app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
 // Connect to MongoDB, then start server
 const connectDB = async () => {
   try {
+    if (!MONGO_URI) {
+      console.error('❌ MONGO_URI is not set in .env file');
+      process.exit(1);
+    }
+
     const options: mongoose.ConnectOptions = {
       serverSelectionTimeoutMS: 10000,
       socketTimeoutMS: 45000,
@@ -67,8 +72,8 @@ const connectDB = async () => {
     app.listen(PORT, () => {
       console.log(`🚀 Server listening on port ${PORT}`);
     });
-  } catch (err) {
-    console.error('❌ MongoDB connection error:', err);
+  } catch (err: any) {
+    console.error('❌ MongoDB connection error:', err.message || err);
     process.exit(1);
   }
 };
