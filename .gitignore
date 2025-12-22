@@ -10,9 +10,7 @@ dist/
 build/
 
 # Environment variables
-.env
-server/.env
-client/.env
+
 
 # Logs
 logs/
