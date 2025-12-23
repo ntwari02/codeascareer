@@ -6,7 +6,9 @@ import helmet from 'helmet';
 import compression from 'compression';
 import cookieParser from 'cookie-parser';
 import mongoose from 'mongoose';
+import path from 'path';
 import authRoutes from './src/routes/authRoutes';
+import inventoryRoutes from './src/routes/inventoryRoutes';
 
 dotenv.config();
 
@@ -26,6 +28,14 @@ app.use(cookieParser());
 app.use(morgan('dev'));
 app.use(helmet());
 app.use(compression());
+// Static files for uploaded images
+// Allow product images to be embedded from a different origin (e.g. Vite dev server on 5173)
+// by relaxing the Cross-Origin-Resource-Policy for this path only.
+app.use(
+  '/uploads',
+  helmet.crossOriginResourcePolicy({ policy: 'cross-origin' })
+);
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Health check
 app.get('/api/health', (_req: Request, res: Response) => {
@@ -34,6 +44,8 @@ app.get('/api/health', (_req: Request, res: Response) => {
 
 // Auth routes
 app.use('/api/auth', authRoutes);
+// Seller inventory routes
+app.use('/api/seller/inventory', inventoryRoutes);
 
 // 404 handler
 app.use((req: Request, res: Response) => {

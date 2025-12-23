@@ -189,6 +189,7 @@ export function Header() {
   const [searchModalPosition, setSearchModalPosition] = useState<{ top: number; left: number; width: number } | null>(null);
   const [cartPreviewPosition, setCartPreviewPosition] = useState<{ top: number; right: number } | null>(null);
   const [imageFileName, setImageFileName] = useState<string | null>(null);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
 
   const { toast } = useToast();
 
@@ -1526,9 +1527,8 @@ export function Header() {
                           <div className="my-1.5 border-t border-gray-200 dark:border-gray-700" />
                           <button
                             onClick={() => {
-                              useAuthStore.getState().signOut();
                               setShowUserMenu(false);
-                              navigate('/login');
+                              setShowLogoutConfirm(true);
                             }}
                             className="w-full text-left flex items-center gap-3 px-3 py-2 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg text-sm text-red-600 dark:text-red-400 transition-colors font-medium"
                           >
@@ -1634,6 +1634,40 @@ export function Header() {
           </div>
         </div>
       </header>
+
+      {/* Logout confirmation dialog */}
+      <Dialog open={showLogoutConfirm} onOpenChange={setShowLogoutConfirm}>
+        <DialogContent className="max-w-sm bg-white dark:bg-dark-card border border-red-200 dark:border-red-700">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-bold text-red-600 dark:text-red-400">
+              Logout
+            </DialogTitle>
+            <DialogDescription className="text-sm text-gray-600 dark:text-gray-400">
+              Are you sure you want to log out from your account? You will need to log in again to manage your orders and seller dashboard.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end gap-2 pt-4">
+            <button
+              type="button"
+              className="px-4 py-1.5 text-sm rounded-lg border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+              onClick={() => setShowLogoutConfirm(false)}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="px-4 py-1.5 text-sm rounded-lg bg-red-600 hover:bg-red-700 text-white transition-colors"
+              onClick={() => {
+                useAuthStore.getState().signOut();
+                setShowLogoutConfirm(false);
+                navigate('/login');
+              }}
+            >
+              Logout
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Mobile Search Modal - Full Screen */}
       {mobileSearchOpen && (

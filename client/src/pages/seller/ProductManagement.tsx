@@ -1,8 +1,16 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { Box, Plus, Edit, Trash2, Eye, Search, Filter, Upload, Download, X, Check, Image as ImageIcon, Tag, DollarSign, Package, Globe, LayoutGrid, Rows } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { useToastStore } from '@/stores/toastStore';
+
+type Variant = {
+  color?: string;
+  size?: string;
+  sku: string;
+  stock: number;
+};
 
 interface Product {
   id: string;
@@ -12,6 +20,7 @@ interface Product {
   discount?: number;
   stock: number;
   moq?: number;
+  // UI status for display/filtering, derived from inventory state
   status: 'active' | 'draft' | 'out_of_stock' | 'hidden';
   sales: number;
   views: number;
@@ -19,7 +28,11 @@ interface Product {
   images?: string[];
   description?: string;
   sku?: string;
-  variants?: { color?: string; size?: string; price: number; stock: number }[];
+  weight?: number;
+  variants?: Variant[];
+   seoTitle?: string;
+   seoDescription?: string;
+   seoKeywords?: string;
 }
 
 const ProductManagement: React.FC = () => {
@@ -35,75 +48,13 @@ const ProductManagement: React.FC = () => {
   const [showAddProduct, setShowAddProduct] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [showBulkActions, setShowBulkActions] = useState(false);
-
-  const [products] = useState<Product[]>([
-    {
-      id: '1',
-      name: 'Wireless Headphones',
-      category: 'Electronics',
-      price: 149.99,
-      discount: 10,
-      stock: 45,
-      moq: 10,
-      status: 'active',
-      sales: 234,
-      views: 1234,
-      rating: 4.8,
-      sku: 'WH-001',
-      images: ['https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=500&h=500&fit=crop'],
-      description: 'High-quality wireless headphones with noise cancellation',
-      variants: [
-        { color: 'Black', size: 'Standard', price: 149.99, stock: 20 },
-        { color: 'White', size: 'Standard', price: 149.99, stock: 25 },
-      ],
-    },
-    {
-      id: '2',
-      name: 'Smart Watch',
-      category: 'Electronics',
-      price: 299.99,
-      stock: 12,
-      moq: 5,
-      status: 'active',
-      sales: 189,
-      views: 987,
-      rating: 4.6,
-      sku: 'SW-002',
-      images: ['https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=500&h=500&fit=crop'],
-      variants: [
-        { color: 'Silver', size: '42mm', price: 299.99, stock: 5 },
-        { color: 'Black', size: '46mm', price: 299.99, stock: 7 },
-      ],
-    },
-    {
-      id: '3',
-      name: 'Laptop Stand',
-      category: 'Accessories',
-      price: 79.99,
-      stock: 0,
-      moq: 20,
-      status: 'out_of_stock',
-      sales: 0,
-      views: 45,
-      rating: 0,
-      sku: 'LS-003',
-      images: ['https://images.unsplash.com/photo-1527864550417-7fd91fc51a46?w=500&h=500&fit=crop'],
-    },
-    {
-      id: '4',
-      name: 'USB-C Cable',
-      category: 'Accessories',
-      price: 19.99,
-      stock: 128,
-      moq: 50,
-      status: 'active',
-      sales: 456,
-      views: 2341,
-      rating: 4.9,
-      sku: 'UC-004',
-      images: ['https://images.unsplash.com/photo-1587825140708-dfaf72ae4b04?w=500&h=500&fit=crop'],
-    },
-  ]);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
+  const { showToast } = useToastStore();
+  const [viewProduct, setViewProduct] = useState<Product | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Product | null>(null);
 
   const [newProduct, setNewProduct] = useState({
     name: '',
@@ -112,11 +63,95 @@ const ProductManagement: React.FC = () => {
     price: '',
     discount: '',
     stock: '',
+    weight: '',
     sku: '',
+    images: [] as string[],
+    variants: [] as Variant[],
     seoTitle: '',
     seoDescription: '',
     seoKeywords: '',
   });
+
+  const [variantDraft, setVariantDraft] = useState({
+    color: '',
+    size: '',
+    sku: '',
+    stock: '',
+  });
+
+  const API_HOST = 'http://localhost:5000';
+  const API_BASE = `${API_HOST}/api/seller/inventory`;
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const resolveImageUrl = (url: string): string => {
+    if (!url) return url;
+    return url.startsWith('http://') || url.startsWith('https://')
+      ? url
+      : `${API_HOST}${url}`;
+  };
+
+  const getAuthHeaders = () => {
+    const token = localStorage.getItem('auth_token');
+    return token
+      ? {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        }
+      : { 'Content-Type': 'application/json' };
+  };
+
+  const mapApiProduct = (p: any): Product => ({
+    id: p._id?.toString() || p.id?.toString(),
+    name: p.name,
+    category: p.category || 'Uncategorized',
+    price: p.price,
+    discount: p.discount,
+    stock: p.stock,
+    moq: p.moq,
+    weight: p.weight,
+    weight: p.weight,
+    // Derive a simple UI status from stock level
+    status: p.stock === 0 ? 'out_of_stock' : 'active',
+    sales: 0,
+    views: 0,
+    rating: 0,
+    images: Array.isArray(p.images) ? p.images.map(resolveImageUrl) : undefined,
+    description: p.description,
+    sku: p.sku,
+    variants: p.variants,
+  seoTitle: p.seoTitle,
+  seoDescription: p.seoDescription,
+  seoKeywords: p.seoKeywords,
+  });
+
+  const loadProducts = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await fetch(`${API_BASE}/products`, {
+        method: 'GET',
+        headers: getAuthHeaders(),
+        credentials: 'include',
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.message || 'Failed to load products');
+      }
+      const apiProducts = Array.isArray(data.products)
+        ? data.products.map(mapApiProduct)
+        : [];
+      setProducts(apiProducts);
+    } catch (e: any) {
+      console.error('Failed to load products:', e);
+      setError(e.message || 'Failed to load products');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadProducts();
+  }, []);
 
   const filteredProducts = useMemo(
     () =>
@@ -188,19 +223,345 @@ const ProductManagement: React.FC = () => {
     }
   };
 
-  const handleBulkAction = (action: string) => {
-    console.log(`Bulk ${action} for:`, selectedProducts);
+  const handleBulkAction = async (action: string) => {
+    if (action === 'delete') {
+      try {
+        await Promise.all(
+          selectedProducts.map((id) =>
+            fetch(`${API_BASE}/products/${id}`, {
+              method: 'DELETE',
+              headers: getAuthHeaders(),
+              credentials: 'include',
+            })
+          )
+        );
+        await loadProducts();
+      } catch (e) {
+        console.error('Bulk delete failed:', e);
+      }
+    } else {
+      console.log(`Bulk ${action} for:`, selectedProducts);
+    }
     setSelectedProducts([]);
     setShowBulkActions(false);
   };
 
-  const handleSaveProduct = () => {
-    console.log('Save product:', newProduct);
-    setShowAddProduct(false);
-    setNewProduct({
-      name: '', description: '', category: '', price: '', discount: '', stock: '', sku: '',
-      seoTitle: '', seoDescription: '', seoKeywords: '',
+  const handleExportProducts = () => {
+    if (filteredProducts.length === 0) {
+      showToast('No products to export with the current filters.', 'info');
+      return;
+    }
+
+    try {
+      const headers = [
+        'ID',
+        'Name',
+        'Category',
+        'SKU',
+        'Price',
+        'Discount',
+        'FinalPrice',
+        'Stock',
+        'MOQ',
+        'Status',
+        'ImagesCount',
+        'VariantsCount',
+      ];
+
+      const rows = filteredProducts.map((p) => {
+        const finalPrice =
+          p.price * (1 - (p.discount || 0) / 100);
+        return [
+          p.id,
+          `"${(p.name || '').replace(/"/g, '""')}"`,
+          `"${(p.category || '').replace(/"/g, '""')}"`,
+          p.sku || '',
+          p.price.toFixed(2),
+          p.discount != null ? String(p.discount) : '',
+          finalPrice.toFixed(2),
+          String(p.stock),
+          p.moq != null ? String(p.moq) : '',
+          p.status,
+          String(p.images?.length || 0),
+          String(p.variants?.length || 0),
+        ].join(',');
+      });
+
+      const csvContent = [headers.join(','), ...rows].join('\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      const date = new Date().toISOString().split('T')[0];
+      link.href = url;
+      link.setAttribute('download', `seller-products-export-${date}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      showToast(`Exported ${filteredProducts.length} product(s) to CSV.`, 'success');
+    } catch (e: any) {
+      console.error('Export products failed:', e);
+      showToast(e.message || 'Failed to export products.', 'error');
+    }
+  };
+
+  const handleViewProduct = (product: Product) => {
+    setViewProduct(product);
+  };
+
+  const handleDeleteProduct = (product: Product) => {
+    setDeleteTarget(product);
+  };
+
+  const confirmDeleteProduct = async () => {
+    if (!deleteTarget) return;
+
+    try {
+      const response = await fetch(`${API_BASE}/products/${deleteTarget.id}`, {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+        credentials: 'include',
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const msg = data.message || 'Failed to delete product.';
+        showToast(msg, 'error');
+        return;
+      }
+
+      setProducts((prev) => prev.filter((p) => p.id !== deleteTarget.id));
+      setSelectedProducts((prev) => prev.filter((pid) => pid !== deleteTarget.id));
+      showToast('Product deleted successfully.', 'success');
+      setDeleteTarget(null);
+    } catch (e: any) {
+      console.error('Delete product failed:', e);
+      showToast(e.message || 'Failed to delete product.', 'error');
+    }
+  };
+
+  const handleSaveProduct = async () => {
+    setFormError(null);
+
+    // Basic client-side validation for required backend fields
+    const name = editingProduct ? editingProduct.name : newProduct.name;
+    const sku = editingProduct ? editingProduct.sku : newProduct.sku;
+    const priceValue = editingProduct
+      ? editingProduct.price
+      : newProduct.price ? parseFloat(newProduct.price) : NaN;
+
+    if (!name || !sku || !sku.trim() || Number.isNaN(priceValue) || priceValue <= 0) {
+      setFormError('Name, SKU and a valid positive price are required.');
+      return;
+    }
+
+    try {
+      if (editingProduct) {
+        // Update existing product
+        const body = {
+          name: editingProduct.name,
+          category: editingProduct.category,
+          description: editingProduct.description,
+          weight: editingProduct.weight,
+          seoTitle: editingProduct.seoTitle,
+          seoDescription: editingProduct.seoDescription,
+          seoKeywords: editingProduct.seoKeywords,
+          sku: editingProduct.sku,
+          stock: editingProduct.stock,
+          price: editingProduct.price,
+          discount: editingProduct.discount,
+          moq: editingProduct.moq,
+          images: editingProduct.images,
+          variants: editingProduct.variants,
+        };
+        const response = await fetch(`${API_BASE}/products/${editingProduct.id}`, {
+          method: 'PUT',
+          headers: getAuthHeaders(),
+          credentials: 'include',
+          body: JSON.stringify(body),
+        });
+        if (!response.ok) {
+          const data = await response.json().catch(() => ({}));
+          setFormError(data.message || 'Failed to update product.');
+          showToast(data.message || 'Failed to update product.', 'error');
+          return;
+        }
+        showToast('Product updated successfully.', 'success');
+      } else {
+        // Create new product
+        const body = {
+          name: newProduct.name,
+          category: newProduct.category,
+          description: newProduct.description,
+          weight: newProduct.weight ? parseFloat(newProduct.weight) : undefined,
+          seoTitle: newProduct.seoTitle,
+          seoDescription: newProduct.seoDescription,
+          seoKeywords: newProduct.seoKeywords,
+          sku: newProduct.sku,
+          stock: newProduct.stock ? parseInt(newProduct.stock, 10) : 0,
+          price: priceValue,
+          discount: newProduct.discount
+            ? parseFloat(newProduct.discount)
+            : undefined,
+          moq: (newProduct as any).moq
+            ? parseInt((newProduct as any).moq, 10)
+            : undefined,
+          images: newProduct.images,
+          variants: newProduct.variants,
+        };
+        const response = await fetch(`${API_BASE}/products`, {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          credentials: 'include',
+          body: JSON.stringify(body),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          setFormError(data.message || 'Failed to create product.');
+          showToast(data.message || 'Failed to create product.', 'error');
+          return;
+        }
+        showToast('Product created successfully.', 'success');
+      }
+
+      await loadProducts();
+
+      setShowAddProduct(false);
+      setEditingProduct(null);
+      setNewProduct({
+        name: '',
+        description: '',
+        category: '',
+        price: '',
+        discount: '',
+        stock: '',
+        weight: '',
+        sku: '',
+        images: [],
+        seoTitle: '',
+        seoDescription: '',
+        seoKeywords: '',
+      });
+      setVariantDraft({
+        color: '',
+        size: '',
+        sku: '',
+        stock: '',
+      });
+    } catch (e: any) {
+      console.error('Save product failed:', e);
+      const msg = e.message || 'Failed to save product.';
+      setFormError(msg);
+      showToast(msg, 'error');
+    }
+  };
+
+  const handleSelectImagesClick = () => {
+    if (fileInputRef.current) {
+      fileInputRef.current.click();
+    }
+  };
+
+  const handleImageUpload = async (
+    event: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const files = event.target.files;
+    if (!files || files.length === 0) return;
+
+    const formData = new FormData();
+    Array.from(files).forEach((file) => {
+      formData.append('images', file);
     });
+
+    try {
+      const token = localStorage.getItem('auth_token');
+      const response = await fetch(`${API_BASE}/products/upload-images`, {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        body: formData,
+        credentials: 'include',
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.message || 'Failed to upload images');
+      }
+
+      const urls: string[] = (data.urls || []).map((u: string) =>
+        resolveImageUrl(u)
+      );
+
+      if (editingProduct) {
+        setEditingProduct({
+          ...editingProduct,
+          images: [...(editingProduct.images || []), ...urls],
+        });
+      } else {
+        setNewProduct((prev) => ({
+          ...prev,
+          images: [...(prev.images || []), ...urls],
+        }));
+      }
+    } catch (e) {
+      console.error('Image upload failed:', e);
+    } finally {
+      // reset input so same file can be selected again if needed
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
+  const handleAddVariant = () => {
+    const trimmedSku = variantDraft.sku.trim();
+    const stockValue = parseInt(variantDraft.stock, 10);
+
+    if (!trimmedSku || Number.isNaN(stockValue)) {
+      setFormError('Variant SKU and a valid stock quantity are required.');
+      return;
+    }
+
+    setFormError(null);
+
+    const newVariant: Variant = {
+      color: variantDraft.color || undefined,
+      size: variantDraft.size || undefined,
+      sku: trimmedSku,
+      stock: stockValue,
+    };
+
+    if (editingProduct) {
+      setEditingProduct({
+        ...editingProduct,
+        variants: [...(editingProduct.variants || []), newVariant],
+      });
+    } else {
+      setNewProduct((prev) => ({
+        ...prev,
+        variants: [...(prev.variants || []), newVariant],
+      }));
+    }
+
+    setVariantDraft({
+      color: '',
+      size: '',
+      sku: '',
+      stock: '',
+    });
+  };
+
+  const handleRemoveVariant = (index: number) => {
+    if (editingProduct) {
+      setEditingProduct({
+        ...editingProduct,
+        variants: (editingProduct.variants || []).filter((_, i) => i !== index),
+      });
+    } else {
+      setNewProduct((prev) => ({
+        ...prev,
+        variants: (prev.variants || []).filter((_, i) => i !== index),
+      }));
+    }
   };
 
   return (
@@ -215,9 +576,13 @@ const ProductManagement: React.FC = () => {
           <p className="text-gray-600 dark:text-gray-400 mt-1 transition-colors duration-300">Manage your product catalog</p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" className="border-gray-300 dark:border-gray-700">
+          <Button
+            variant="outline"
+            className="border-gray-300 dark:border-gray-700"
+            onClick={handleExportProducts}
+          >
             <Download className="w-4 h-4 mr-2" />
-            Export
+            Export CSV
           </Button>
           <Button 
             className="bg-gradient-to-r from-red-500 to-orange-500 hover:from-red-600 hover:to-orange-600"
@@ -406,6 +771,13 @@ const ProductManagement: React.FC = () => {
           </div>
         )}
 
+        {/* Error / Loading states */}
+        {error && (
+          <div className="mb-4 text-sm text-red-600 dark:text-red-400">
+            {error}
+          </div>
+        )}
+
         {/* Products Grid / List */}
         {viewMode === 'grid' ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -540,6 +912,7 @@ const ProductManagement: React.FC = () => {
                     variant="ghost"
                     size="sm"
                     className="flex-1 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"
+                    onClick={() => handleViewProduct(product)}
                   >
                     <Eye className="w-4 h-4 mr-2" />
                     View
@@ -556,6 +929,7 @@ const ProductManagement: React.FC = () => {
                     variant="ghost"
                     size="sm"
                     className="text-red-500 dark:text-red-400 hover:text-red-600 dark:hover:text-red-300 transition-colors"
+                    onClick={() => handleDeleteProduct(product)}
                   >
                     <Trash2 className="w-4 h-4" />
                   </Button>
@@ -711,6 +1085,7 @@ const ProductManagement: React.FC = () => {
                             variant="ghost"
                             size="icon"
                             className="h-7 w-7 text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white"
+                            onClick={() => handleViewProduct(product)}
                           >
                             <Eye className="w-3 h-3" />
                           </Button>
@@ -726,6 +1101,7 @@ const ProductManagement: React.FC = () => {
                             variant="ghost"
                             size="icon"
                             className="h-7 w-7 text-red-500 hover:text-red-600 dark:text-red-400 dark:hover:text-red-300"
+                            onClick={() => handleDeleteProduct(product)}
                           >
                             <Trash2 className="w-3 h-3" />
                           </Button>
@@ -756,6 +1132,7 @@ const ProductManagement: React.FC = () => {
         if (!open) {
           setShowAddProduct(false);
           setEditingProduct(null);
+          setFormError(null);
         }
       }}>
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto overflow-x-hidden scroll-smooth bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:dark:bg-gray-700 hover:[&::-webkit-scrollbar-thumb]:bg-gray-400 dark:hover:[&::-webkit-scrollbar-thumb]:bg-gray-600">
@@ -763,8 +1140,16 @@ const ProductManagement: React.FC = () => {
             <DialogTitle className="text-2xl font-bold text-gray-900 dark:text-white">
               {editingProduct ? 'Edit Product' : 'Add New Product'}
             </DialogTitle>
+            <DialogDescription className="text-sm text-gray-600 dark:text-gray-400">
+              Manage all product details, pricing, inventory, images, variants and SEO in one place.
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-6 mt-4">
+            {formError && (
+              <div className="text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-500/40 rounded-lg px-3 py-2">
+                {formError}
+              </div>
+            )}
             {/* Basic Information */}
             <div className="space-y-4">
               <h3 className="font-semibold text-gray-900 dark:text-white">Basic Information</h3>
@@ -851,7 +1236,7 @@ const ProductManagement: React.FC = () => {
                 <Package className="w-5 h-5 text-red-400" />
                 Inventory
               </h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Quantity *</label>
                   <input
@@ -872,6 +1257,30 @@ const ProductManagement: React.FC = () => {
                     placeholder="SKU-001"
                   />
                 </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Weight (kg)
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={editingProduct?.weight ?? newProduct.weight}
+                    onChange={(e) =>
+                      editingProduct
+                        ? setEditingProduct({
+                            ...editingProduct,
+                            weight: e.target.value === '' ? undefined : parseFloat(e.target.value),
+                          })
+                        : setNewProduct({
+                            ...newProduct,
+                            weight: e.target.value,
+                          })
+                    }
+                    className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg px-4 py-2 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+                    placeholder="e.g. 1.25"
+                  />
+                </div>
               </div>
             </div>
 
@@ -883,10 +1292,44 @@ const ProductManagement: React.FC = () => {
               </h3>
               <div className="border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-lg p-8 text-center">
                 <Upload className="w-12 h-12 mx-auto text-gray-400 mb-4" />
-                <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">Upload product images</p>
-                <Button variant="outline" className="border-gray-300 dark:border-gray-700">
+                <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">
+                  Upload product images
+                </p>
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  className="hidden"
+                  multiple
+                  accept="image/*"
+                  onChange={handleImageUpload}
+                />
+                <Button
+                  variant="outline"
+                  className="border-gray-300 dark:border-gray-700"
+                  type="button"
+                  onClick={handleSelectImagesClick}
+                >
                   Select Images
                 </Button>
+                {(editingProduct?.images && editingProduct.images.length > 0) ||
+                newProduct.images.length > 0 ? (
+                  <div className="mt-4 flex flex-wrap gap-3 justify-center">
+                    {(editingProduct?.images || newProduct.images).map(
+                      (url, idx) => (
+                        <div
+                          key={idx}
+                          className="w-16 h-16 rounded-md overflow-hidden border border-gray-200 dark:border-gray-700 bg-gray-100 dark:bg-gray-800"
+                        >
+                          <img
+                            src={resolveImageUrl(url)}
+                            alt={`Product ${idx + 1}`}
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                      )
+                    )}
+                  </div>
+                ) : null}
               </div>
             </div>
 
@@ -896,10 +1339,102 @@ const ProductManagement: React.FC = () => {
                 <Tag className="w-5 h-5 text-red-400" />
                 Variants (Colors, Sizes, etc.)
               </h3>
-              <Button variant="outline" className="border-gray-300 dark:border-gray-700">
-                <Plus className="w-4 h-4 mr-2" />
-                Add Variant
-              </Button>
+
+              {/* Existing variants list */}
+              {((editingProduct?.variants && editingProduct.variants.length > 0) ||
+                (newProduct as any).variants?.length > 0) && (
+                <div className="space-y-2 rounded-lg border border-gray-200 bg-gray-50 p-3 text-xs dark:border-gray-700 dark:bg-gray-800">
+                  <div className="grid grid-cols-5 gap-2 font-semibold text-gray-700 dark:text-gray-300">
+                    <span>Color</span>
+                    <span>Size</span>
+                    <span>SKU</span>
+                    <span className="text-right">Stock</span>
+                    <span className="text-right">Actions</span>
+                  </div>
+                  <div className="space-y-2">
+                    {(editingProduct?.variants || (newProduct as any).variants || []).map(
+                      (variant: Variant, idx: number) => (
+                        <div
+                          key={idx}
+                          className="grid grid-cols-5 gap-2 items-center text-gray-800 dark:text-gray-100"
+                        >
+                          <span>{variant.color || '-'}</span>
+                          <span>{variant.size || '-'}</span>
+                          <span className="font-mono">{variant.sku}</span>
+                          <span className="text-right">{variant.stock}</span>
+                          <div className="flex justify-end">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-red-500 hover:text-red-600 dark:text-red-400"
+                              onClick={() => handleRemoveVariant(idx)}
+                            >
+                              <X className="w-3 h-3" />
+                            </Button>
+                          </div>
+                        </div>
+                      )
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Add variant form */}
+              <div className="space-y-2 rounded-lg border border-dashed border-gray-300 p-3 text-xs dark:border-gray-700">
+                <p className="text-gray-600 dark:text-gray-400">
+                  Add variants for different colors / sizes. Each variant must have its own SKU and stock.
+                </p>
+                <div className="grid grid-cols-1 gap-2 md:grid-cols-5">
+                  <input
+                    type="text"
+                    placeholder="Color (optional)"
+                    value={variantDraft.color}
+                    onChange={(e) =>
+                      setVariantDraft((prev) => ({ ...prev, color: e.target.value }))
+                    }
+                    className="rounded-md border border-gray-300 bg-gray-50 px-2 py-1 text-xs text-gray-900 focus:border-red-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-white"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Size (optional)"
+                    value={variantDraft.size}
+                    onChange={(e) =>
+                      setVariantDraft((prev) => ({ ...prev, size: e.target.value }))
+                    }
+                    className="rounded-md border border-gray-300 bg-gray-50 px-2 py-1 text-xs text-gray-900 focus:border-red-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-white"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Variant SKU *"
+                    value={variantDraft.sku}
+                    onChange={(e) =>
+                      setVariantDraft((prev) => ({ ...prev, sku: e.target.value }))
+                    }
+                    className="rounded-md border border-gray-300 bg-gray-50 px-2 py-1 text-xs text-gray-900 focus:border-red-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-white"
+                  />
+                  <input
+                    type="number"
+                    placeholder="Stock *"
+                    value={variantDraft.stock}
+                    onChange={(e) =>
+                      setVariantDraft((prev) => ({ ...prev, stock: e.target.value }))
+                    }
+                    className="rounded-md border border-gray-300 bg-gray-50 px-2 py-1 text-xs text-gray-900 focus:border-red-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-white"
+                  />
+                  <div className="flex items-stretch md:justify-end">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full border-gray-300 text-xs dark:border-gray-700"
+                      onClick={handleAddVariant}
+                    >
+                      <Plus className="w-3 h-3 mr-1" />
+                      Add Variant
+                    </Button>
+                  </div>
+                </div>
+              </div>
             </div>
 
             {/* SEO */}
@@ -913,8 +1448,12 @@ const ProductManagement: React.FC = () => {
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">SEO Title</label>
                   <input
                     type="text"
-                    value={newProduct.seoTitle}
-                    onChange={(e) => setNewProduct({...newProduct, seoTitle: e.target.value})}
+                    value={editingProduct?.seoTitle ?? newProduct.seoTitle}
+                    onChange={(e) =>
+                      editingProduct
+                        ? setEditingProduct({ ...editingProduct, seoTitle: e.target.value })
+                        : setNewProduct({ ...newProduct, seoTitle: e.target.value })
+                    }
                     className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg px-4 py-2 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
                     placeholder="SEO optimized title"
                   />
@@ -922,8 +1461,12 @@ const ProductManagement: React.FC = () => {
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">SEO Description</label>
                   <textarea
-                    value={newProduct.seoDescription}
-                    onChange={(e) => setNewProduct({...newProduct, seoDescription: e.target.value})}
+                    value={editingProduct?.seoDescription ?? newProduct.seoDescription}
+                    onChange={(e) =>
+                      editingProduct
+                        ? setEditingProduct({ ...editingProduct, seoDescription: e.target.value })
+                        : setNewProduct({ ...newProduct, seoDescription: e.target.value })
+                    }
                     rows={3}
                     className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg px-4 py-2 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
                     placeholder="SEO meta description"
@@ -933,8 +1476,12 @@ const ProductManagement: React.FC = () => {
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">SEO Keywords</label>
                   <input
                     type="text"
-                    value={newProduct.seoKeywords}
-                    onChange={(e) => setNewProduct({...newProduct, seoKeywords: e.target.value})}
+                    value={editingProduct?.seoKeywords ?? newProduct.seoKeywords}
+                    onChange={(e) =>
+                      editingProduct
+                        ? setEditingProduct({ ...editingProduct, seoKeywords: e.target.value })
+                        : setNewProduct({ ...newProduct, seoKeywords: e.target.value })
+                    }
                     className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg px-4 py-2 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
                     placeholder="keyword1, keyword2, keyword3"
                   />
@@ -958,6 +1505,230 @@ const ProductManagement: React.FC = () => {
                 {editingProduct ? 'Update Product' : 'Create Product'}
               </Button>
             </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* View Product Modal */}
+      <Dialog
+        open={viewProduct !== null}
+        onOpenChange={(open) => {
+          if (!open) setViewProduct(null);
+        }}
+      >
+        <DialogContent className="max-w-3xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold text-gray-900 dark:text-white flex items-center justify-between gap-2">
+              <span>{viewProduct?.name || 'Product details'}</span>
+              {viewProduct?.sku && (
+                <span className="text-xs font-mono text-gray-500 dark:text-gray-400">
+                  SKU: {viewProduct.sku}
+                </span>
+              )}
+            </DialogTitle>
+            <DialogDescription className="text-sm text-gray-600 dark:text-gray-400">
+              Quick overview of the product as customers will see it, including images, stock and variants.
+            </DialogDescription>
+          </DialogHeader>
+
+          {viewProduct && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-2">
+              {/* Image */}
+              <div className="space-y-3">
+                <div className="aspect-square rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700 bg-gray-100 dark:bg-gray-800">
+                  {viewProduct.images && viewProduct.images.length > 0 ? (
+                    <img
+                      src={viewProduct.images[0]}
+                      alt={viewProduct.name}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center">
+                      <ImageIcon className="w-12 h-12 text-gray-400 dark:text-gray-500" />
+                    </div>
+                  )}
+                </div>
+                {viewProduct.images && viewProduct.images.length > 1 && (
+                  <div className="flex flex-wrap gap-2">
+                    {viewProduct.images.slice(1, 5).map((img, idx) => (
+                      <div
+                        key={idx}
+                        className="w-16 h-16 rounded-md overflow-hidden border border-gray-200 dark:border-gray-700 bg-gray-100 dark:bg-gray-800"
+                      >
+                        <img src={img} alt={`Preview ${idx + 2}`} className="w-full h-full object-cover" />
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Details */}
+              <div className="space-y-3 text-sm">
+                <div className="flex flex-wrap gap-3">
+                  <div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Category</p>
+                    <p className="font-medium text-gray-900 dark:text-white">
+                      {viewProduct.category || 'Uncategorized'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Price</p>
+                    <p className="font-semibold text-gray-900 dark:text-white">
+                      ${viewProduct.price.toFixed(2)}
+                    </p>
+                    {viewProduct.weight != null && viewProduct.weight > 0 && (
+                      <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                        Est. shipping: ${(viewProduct.weight * 5).toFixed(2)}
+                      </p>
+                    )}
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Stock</p>
+                    <p
+                      className={`font-semibold ${
+                        viewProduct.stock === 0
+                          ? 'text-red-500'
+                          : viewProduct.stock < 20
+                          ? 'text-yellow-500'
+                          : 'text-green-500'
+                      }`}
+                    >
+                      {viewProduct.stock} units
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Weight</p>
+                    <p className="font-medium text-gray-900 dark:text-white">
+                      {viewProduct.weight != null ? `${viewProduct.weight} kg` : 'Not set'}
+                    </p>
+                  </div>
+                  {viewProduct.moq !== undefined && (
+                    <div>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">MOQ</p>
+                      <p className="font-medium text-gray-900 dark:text-white">
+                        {viewProduct.moq} units
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                {viewProduct.description && (
+                  <div className="pt-2 border-t border-gray-200 dark:border-gray-700">
+                    <p className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                      Description
+                    </p>
+                    <p className="text-gray-700 dark:text-gray-300 whitespace-pre-line max-h-40 overflow-y-auto">
+                      {viewProduct.description}
+                    </p>
+                  </div>
+                )}
+
+                {(viewProduct.variants && viewProduct.variants.length > 0) && (
+                  <div className="pt-2 border-t border-gray-200 dark:border-gray-700">
+                    <p className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                      Variants
+                    </p>
+                    <div className="max-h-32 overflow-y-auto border border-gray-200 dark:border-gray-700 rounded-md">
+                      <table className="w-full text-xs">
+                        <thead className="bg-gray-50 dark:bg-gray-800">
+                          <tr>
+                            <th className="px-2 py-1 text-left text-gray-600 dark:text-gray-300">Color</th>
+                            <th className="px-2 py-1 text-left text-gray-600 dark:text-gray-300">Size</th>
+                            <th className="px-2 py-1 text-left text-gray-600 dark:text-gray-300">SKU</th>
+                            <th className="px-2 py-1 text-right text-gray-600 dark:text-gray-300">Stock</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {viewProduct.variants.map((v, idx) => (
+                            <tr key={idx} className="border-t border-gray-100 dark:border-gray-800">
+                              <td className="px-2 py-1 text-gray-800 dark:text-gray-100">{v.color || '-'}</td>
+                              <td className="px-2 py-1 text-gray-800 dark:text-gray-100">{v.size || '-'}</td>
+                              <td className="px-2 py-1 text-gray-600 dark:text-gray-300 font-mono">{v.sku}</td>
+                              <td className="px-2 py-1 text-right text-gray-800 dark:text-gray-100">
+                                {v.stock}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {(viewProduct.seoTitle || viewProduct.seoDescription || viewProduct.seoKeywords) && (
+                  <div className="pt-2 border-t border-gray-200 dark:border-gray-700 space-y-1">
+                    <p className="text-xs font-semibold text-gray-700 dark:text-gray-300">
+                      SEO Metadata
+                    </p>
+                    {viewProduct.seoTitle && (
+                      <p className="text-xs text-gray-600 dark:text-gray-400">
+                        <span className="font-semibold">Title:</span> {viewProduct.seoTitle}
+                      </p>
+                    )}
+                    {viewProduct.seoDescription && (
+                      <p className="text-xs text-gray-600 dark:text-gray-400 line-clamp-3">
+                        <span className="font-semibold">Description:</span> {viewProduct.seoDescription}
+                      </p>
+                    )}
+                    {viewProduct.seoKeywords && (
+                      <p className="text-xs text-gray-600 dark:text-gray-400">
+                        <span className="font-semibold">Keywords:</span> {viewProduct.seoKeywords}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete confirmation dialog */}
+      <Dialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null);
+        }}
+      >
+        <DialogContent className="max-w-md bg-white dark:bg-gray-900 border border-red-200 dark:border-red-700">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-bold text-red-600 dark:text-red-400">
+              Delete Product
+            </DialogTitle>
+            <DialogDescription className="text-sm text-gray-600 dark:text-gray-400">
+              This will permanently remove the product from your catalog. This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 mt-2 text-sm">
+            <p className="text-gray-700 dark:text-gray-300">
+              Are you sure you want to delete{' '}
+              <span className="font-semibold">
+                {deleteTarget?.name || 'this product'}
+              </span>
+              ? This action cannot be undone.
+            </p>
+            {deleteTarget?.sku && (
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                SKU: <span className="font-mono">{deleteTarget.sku}</span>
+              </p>
+            )}
+          </div>
+          <div className="flex justify-end gap-2 pt-4">
+            <Button
+              type="button"
+              variant="outline"
+              className="border-gray-300 dark:border-gray-700"
+              onClick={() => setDeleteTarget(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              className="bg-red-600 hover:bg-red-700 text-white"
+              onClick={confirmDeleteProduct}
+            >
+              Delete
+            </Button>
           </div>
         </DialogContent>
       </Dialog>
