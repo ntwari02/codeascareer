@@ -7,6 +7,7 @@ import compression from 'compression';
 import cookieParser from 'cookie-parser';
 import mongoose from 'mongoose';
 import authRoutes from './src/routes/authRoutes';
+import sellerRoutes from './src/routes/sellerRoutes';
 
 dotenv.config();
 
@@ -34,6 +35,9 @@ app.get('/api/health', (_req: Request, res: Response) => {
 
 // Auth routes
 app.use('/api/auth', authRoutes);
+
+// Seller routes
+app.use('/api/seller', sellerRoutes);
 
 // 404 handler
 app.use((req: Request, res: Response) => {

@@ -63,8 +63,16 @@ export function Login() {
         return;
       }
 
-      // Login successful, redirect to home
-      navigate('/');
+      // Login successful: redirect based on role
+      const { user } = useAuthStore.getState();
+
+      if (user?.role === 'seller') {
+        navigate('/seller');
+      } else if (user?.role === 'admin') {
+        navigate('/admin');
+      } else {
+        navigate('/');
+      }
     } catch (err: any) {
       setError(err.message || 'An unexpected error occurred. Please try again.');
     } finally {

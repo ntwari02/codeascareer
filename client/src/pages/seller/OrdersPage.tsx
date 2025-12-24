@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { ShoppingCart, Search, Eye, Package, Truck, CheckCircle, XCircle, Filter, Printer, Upload, X, MapPin, CreditCard, User, Calendar, Clock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -43,6 +44,7 @@ interface Order {
 }
 
 const OrdersPage: React.FC = () => {
+  const navigate = useNavigate();
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
@@ -56,133 +58,95 @@ const OrdersPage: React.FC = () => {
   const [showBulkShippingModal, setShowBulkShippingModal] = useState(false);
   const [bulkCarrier, setBulkCarrier] = useState<'ups' | 'fedex' | 'dhl'>('ups');
 
-  const [orders] = useState<Order[]>([
-    {
-      id: '1',
-      orderNumber: 'ORD-2847',
-      customer: 'Alice Johnson',
-      customerEmail: 'alice@example.com',
-      customerPhone: '+1 234-567-8900',
-      items: [
-        { id: '1', name: 'Wireless Headphones', quantity: 2, price: 149.99, variant: 'Black' },
-        { id: '2', name: 'USB-C Cable', quantity: 1, price: 19.99 },
-      ],
-      subtotal: 319.97,
-      shipping: 5.00,
-      tax: 25.60,
-      total: 350.57,
-      status: 'processing',
-      date: '2024-01-15',
-      shippingAddress: {
-        name: 'Alice Johnson',
-        street: '123 Main Street',
-        city: 'New York',
-        state: 'NY',
-        zip: '10001',
-        country: 'USA',
-      },
-      paymentMethod: 'Credit Card •••• 4242',
-      timeline: [
-        { status: 'Order Placed', date: '2024-01-15', time: '10:30 AM' },
-        { status: 'Processing', date: '2024-01-15', time: '11:00 AM' },
-      ],
-    },
-    {
-      id: '2',
-      orderNumber: 'ORD-2846',
-      customer: 'Bob Smith',
-      customerEmail: 'bob@example.com',
-      customerPhone: '+1 234-567-8901',
-      items: [
-        { id: '3', name: 'Smart Watch', quantity: 1, price: 299.99, variant: 'Silver, 42mm' },
-      ],
-      subtotal: 299.99,
-      shipping: 10.00,
-      tax: 24.00,
-      total: 333.99,
-      status: 'shipped',
-      date: '2024-01-14',
-      shippingAddress: {
-        name: 'Bob Smith',
-        street: '456 Oak Avenue',
-        city: 'Los Angeles',
-        state: 'CA',
-        zip: '90001',
-        country: 'USA',
-      },
-      paymentMethod: 'PayPal',
-      trackingNumber: 'TRACK123456789',
-      timeline: [
-        { status: 'Order Placed', date: '2024-01-14', time: '09:15 AM' },
-        { status: 'Processing', date: '2024-01-14', time: '09:45 AM' },
-        { status: 'Packed', date: '2024-01-14', time: '02:30 PM' },
-        { status: 'Shipped', date: '2024-01-14', time: '04:00 PM' },
-      ],
-    },
-    {
-      id: '3',
-      orderNumber: 'ORD-2845',
-      customer: 'Carol White',
-      customerEmail: 'carol@example.com',
-      customerPhone: '+1 234-567-8902',
-      items: [
-        { id: '4', name: 'Laptop Stand', quantity: 1, price: 79.99 },
-        { id: '5', name: 'USB-C Cable', quantity: 2, price: 19.99 },
-        { id: '6', name: 'Wireless Headphones', quantity: 1, price: 149.99, variant: 'White' },
-      ],
-      subtotal: 269.96,
-      shipping: 8.00,
-      tax: 22.20,
-      total: 300.16,
-      status: 'delivered',
-      date: '2024-01-13',
-      shippingAddress: {
-        name: 'Carol White',
-        street: '789 Pine Road',
-        city: 'Chicago',
-        state: 'IL',
-        zip: '60601',
-        country: 'USA',
-      },
-      paymentMethod: 'Credit Card •••• 5678',
-      trackingNumber: 'TRACK987654321',
-      timeline: [
-        { status: 'Order Placed', date: '2024-01-13', time: '08:00 AM' },
-        { status: 'Processing', date: '2024-01-13', time: '08:30 AM' },
-        { status: 'Packed', date: '2024-01-13', time: '12:00 PM' },
-        { status: 'Shipped', date: '2024-01-13', time: '03:00 PM' },
-        { status: 'Delivered', date: '2024-01-15', time: '10:00 AM' },
-      ],
-    },
-    {
-      id: '4',
-      orderNumber: 'ORD-2844',
-      customer: 'David Brown',
-      customerEmail: 'david@example.com',
-      customerPhone: '+1 234-567-8903',
-      items: [
-        { id: '7', name: 'USB-C Cable', quantity: 1, price: 19.99 },
-      ],
-      subtotal: 19.99,
-      shipping: 3.00,
-      tax: 1.84,
-      total: 24.83,
-      status: 'pending',
-      date: '2024-01-12',
-      shippingAddress: {
-        name: 'David Brown',
-        street: '321 Elm Street',
-        city: 'Houston',
-        state: 'TX',
-        zip: '77001',
-        country: 'USA',
-      },
-      paymentMethod: 'Credit Card •••• 9012',
-      timeline: [
-        { status: 'Order Placed', date: '2024-01-12', time: '03:45 PM' },
-      ],
-    },
-  ]);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchOrders = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      const token = localStorage.getItem('auth_token');
+
+      const res = await fetch('http://localhost:5000/api/seller/orders', {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        credentials: 'include',
+      });
+
+      if (res.status === 401 || res.status === 403) {
+        // Not authenticated as seller; send to login/home
+        navigate(res.status === 401 ? '/login' : '/');
+        return;
+      }
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.message || 'Failed to load orders');
+      }
+
+      const data = await res.json();
+
+      const mapped: Order[] = (data.orders || []).map((o: any) => ({
+        id: o._id,
+        orderNumber: o.orderNumber,
+        customer: o.customer,
+        customerEmail: o.customerEmail,
+        customerPhone: o.customerPhone,
+        items: (o.items || []).map((item: any) => ({
+          id: item._id || item.productId || '',
+          name: item.name,
+          quantity: item.quantity,
+          price: item.price,
+          variant: item.variant,
+        })),
+        subtotal: o.subtotal,
+        shipping: o.shipping,
+        tax: o.tax,
+        total: o.total,
+        status: o.status,
+        date: o.date ? new Date(o.date).toISOString().slice(0, 10) : '',
+        shippingAddress: {
+          name: o.shippingAddress?.name || '',
+          street: o.shippingAddress?.street || '',
+          city: o.shippingAddress?.city || '',
+          state: o.shippingAddress?.state || '',
+          zip: o.shippingAddress?.zip || '',
+          country: o.shippingAddress?.country || '',
+        },
+        paymentMethod: o.paymentMethod,
+        trackingNumber: o.trackingNumber,
+        timeline: (o.timeline || []).map((t: any) => ({
+          status: t.status,
+          date: t.date ? new Date(t.date).toISOString().slice(0, 10) : '',
+          time: t.time,
+        })),
+      }));
+
+      setOrders(mapped);
+    } catch (err: any) {
+      console.error('Failed to fetch seller orders:', err);
+      setError(err.message || 'Failed to load orders');
+    } finally {
+      setLoading(false);
+    }
+  }, [navigate]);
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        await fetchOrders();
+      } catch (err: any) {
+        // error is already handled inside fetchOrders
+      }
+    };
+
+    load();
+  }, [fetchOrders]);
 
   const filteredOrders = orders.filter(order => {
     const matchesSearch = 
@@ -238,13 +202,25 @@ const OrdersPage: React.FC = () => {
   };
 
   const handleViewOrder = (order: Order) => {
-    setSelectedOrder(order);
-    setShowOrderDetails(true);
+    navigate(`/seller/orders/${order.id}`);
   };
 
-  const handleMarkAsPacked = (orderId: string) => {
-    // Implementation would update order status
-    console.log('Mark as packed:', orderId);
+  const handleMarkAsPacked = async (orderId: string) => {
+    try {
+      const token = localStorage.getItem('auth_token');
+      await fetch(`http://localhost:5000/api/seller/orders/${orderId}/status`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        credentials: 'include',
+        body: JSON.stringify({ status: 'packed' }),
+      });
+      await fetchOrders();
+    } catch (err) {
+      console.error('Failed to mark as packed', err);
+    }
   };
 
   const handleMarkAsShipped = (orderId: string) => {
@@ -252,22 +228,48 @@ const OrdersPage: React.FC = () => {
     setSelectedOrder(orders.find(o => o.id === orderId) || null);
   };
 
-  const handleSubmitTracking = () => {
+  const handleSubmitTracking = async () => {
     if (selectedOrder && trackingNumber) {
-      // Implementation would update order with tracking number
-      console.log('Tracking submitted:', trackingNumber);
-      setShowTrackingModal(false);
-      setTrackingNumber('');
+      try {
+        const token = localStorage.getItem('auth_token');
+        await fetch(`http://localhost:5000/api/seller/orders/${selectedOrder.id}/tracking`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          credentials: 'include',
+          body: JSON.stringify({ trackingNumber }),
+        });
+        setShowTrackingModal(false);
+        setTrackingNumber('');
+        await fetchOrders();
+      } catch (err) {
+        console.error('Failed to submit tracking', err);
+      }
     }
   };
 
-  const handleCancelOrder = () => {
+  const handleCancelOrder = async () => {
     if (selectedOrder && cancelReason) {
-      // Implementation would cancel order
-      console.log('Cancel order:', cancelReason);
-      setShowCancelModal(false);
-      setCancelReason('');
-      setShowOrderDetails(false);
+      try {
+        const token = localStorage.getItem('auth_token');
+        await fetch(`http://localhost:5000/api/seller/orders/${selectedOrder.id}/status`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          credentials: 'include',
+          body: JSON.stringify({ status: 'cancelled', reason: cancelReason }),
+        });
+        setShowCancelModal(false);
+        setCancelReason('');
+        setShowOrderDetails(false);
+        await fetchOrders();
+      } catch (err) {
+        console.error('Failed to cancel order', err);
+      }
     }
   };
 
@@ -291,11 +293,30 @@ const OrdersPage: React.FC = () => {
     window.print();
   };
 
-  const handleBatchStatusUpdate = (status: Order['status']) => {
+  const handleBatchStatusUpdate = async (status: Order['status']) => {
     if (!selectedOrderIds.length) return;
-    console.log('Bulk status update to', status, 'for orders:', selectedOrderIds);
-    // In a real app, this would call your backend and then refresh local state.
-    setBulkStatus('');
+    try {
+      const token = localStorage.getItem('auth_token');
+
+      await Promise.all(
+        selectedOrderIds.map((orderId) =>
+          fetch(`http://localhost:5000/api/seller/orders/${orderId}/status`, {
+            method: 'PATCH',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+            credentials: 'include',
+            body: JSON.stringify({ status }),
+          })
+        )
+      );
+
+      setBulkStatus('');
+      await fetchOrders();
+    } catch (err) {
+      console.error('Failed to apply bulk status update', err);
+    }
   };
 
   const handleBatchGenerateLabels = () => {
@@ -324,6 +345,17 @@ const OrdersPage: React.FC = () => {
             Orders Management
           </h1>
           <p className="text-gray-600 dark:text-gray-400 mt-1 transition-colors duration-300">View and manage all your orders</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={fetchOrders}
+            disabled={loading}
+            className="border-gray-300 dark:border-gray-700"
+          >
+            {loading ? 'Refreshing...' : 'Refresh'}
+          </Button>
         </div>
       </div>
 
@@ -445,8 +477,19 @@ const OrdersPage: React.FC = () => {
           </div>
         )}
 
-        {/* Orders List */}
+      {/* Orders List */}
         <div className="space-y-4">
+        {loading && (
+          <p className="text-sm text-gray-600 dark:text-gray-400">Loading orders...</p>
+        )}
+        {error && !loading && (
+          <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+        )}
+        {!loading && !error && filteredOrders.length === 0 && (
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            No orders found for the selected filters.
+          </p>
+        )}
           {filteredOrders.map((order, index) => {
             const StatusIcon = getStatusIcon(order.status);
             const isSelected = selectedOrderIds.includes(order.id);

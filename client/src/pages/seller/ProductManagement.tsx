@@ -1,8 +1,9 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, ChangeEvent } from 'react';
 import { motion } from 'framer-motion';
-import { Box, Plus, Edit, Trash2, Eye, Search, Filter, Upload, Download, X, Check, Image as ImageIcon, Tag, DollarSign, Package, Globe, LayoutGrid, Rows } from 'lucide-react';
+import { Box, Plus, Edit, Trash2, Eye, Search, Filter, Upload, Download, X, Check, Image as ImageIcon, Tag, DollarSign, Package, Globe, LayoutGrid, Rows, FileSpreadsheet, FileText, AlertCircle, CheckCircle2, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import * as XLSX from 'xlsx';
 
 interface Product {
   id: string;
@@ -35,8 +36,15 @@ const ProductManagement: React.FC = () => {
   const [showAddProduct, setShowAddProduct] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [showBulkActions, setShowBulkActions] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importProgress, setImportProgress] = useState<{ processed: number; total: number; errors: string[] } | null>(null);
+  const [importResults, setImportResults] = useState<{ success: number; failed: number; errors: string[] } | null>(null);
+  const [isImporting, setIsImporting] = useState(false);
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const exportMenuRef = useRef<HTMLDivElement>(null);
 
-  const [products] = useState<Product[]>([
+  const [products, setProducts] = useState<Product[]>([
     {
       id: '1',
       name: 'Wireless Headphones',
@@ -203,6 +211,336 @@ const ProductManagement: React.FC = () => {
     });
   };
 
+  // Close export menu when clicking outside
+  React.useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(event.target as Node)) {
+        setShowExportMenu(false);
+      }
+    };
+    if (showExportMenu) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showExportMenu]);
+
+  // CSV Export
+  const handleExportCsv = () => {
+    setShowExportMenu(false);
+    const headers = ['ID', 'Name', 'SKU', 'Category', 'Price', 'Discount (%)', 'Stock', 'MOQ', 'Status', 'Description'];
+    const rows = products.map(p => [
+      p.id,
+      p.name,
+      p.sku || '',
+      p.category,
+      p.price,
+      p.discount || 0,
+      p.stock,
+      p.moq || '',
+      p.status,
+      p.description || '',
+    ]);
+    
+    const csvContent = [headers.join(','), ...rows.map(row => 
+      row.map(cell => {
+        const str = String(cell || '');
+        return str.includes(',') || str.includes('"') || str.includes('\n') 
+          ? `"${str.replace(/"/g, '""')}"` 
+          : str;
+      }).join(',')
+    )].join('\n');
+    
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `products-export-${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // Excel Export
+  const handleExportExcel = () => {
+    setShowExportMenu(false);
+    const worksheetData = [
+      ['ID', 'Name', 'SKU', 'Category', 'Price', 'Discount (%)', 'Stock', 'MOQ', 'Status', 'Description'],
+      ...products.map(p => [
+        p.id,
+        p.name,
+        p.sku || '',
+        p.category,
+        p.price,
+        p.discount || 0,
+        p.stock,
+        p.moq || '',
+        p.status,
+        p.description || '',
+      ]),
+    ];
+    
+    const worksheet = XLSX.utils.aoa_to_sheet(worksheetData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Products');
+    XLSX.writeFile(workbook, `products-export-${new Date().toISOString().split('T')[0]}.xlsx`);
+  };
+
+  // Download Template
+  const handleDownloadTemplate = (format: 'csv' | 'excel') => {
+    const headers = ['Name', 'SKU', 'Category', 'Price', 'Discount (%)', 'Stock', 'MOQ', 'Status', 'Description'];
+    const exampleRow = ['Example Product', 'SKU-001', 'Electronics', '99.99', '10', '100', '5', 'active', 'Product description'];
+    
+    if (format === 'csv') {
+      const csvContent = [headers.join(','), exampleRow.map(cell => 
+        String(cell).includes(',') || String(cell).includes('"') 
+          ? `"${String(cell).replace(/"/g, '""')}"` 
+          : String(cell)
+      ).join(',')].join('\n');
+      
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      link.setAttribute('href', url);
+      link.setAttribute('download', 'product-import-template.csv');
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } else {
+      const worksheetData = [headers, exampleRow];
+      const worksheet = XLSX.utils.aoa_to_sheet(worksheetData);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Products');
+      XLSX.writeFile(workbook, 'product-import-template.xlsx');
+    }
+  };
+
+  // Parse CSV
+  const parseCsv = (text: string): Partial<Product>[] => {
+    const lines = text.split(/\r?\n/).filter(Boolean);
+    if (lines.length < 2) return [];
+    
+    const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''));
+    const dataLines = lines.slice(1);
+    
+    return dataLines.map((line, index) => {
+      const cells = line.split(',').map(c => c.trim().replace(/^"|"$/g, '').replace(/""/g, '"'));
+      
+      const product: Partial<Product> = {
+        id: crypto.randomUUID(),
+        name: cells[headers.indexOf('Name')] || '',
+        sku: cells[headers.indexOf('SKU')] || '',
+        category: cells[headers.indexOf('Category')] || '',
+        price: parseFloat(cells[headers.indexOf('Price')] || '0') || 0,
+        discount: parseFloat(cells[headers.indexOf('Discount (%)')] || '0') || undefined,
+        stock: parseInt(cells[headers.indexOf('Stock')] || '0', 10) || 0,
+        moq: parseInt(cells[headers.indexOf('MOQ')] || '0', 10) || undefined,
+        status: (cells[headers.indexOf('Status')] || 'draft') as Product['status'],
+        description: cells[headers.indexOf('Description')] || '',
+        sales: 0,
+        views: 0,
+        rating: 0,
+      };
+      
+      return product;
+    }).filter(p => p.name && p.category);
+  };
+
+  // Parse Excel
+  const parseExcel = (file: File): Promise<Partial<Product>[]> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const data = new Uint8Array(e.target?.result as ArrayBuffer);
+          const workbook = XLSX.read(data, { type: 'array' });
+          const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+          const jsonData = XLSX.utils.sheet_to_json(firstSheet, { header: 1 }) as any[][];
+          
+          if (jsonData.length < 2) {
+            resolve([]);
+            return;
+          }
+          
+          const headers = (jsonData[0] as string[]).map(h => String(h).trim());
+          const rows = jsonData.slice(1);
+          
+          const products: Partial<Product>[] = rows.map((row: any[]) => {
+            const product: Partial<Product> = {
+              id: crypto.randomUUID(),
+              name: String(row[headers.indexOf('Name')] || '').trim(),
+              sku: String(row[headers.indexOf('SKU')] || '').trim(),
+              category: String(row[headers.indexOf('Category')] || '').trim(),
+              price: parseFloat(String(row[headers.indexOf('Price')] || '0')) || 0,
+              discount: parseFloat(String(row[headers.indexOf('Discount (%)')] || '0')) || undefined,
+              stock: parseInt(String(row[headers.indexOf('Stock')] || '0'), 10) || 0,
+              moq: parseInt(String(row[headers.indexOf('MOQ')] || '0'), 10) || undefined,
+              status: (String(row[headers.indexOf('Status')] || 'draft').trim() || 'draft') as Product['status'],
+              description: String(row[headers.indexOf('Description')] || '').trim(),
+              sales: 0,
+              views: 0,
+              rating: 0,
+            };
+            
+            return product;
+          }).filter(p => p.name && p.category);
+          
+          resolve(products);
+        } catch (error) {
+          reject(error);
+        }
+      };
+      reader.onerror = reject;
+      reader.readAsArrayBuffer(file);
+    });
+  };
+
+  // Handle File Import
+  const handleFileImport = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    
+    setIsImporting(true);
+    setImportProgress({ processed: 0, total: 0, errors: [] });
+    setImportResults(null);
+    
+    try {
+      let importedProducts: Partial<Product>[] = [];
+      const errors: string[] = [];
+      
+      if (file.name.endsWith('.csv')) {
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+          try {
+            const text = String(e.target?.result || '');
+            importedProducts = parseCsv(text);
+            
+            setImportProgress({ processed: importedProducts.length, total: importedProducts.length, errors: [] });
+            
+            // Validate and add products
+            const validProducts: Product[] = [];
+            importedProducts.forEach((p, index) => {
+              if (!p.name || !p.category) {
+                errors.push(`Row ${index + 2}: Missing required fields (Name, Category)`);
+                return;
+              }
+              
+              if (p.price <= 0) {
+                errors.push(`Row ${index + 2}: Invalid price`);
+                return;
+              }
+              
+              validProducts.push({
+                id: p.id || crypto.randomUUID(),
+                name: p.name,
+                category: p.category,
+                price: p.price || 0,
+                discount: p.discount,
+                stock: p.stock || 0,
+                moq: p.moq,
+                status: p.status || 'draft',
+                sales: 0,
+                views: 0,
+                rating: 0,
+                sku: p.sku,
+                description: p.description,
+              } as Product);
+            });
+            
+            setProducts(prev => [...prev, ...validProducts]);
+            setImportResults({
+              success: validProducts.length,
+              failed: errors.length,
+              errors: errors.slice(0, 10), // Show first 10 errors
+            });
+          } catch (error: any) {
+            setImportResults({
+              success: 0,
+              failed: importedProducts.length,
+              errors: [error.message || 'Failed to parse CSV file'],
+            });
+          } finally {
+            setIsImporting(false);
+          }
+        };
+        reader.readAsText(file);
+      } else if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
+        try {
+          importedProducts = await parseExcel(file);
+          
+          setImportProgress({ processed: importedProducts.length, total: importedProducts.length, errors: [] });
+          
+          // Validate and add products
+          const validProducts: Product[] = [];
+          importedProducts.forEach((p, index) => {
+            if (!p.name || !p.category) {
+              errors.push(`Row ${index + 2}: Missing required fields (Name, Category)`);
+              return;
+            }
+            
+            if (p.price <= 0) {
+              errors.push(`Row ${index + 2}: Invalid price`);
+              return;
+            }
+            
+            validProducts.push({
+              id: p.id || crypto.randomUUID(),
+              name: p.name,
+              category: p.category,
+              price: p.price || 0,
+              discount: p.discount,
+              stock: p.stock || 0,
+              moq: p.moq,
+              status: p.status || 'draft',
+              sales: 0,
+              views: 0,
+              rating: 0,
+              sku: p.sku,
+              description: p.description,
+            } as Product);
+          });
+          
+          setProducts(prev => [...prev, ...validProducts]);
+          setImportResults({
+            success: validProducts.length,
+            failed: errors.length,
+            errors: errors.slice(0, 10),
+          });
+        } catch (error: any) {
+          setImportResults({
+            success: 0,
+            failed: importedProducts.length,
+            errors: [error.message || 'Failed to parse Excel file'],
+          });
+        } finally {
+          setIsImporting(false);
+        }
+      } else {
+        setImportResults({
+          success: 0,
+          failed: 0,
+          errors: ['Unsupported file format. Please use CSV or Excel (.xlsx, .xls)'],
+        });
+        setIsImporting(false);
+      }
+    } catch (error: any) {
+      setImportResults({
+        success: 0,
+        failed: 0,
+        errors: [error.message || 'Failed to import file'],
+      });
+      setIsImporting(false);
+    }
+    
+    // Reset file input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -215,10 +553,42 @@ const ProductManagement: React.FC = () => {
           <p className="text-gray-600 dark:text-gray-400 mt-1 transition-colors duration-300">Manage your product catalog</p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" className="border-gray-300 dark:border-gray-700">
-            <Download className="w-4 h-4 mr-2" />
-            Export
+          <Button 
+            variant="outline" 
+            className="border-gray-300 dark:border-gray-700"
+            onClick={() => setShowImportModal(true)}
+          >
+            <Upload className="w-4 h-4 mr-2" />
+            Import
           </Button>
+          <div className="relative" ref={exportMenuRef}>
+            <Button 
+              variant="outline" 
+              className="border-gray-300 dark:border-gray-700"
+              onClick={() => setShowExportMenu(!showExportMenu)}
+            >
+              <Download className="w-4 h-4 mr-2" />
+              Export
+            </Button>
+            {showExportMenu && (
+              <div className="absolute right-0 top-full mt-1 w-48 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50">
+                <button
+                  onClick={handleExportCsv}
+                  className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 rounded-t-lg transition-colors"
+                >
+                  <FileText className="w-4 h-4" />
+                  Export as CSV
+                </button>
+                <button
+                  onClick={handleExportExcel}
+                  className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2 rounded-b-lg transition-colors"
+                >
+                  <FileSpreadsheet className="w-4 h-4" />
+                  Export as Excel
+                </button>
+              </div>
+            )}
+          </div>
           <Button 
             className="bg-gradient-to-r from-red-500 to-orange-500 hover:from-red-600 hover:to-orange-600"
             onClick={() => setShowAddProduct(true)}
@@ -956,6 +1326,166 @@ const ProductManagement: React.FC = () => {
               >
                 <Check className="w-4 h-4 mr-2" />
                 {editingProduct ? 'Update Product' : 'Create Product'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk Import Modal */}
+      <Dialog open={showImportModal} onOpenChange={setShowImportModal}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700">
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+              <Upload className="w-6 h-6 text-red-400" />
+              Bulk Import Products
+            </DialogTitle>
+          </DialogHeader>
+          
+          <div className="space-y-6 mt-4">
+            {/* Instructions */}
+            <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-500/30 rounded-lg p-4">
+              <h3 className="font-semibold text-blue-900 dark:text-blue-300 mb-2 flex items-center gap-2">
+                <AlertCircle className="w-5 h-5" />
+                Import Instructions
+              </h3>
+              <ul className="text-sm text-blue-800 dark:text-blue-300 space-y-1 list-disc list-inside">
+                <li>Supported formats: CSV (.csv) or Excel (.xlsx, .xls)</li>
+                <li>Required columns: Name, Category, Price, Stock</li>
+                <li>Optional columns: SKU, Discount (%), MOQ, Status, Description</li>
+                <li>Status values: active, draft, out_of_stock, hidden</li>
+                <li>Download template below to see the correct format</li>
+              </ul>
+            </div>
+
+            {/* Template Download */}
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Download Template
+              </label>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => handleDownloadTemplate('csv')}
+                  className="flex-1 border-gray-300 dark:border-gray-700"
+                >
+                  <FileText className="w-4 h-4 mr-2" />
+                  CSV Template
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => handleDownloadTemplate('excel')}
+                  className="flex-1 border-gray-300 dark:border-gray-700"
+                >
+                  <FileSpreadsheet className="w-4 h-4 mr-2" />
+                  Excel Template
+                </Button>
+              </div>
+            </div>
+
+            {/* File Upload */}
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Upload File
+              </label>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".csv,.xlsx,.xls"
+                onChange={handleFileImport}
+                className="hidden"
+              />
+              <div
+                onClick={() => fileInputRef.current?.click()}
+                className="border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-lg p-8 text-center cursor-pointer hover:border-red-500 dark:hover:border-red-500 transition-colors"
+              >
+                <Upload className="w-12 h-12 mx-auto text-gray-400 dark:text-gray-500 mb-4" />
+                <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">
+                  Click to upload or drag and drop
+                </p>
+                <p className="text-xs text-gray-500 dark:text-gray-500">
+                  CSV or Excel files only
+                </p>
+              </div>
+            </div>
+
+            {/* Import Progress */}
+            {isImporting && importProgress && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-gray-700 dark:text-gray-300">Processing...</span>
+                  <span className="text-gray-600 dark:text-gray-400">
+                    {importProgress.processed} / {importProgress.total}
+                  </span>
+                </div>
+                <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                  <div
+                    className="bg-red-500 h-2 rounded-full transition-all duration-300"
+                    style={{ width: `${(importProgress.processed / importProgress.total) * 100}%` }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Import Results */}
+            {importResults && !isImporting && (
+              <div className={`rounded-lg p-4 border ${
+                importResults.failed === 0
+                  ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-500/30'
+                  : 'bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-500/30'
+              }`}>
+                <div className="flex items-start gap-3">
+                  {importResults.failed === 0 ? (
+                    <CheckCircle2 className="w-6 h-6 text-green-600 dark:text-green-400 flex-shrink-0 mt-0.5" />
+                  ) : (
+                    <AlertCircle className="w-6 h-6 text-yellow-600 dark:text-yellow-400 flex-shrink-0 mt-0.5" />
+                  )}
+                  <div className="flex-1">
+                    <h4 className="font-semibold text-gray-900 dark:text-white mb-2">
+                      Import Complete
+                    </h4>
+                    <div className="space-y-1 text-sm">
+                      <p className="text-green-600 dark:text-green-400">
+                        ✓ {importResults.success} product(s) imported successfully
+                      </p>
+                      {importResults.failed > 0 && (
+                        <p className="text-yellow-600 dark:text-yellow-400">
+                          ⚠ {importResults.failed} row(s) failed
+                        </p>
+                      )}
+                      {importResults.errors.length > 0 && (
+                        <div className="mt-3 space-y-1">
+                          <p className="font-medium text-gray-700 dark:text-gray-300">Errors:</p>
+                          <ul className="list-disc list-inside text-xs text-gray-600 dark:text-gray-400 space-y-0.5">
+                            {importResults.errors.map((error, index) => (
+                              <li key={index}>{error}</li>
+                            ))}
+                          </ul>
+                          {importResults.errors.length >= 10 && (
+                            <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
+                              ... and more errors (showing first 10)
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Actions */}
+            <div className="flex justify-end gap-3 pt-4 border-t border-gray-200 dark:border-gray-700">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setShowImportModal(false);
+                  setImportResults(null);
+                  setImportProgress(null);
+                }}
+                disabled={isImporting}
+              >
+                {importResults ? 'Close' : 'Cancel'}
               </Button>
             </div>
           </div>
