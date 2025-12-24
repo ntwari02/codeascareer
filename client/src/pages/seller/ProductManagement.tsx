@@ -109,7 +109,6 @@ const ProductManagement: React.FC = () => {
     stock: p.stock,
     moq: p.moq,
     weight: p.weight,
-    weight: p.weight,
     // Derive a simple UI status from stock level
     status: p.stock === 0 ? 'out_of_stock' : 'active',
     sales: 0,

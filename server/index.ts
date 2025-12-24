@@ -9,6 +9,7 @@ import mongoose from 'mongoose';
 import path from 'path';
 import authRoutes from './src/routes/authRoutes';
 import inventoryRoutes from './src/routes/inventoryRoutes';
+import profileRoutes from './src/routes/profileRoutes';
 
 dotenv.config();
 
@@ -44,6 +45,8 @@ app.get('/api/health', (_req: Request, res: Response) => {
 
 // Auth routes
 app.use('/api/auth', authRoutes);
+// Profile routes
+app.use('/api/profile', profileRoutes);
 // Seller inventory routes
 app.use('/api/seller/inventory', inventoryRoutes);
 
