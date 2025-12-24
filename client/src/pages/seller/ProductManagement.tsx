@@ -62,75 +62,7 @@ const ProductManagement: React.FC = () => {
   const { showToast } = useToastStore();
   const [viewProduct, setViewProduct] = useState<Product | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Product | null>(null);
-
-  const [products, setProducts] = useState<Product[]>([
-    {
-      id: '1',
-      name: 'Wireless Headphones',
-      category: 'Electronics',
-      price: 149.99,
-      discount: 10,
-      stock: 45,
-      moq: 10,
-      status: 'active',
-      sales: 234,
-      views: 1234,
-      rating: 4.8,
-      sku: 'WH-001',
-      images: ['https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=500&h=500&fit=crop'],
-      description: 'High-quality wireless headphones with noise cancellation',
-      variants: [
-        { color: 'Black', size: 'Standard', price: 149.99, stock: 20 },
-        { color: 'White', size: 'Standard', price: 149.99, stock: 25 },
-      ],
-    },
-    {
-      id: '2',
-      name: 'Smart Watch',
-      category: 'Electronics',
-      price: 299.99,
-      stock: 12,
-      moq: 5,
-      status: 'active',
-      sales: 189,
-      views: 987,
-      rating: 4.6,
-      sku: 'SW-002',
-      images: ['https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=500&h=500&fit=crop'],
-      variants: [
-        { color: 'Silver', size: '42mm', price: 299.99, stock: 5 },
-        { color: 'Black', size: '46mm', price: 299.99, stock: 7 },
-      ],
-    },
-    {
-      id: '3',
-      name: 'Laptop Stand',
-      category: 'Accessories',
-      price: 79.99,
-      stock: 0,
-      moq: 20,
-      status: 'out_of_stock',
-      sales: 0,
-      views: 45,
-      rating: 0,
-      sku: 'LS-003',
-      images: ['https://images.unsplash.com/photo-1527864550417-7fd91fc51a46?w=500&h=500&fit=crop'],
-    },
-    {
-      id: '4',
-      name: 'USB-C Cable',
-      category: 'Accessories',
-      price: 19.99,
-      stock: 128,
-      moq: 50,
-      status: 'active',
-      sales: 456,
-      views: 2341,
-      rating: 4.9,
-      sku: 'UC-004',
-      images: ['https://images.unsplash.com/photo-1587825140708-dfaf72ae4b04?w=500&h=500&fit=crop'],
-    },
-  ]);
+  const [products, setProducts] = useState<Product[]>([]);
 
   const [newProduct, setNewProduct] = useState({
     name: '',
@@ -157,7 +89,6 @@ const ProductManagement: React.FC = () => {
 
   const API_HOST = 'http://localhost:5000';
   const API_BASE = `${API_HOST}/api/seller/inventory`;
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const resolveImageUrl = (url: string): string => {
     if (!url) return url;
@@ -184,7 +115,6 @@ const ProductManagement: React.FC = () => {
     discount: p.discount,
     stock: p.stock,
     moq: p.moq,
-    weight: p.weight,
     weight: p.weight,
     // Derive a simple UI status from stock level
     status: p.stock === 0 ? 'out_of_stock' : 'active',
@@ -2107,6 +2037,8 @@ const ProductManagement: React.FC = () => {
                 {importResults ? 'Close' : 'Cancel'}
               </Button>
             </div>
+          </div>
+        </DialogContent>
       </Dialog>
 
       {/* View Product Modal */}

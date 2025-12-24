@@ -23,21 +23,46 @@ export async function listProducts(req: AuthenticatedRequest, res: Response) {
     return res.status(401).json({ message: 'Authentication required' });
   }
 
-  const { search, status } = req.query as { search?: string; status?: string };
+  try {
+    const { search, status } = req.query as { search?: string; status?: string };
 
-  const filter: any = { sellerId };
+    // Query by sellerId - MongoDB should handle ObjectId matching automatically
+    const filter: any = { sellerId: sellerId };
 
-  if (status) {
-    filter.status = status;
+    if (status) {
+      filter.status = status;
+    }
+
+    if (search) {
+      const regex = new RegExp(search, 'i');
+      filter.$or = [{ name: regex }, { sku: regex }];
+    }
+
+    console.log(`[DEBUG] Querying products for sellerId: ${sellerId} (type: ${sellerId.constructor.name})`);
+    console.log(`[DEBUG] Filter:`, JSON.stringify(filter, null, 2));
+    
+    const products = await Product.find(filter as any).sort({ createdAt: -1 }).lean();
+    console.log(`[DEBUG] Found ${products.length} products for seller ${sellerId}`);
+    
+    // Debug: Check what's actually in the database
+    if (products.length === 0) {
+      const totalProducts = await Product.countDocuments({});
+      console.log(`[DEBUG] Total products in database: ${totalProducts}`);
+      if (totalProducts > 0) {
+        const sampleProduct = await Product.findOne({}).lean();
+        if (sampleProduct) {
+          console.log(`[DEBUG] Sample product sellerId: ${sampleProduct.sellerId} (type: ${sampleProduct.sellerId?.constructor?.name || typeof sampleProduct.sellerId})`);
+          console.log(`[DEBUG] Your sellerId: ${sellerId} (type: ${sellerId.constructor.name})`);
+          console.log(`[DEBUG] Match check: ${sampleProduct.sellerId?.toString() === sellerId.toString()}`);
+        }
+      }
+    }
+    
+    return res.json({ products });
+  } catch (err: any) {
+    console.error('Error fetching products:', err);
+    return res.status(500).json({ message: 'Failed to fetch products', error: err.message });
   }
-
-  if (search) {
-    const regex = new RegExp(search, 'i');
-    filter.$or = [{ name: regex }, { sku: regex }];
-  }
-
-  const products = await Product.find(filter).sort({ createdAt: -1 });
-  return res.json({ products });
 }
 
 export async function createProduct(req: AuthenticatedRequest, res: Response) {
