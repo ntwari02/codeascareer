@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
 import { useTheme } from '../contexts/ThemeContext';
 import { Mail, Lock, Chrome, Apple, Sun, Moon, Home, Eye, EyeOff } from 'lucide-react';
+import { useToastStore } from '../stores/toastStore';
 
 // Basic guard against obvious SQL injection-style patterns.
 // Real protection is still handled on the backend with parameterized queries / ORMs.
@@ -15,6 +16,7 @@ export function Login() {
   const navigate = useNavigate();
   const { theme, toggleTheme } = useTheme();
   const { login } = useAuthStore();
+  const { showToast } = useToastStore();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -63,7 +65,9 @@ export function Login() {
         return;
       }
 
-      // Login successful: redirect based on role
+      // Login successful: show success message and redirect based on role
+      showToast('Login successful. Welcome back to Reaglex!', 'success');
+
       const { user } = useAuthStore.getState();
 
       if (user?.role === 'seller') {

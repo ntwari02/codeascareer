@@ -9,6 +9,20 @@ interface ProductFormProps {
 
 export default function ProductForm({ product, onClose, onSave }: ProductFormProps) {
   const [activeTab, setActiveTab] = useState<'details' | 'pricing' | 'stock' | 'variants' | 'images' | 'shipping' | 'seo' | 'visibility'>('details');
+  const [imagePreviews, setImagePreviews] = useState<string[]>([]);
+
+  const handleImageChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files;
+    if (!files || files.length === 0) {
+      setImagePreviews([]);
+      return;
+    }
+
+    const urls = Array.from(files).map((file) =>
+      URL.createObjectURL(file)
+    );
+    setImagePreviews(urls);
+  };
   
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 py-6">
@@ -213,7 +227,32 @@ export default function ProductForm({ product, onClose, onSave }: ProductFormPro
               <div className="rounded-xl border-2 border-dashed border-gray-300 bg-gray-50 p-12 text-center dark:border-gray-700 dark:bg-gray-800/50">
                 <Upload className="mx-auto mb-4 h-12 w-12 text-gray-400" />
                 <p className="text-sm font-semibold text-gray-900 dark:text-white">Upload Product Images</p>
-                <p className="text-xs text-gray-500 dark:text-gray-400">Drag and drop or click to browse</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
+                  Drag and drop or click to browse. Selected images will be previewed below.
+                </p>
+                <input
+                  type="file"
+                  multiple
+                  accept="image/*"
+                  onChange={handleImageChange}
+                  className="mx-auto block text-sm text-gray-600 file:mr-4 file:rounded-md file:border-0 file:bg-emerald-50 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-emerald-700 hover:file:bg-emerald-100 dark:text-gray-300 dark:file:bg-emerald-900/30 dark:file:text-emerald-200"
+                />
+                {imagePreviews.length > 0 && (
+                  <div className="mt-6 flex flex-wrap justify-center gap-4">
+                    {imagePreviews.map((src, idx) => (
+                      <div
+                        key={idx}
+                        className="h-20 w-20 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-900"
+                      >
+                        <img
+                          src={src}
+                          alt={`Preview ${idx + 1}`}
+                          className="h-full w-full object-cover"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           )}

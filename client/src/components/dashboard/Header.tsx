@@ -1,11 +1,12 @@
-import React from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Bell, Menu, Search, User, Sun, Moon } from 'lucide-react';
+import { Bell, Menu, Search, User, Sun, Moon, ChevronDown, Settings, Package, BarChart3, ShoppingBag, LogOut, Store, Layers } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useTheme } from '@/contexts/ThemeContext';
 import { ChatWidget } from '@/components/buyer/ChatWidget';
 import { useAuthStore } from '@/stores/authStore';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 
 interface HeaderProps {
   setSidebarOpen: (open: boolean) => void;
@@ -26,19 +27,49 @@ const Header: React.FC<HeaderProps> = ({
 }) => {
   const notificationCount = 2; // This will be dynamic based on actual notifications
   const { theme, toggleTheme } = useTheme();
-  const { user } = useAuthStore();
+  const { user, signOut } = useAuthStore();
   const navigate = useNavigate();
   const location = useLocation();
+  const [showUserMenu, setShowUserMenu] = useState(false);
+  const userMenuRef = useRef<HTMLDivElement>(null);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+
+  const isSeller = location.pathname.startsWith('/seller');
+  const isAdmin = location.pathname.startsWith('/admin');
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (userMenuRef.current && !userMenuRef.current.contains(event.target as Node)) {
+        setShowUserMenu(false);
+      }
+    };
+
+    if (showUserMenu) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showUserMenu]);
 
   const handleProfileClick = () => {
     // Determine profile route based on current path
-    if (location.pathname.startsWith('/admin')) {
+    if (isAdmin) {
       navigate('/admin/settings');
-    } else if (location.pathname.startsWith('/seller')) {
+    } else if (isSeller) {
       navigate('/seller/settings');
     } else {
       navigate('/profile');
     }
+    setShowUserMenu(false);
+  };
+
+  const handleLogout = () => {
+    signOut();
+    setShowUserMenu(false);
+    navigate('/login');
   };
 
   const accent = accentVariant === 'emerald'
@@ -115,28 +146,181 @@ const Header: React.FC<HeaderProps> = ({
         <div className="flex items-center gap-3 pl-3 border-l border-gray-200 dark:border-gray-700/30 transition-colors duration-300">
           <div className="hidden sm:block text-right">
             <p className="text-sm font-semibold text-gray-900 dark:text-white transition-colors duration-300">{userName}</p>
-            <p className="text-xs text-gray-600 dark:text-gray-400 transition-colors duration-300">{userRole}</p>
           </div>
-          <motion.button
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-            onClick={handleProfileClick}
-            className={`w-10 h-10 ${accent.avatarBg} rounded-full flex items-center justify-center overflow-hidden cursor-pointer hover:opacity-90 hover:ring-2 hover:ring-offset-2 hover:ring-gray-300 dark:hover:ring-gray-600 transition-all`}
-            aria-label="Go to profile"
-            title="View Profile"
-          >
-            {user?.avatar_url ? (
-              <img
-                src={user.avatar_url}
-                alt={user.full_name || user.email || userName}
-                className="w-full h-full object-cover"
-              />
-            ) : (
-              <User className="w-6 h-6 text-white" />
+          <div className="relative" ref={userMenuRef}>
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => setShowUserMenu(!showUserMenu)}
+              className="flex items-center gap-1 sm:gap-2 px-1.5 sm:px-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+              aria-label="User menu"
+              title="User menu"
+            >
+              <div className={`w-10 h-10 ${accent.avatarBg} rounded-full flex items-center justify-center overflow-hidden cursor-pointer hover:opacity-90 hover:ring-2 hover:ring-offset-2 hover:ring-gray-300 dark:hover:ring-gray-600 transition-all`}>
+                {user?.avatar_url ? (
+                  <img
+                    src={user.avatar_url}
+                    alt={user.full_name || user.email || userName}
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <User className="w-6 h-6 text-white" />
+                )}
+              </div>
+              <ChevronDown className="h-4 w-4 text-gray-400 hidden md:block" />
+            </motion.button>
+            {showUserMenu && (
+              <>
+                <div
+                  className="fixed inset-0 z-10"
+                  onClick={() => setShowUserMenu(false)}
+                />
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  className="absolute right-0 mt-2 w-64 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl z-20 backdrop-blur-xl"
+                >
+                  <div className="px-4 py-2.5 border-b border-gray-200 dark:border-gray-700">
+                    <p className="font-semibold text-gray-900 dark:text-white text-sm">
+                      {user?.full_name || user?.email || userName}
+                    </p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                      {user?.email}
+                    </p>
+                    {isSeller && (
+                      <div className="mt-1.5 flex items-center gap-1 text-xs">
+                        {user?.seller_status === 'approved' ? (
+                          <span className="text-green-600 dark:text-green-400 flex items-center gap-1">
+                            <Store className="h-3 w-3" />
+                            Verified Seller
+                          </span>
+                        ) : user?.seller_status === 'rejected' ? (
+                          <span className="text-red-600 dark:text-red-400 flex items-center gap-1">
+                            <Store className="h-3 w-3" />
+                            Seller (Verification Rejected)
+                          </span>
+                        ) : (
+                          <span className="text-yellow-600 dark:text-yellow-400 flex items-center gap-1">
+                            <Store className="h-3 w-3" />
+                            Seller (Pending Government & Admin Approval)
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  <div className="py-1.5">
+                    {isSeller && (
+                      <>
+                        <button
+                          onClick={() => {
+                            navigate('/seller');
+                            setShowUserMenu(false);
+                          }}
+                          className="w-full text-left flex items-center gap-3 px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg text-sm text-gray-700 dark:text-gray-300 transition-colors"
+                        >
+                          <BarChart3 className="h-4 w-4" />
+                          Dashboard
+                        </button>
+                        <button
+                          onClick={() => {
+                            navigate('/seller/products');
+                            setShowUserMenu(false);
+                          }}
+                          className="w-full text-left flex items-center gap-3 px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg text-sm text-gray-700 dark:text-gray-300 transition-colors"
+                        >
+                          <Package className="h-4 w-4" />
+                          Products
+                        </button>
+                        <button
+                          onClick={() => {
+                            navigate('/seller/inventory');
+                            setShowUserMenu(false);
+                          }}
+                          className="w-full text-left flex items-center gap-3 px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg text-sm text-gray-700 dark:text-gray-300 transition-colors"
+                        >
+                          <Layers className="h-4 w-4" />
+                          Inventory
+                        </button>
+                        <button
+                          onClick={() => {
+                            navigate('/seller/orders');
+                            setShowUserMenu(false);
+                          }}
+                          className="w-full text-left flex items-center gap-3 px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg text-sm text-gray-700 dark:text-gray-300 transition-colors"
+                        >
+                          <ShoppingBag className="h-4 w-4" />
+                          Orders
+                        </button>
+                        <button
+                          onClick={() => {
+                            navigate('/seller/analytics');
+                            setShowUserMenu(false);
+                          }}
+                          className="w-full text-left flex items-center gap-3 px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg text-sm text-gray-700 dark:text-gray-300 transition-colors"
+                        >
+                          <BarChart3 className="h-4 w-4" />
+                          Analytics
+                        </button>
+                        <div className="my-1.5 border-t border-gray-200 dark:border-gray-700" />
+                      </>
+                    )}
+                    <button
+                      onClick={handleProfileClick}
+                      className="w-full text-left flex items-center gap-3 px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg text-sm text-gray-700 dark:text-gray-300 transition-colors"
+                    >
+                      <Settings className="h-4 w-4" />
+                      Profile & Settings
+                    </button>
+                    <div className="my-1.5 border-t border-gray-200 dark:border-gray-700" />
+                    <button
+                      onClick={() => setShowLogoutConfirm(true)}
+                      className="w-full text-left flex items-center gap-3 px-3 py-2 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg text-sm text-red-600 dark:text-red-400 transition-colors font-medium"
+                    >
+                      <LogOut className="h-4 w-4" />
+                      Logout
+                    </button>
+                  </div>
+                </motion.div>
+              </>
             )}
-          </motion.button>
+          </div>
         </div>
       </div>
+
+      {/* Logout confirmation dialog */}
+      <Dialog open={showLogoutConfirm} onOpenChange={setShowLogoutConfirm}>
+        <DialogContent className="max-w-sm bg-white dark:bg-gray-900 border border-red-200 dark:border-red-700">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-bold text-red-600 dark:text-red-400">
+              Logout
+            </DialogTitle>
+            <DialogDescription className="text-sm text-gray-600 dark:text-gray-400">
+              Are you sure you want to log out from your seller account? Any unsaved changes in your dashboard pages will be lost.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end gap-2 pt-4">
+            <Button
+              type="button"
+              variant="outline"
+              className="border-gray-300 dark:border-gray-700"
+              onClick={() => setShowLogoutConfirm(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              className="bg-red-600 hover:bg-red-700 text-white"
+              onClick={() => {
+                handleLogout();
+                setShowLogoutConfirm(false);
+              }}
+            >
+              Logout
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </header>
   );
 };

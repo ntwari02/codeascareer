@@ -21,7 +21,7 @@ import { useAuthStore } from '../stores/authStore';
 const SellerDashboard: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { user } = useAuthStore();
+  const { user, loading, initialized } = useAuthStore();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   
@@ -32,8 +32,14 @@ const SellerDashboard: React.FC = () => {
     ? pathSegments[sellerIndex + 1] 
     : 'dashboard';
   
-  // Ensure user is a seller and (optionally) approved
+  // Ensure user is a seller and (optionally) approved.
+  // Wait until auth store has finished initializing to avoid redirecting on page reload
+  // while the user is still being restored from localStorage / backend.
   useEffect(() => {
+    if (loading || !initialized) {
+      return;
+    }
+
     if (!user) {
       navigate('/login');
       return;
@@ -46,7 +52,7 @@ const SellerDashboard: React.FC = () => {
 
     // Optionally, you can block access entirely for non-approved sellers.
     // For now, we allow access but mark them as pending in the UI.
-  }, [user, navigate]);
+  }, [user, navigate, loading, initialized]);
 
   // Ensure we're on a valid route
   useEffect(() => {
@@ -69,6 +75,20 @@ const SellerDashboard: React.FC = () => {
       navigate(`/seller/${tabId}`);
     }
   };
+
+  // While auth is initializing, keep the seller on this page and show a lightweight loader
+  if (loading && !initialized) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-gray-50 dark:bg-gray-900">
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-10 w-10 animate-spin rounded-full border-2 border-orange-500 border-t-transparent" />
+          <p className="text-sm font-medium text-gray-600 dark:text-gray-300">
+            Restoring your session...
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-screen overflow-hidden bg-gradient-to-br from-gray-50 via-white to-gray-100 dark:from-gray-900 dark:via-black dark:to-gray-900 transition-colors duration-300">

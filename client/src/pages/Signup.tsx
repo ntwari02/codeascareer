@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useTheme } from '../contexts/ThemeContext';
 import { User, Mail, Lock, RotateCw, Chrome, Apple, Sun, Moon, Home, Briefcase, Eye, EyeOff } from 'lucide-react';
+import { useToastStore } from '../stores/toastStore';
 
 // Basic guard against obvious SQL injection-style patterns.
 // Real protection is still handled on the backend with validation and ORM.
@@ -13,6 +14,7 @@ function hasSQLInjectionRisk(value: string): boolean {
 export function Signup() {
   const navigate = useNavigate();
   const { theme, toggleTheme } = useTheme();
+  const { showToast } = useToastStore();
   const [formData, setFormData] = useState({
     fullName: '',
     email: '',
@@ -103,8 +105,18 @@ export function Signup() {
         return;
       }
 
-      // Redirect to login page after successful registration
-      navigate('/login');
+      // Successful registration: show success message and redirect to login page
+      showToast(
+        formData.role === 'seller'
+          ? 'Account created! Your seller profile is pending verification. Please log in to continue.'
+          : 'Account created successfully! Please log in to continue.',
+        'success'
+      );
+
+      // Give the toast ~2 seconds to be visible before navigating to login
+      setTimeout(() => {
+        navigate('/login');
+      }, 2000);
     } catch (err) {
       setError('Network error. Please try again.');
     } finally {
