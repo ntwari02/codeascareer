@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { Crown, Check, Calendar, Download, CreditCard, Plus, Trash2, FileText, ArrowRight, Loader2, ArrowUp } from 'lucide-react';
+import { Crown, Check, Calendar, Download, CreditCard, Plus, Trash2, FileText, ArrowRight, Loader2, ArrowUp, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { subscriptionApi } from '@/services/subscriptionApi';
@@ -61,6 +61,7 @@ const SubscriptionTiers: React.FC = () => {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleteMethodId, setDeleteMethodId] = useState<string | null>(null);
   const [deleteMethodName, setDeleteMethodName] = useState<string>('');
+  const [isOnlyPaymentMethod, setIsOnlyPaymentMethod] = useState(false);
   
   // Billing history filters
   const [billingFilters, setBillingFilters] = useState({
@@ -259,16 +260,18 @@ const SubscriptionTiers: React.FC = () => {
   const handleConfirmUpgrade = async () => {
     if (!selectedTier) return;
 
-    try {
-      setUpgrading(true);
-      const response = await subscriptionApi.upgradeSubscription(selectedTier);
-      
-      // Store success data for success modal
+    setUpgrading(true);
+    
+    // Use result-based pattern - no try/catch needed, no errors thrown
+    const result = await subscriptionApi.upgradeSubscription(selectedTier);
+    
+    if (result.success && result.data) {
+      // Success case - no errors thrown, no console errors
       setUpgradeSuccessData({
         tierName: tiers.find(t => t.id === selectedTier)?.name,
         price: tiers.find(t => t.id === selectedTier)?.price,
-        transactionId: response.payment?.transactionId,
-        amount: response.payment?.amount,
+        transactionId: result.data.payment?.transactionId,
+        amount: result.data.payment?.amount,
       });
       
       // Show success toast
@@ -287,26 +290,33 @@ const SubscriptionTiers: React.FC = () => {
       ]);
       setTiers(plansRes.plans || []);
       setCurrentSubscription(subscriptionRes.subscription);
-    } catch (error: any) {
-      console.error('Error upgrading subscription:', error);
-      
-      // Check if error requires payment method
-      if (error.message && error.message.includes('payment method')) {
-        showToast('Please add a payment method first before subscribing to a paid plan', 'error');
-        // Close upgrade modal and open payment methods tab
+    } else if (result.error) {
+      // Handle expected errors gracefully - no error thrown, no console errors
+      if (result.error.requiresPaymentMethod) {
+        // Payment method required - show guidance, not error
+        showToast(
+          'A payment method is required for paid plans. We\'ll help you add one now.',
+          'info',
+          6000
+        );
+        // Close upgrade modal first
         setShowUpgradeModal(false);
-        setActiveTab('payment');
-        // Optionally open add card modal
+        // Then switch to payment tab
         setTimeout(() => {
-          setShowAddCard(true);
-        }, 500);
+          setActiveTab('payment');
+          // Open add card modal after tab switch
+          setTimeout(() => {
+            setShowAddCard(true);
+          }, 500);
+        }, 200);
       } else {
-        showToast(error.message || 'Failed to upgrade subscription', 'error');
+        // Other errors - still no error thrown, just show message
+        showToast(result.error.message || 'Failed to upgrade subscription', 'error');
         setShowUpgradeModal(false);
       }
-    } finally {
-      setUpgrading(false);
     }
+    
+    setUpgrading(false);
   };
 
   const handleAddPaymentMethod = async () => {
@@ -333,10 +343,22 @@ const SubscriptionTiers: React.FC = () => {
         ? { ...cardData, type: 'visa' as const }
         : { ...mobileMoneyData, type: mobileMoneyData.provider as 'mtn' | 'airtel' };
       
-      await subscriptionApi.addPaymentMethod(payload);
+      const response = await subscriptionApi.addPaymentMethod(payload);
+      
+      // Check if subscription was reactivated
+      const subscriptionReactivated = response.subscriptionReactivated;
       
       // Show success message in modal
-      setModalMessage({ type: 'success', text: 'Payment method added successfully!' });
+      if (subscriptionReactivated) {
+        setModalMessage({ 
+          type: 'success', 
+          text: 'Payment method added and subscription reactivated successfully!' 
+        });
+        // Also show toast for reactivation
+        showToast('Your subscription has been reactivated!', 'success', 5000);
+      } else {
+        setModalMessage({ type: 'success', text: 'Payment method added successfully!' });
+      }
       
       // Clear form data
       setCardData({
@@ -352,12 +374,39 @@ const SubscriptionTiers: React.FC = () => {
         accountName: '',
       });
       
-      // Refresh payment methods
-      const methodsRes = await subscriptionApi.getPaymentMethods();
-      setPaymentMethods(methodsRes.paymentMethods || []);
-      if (methodsRes.paymentIcons) {
-        setPaymentIcons(methodsRes.paymentIcons);
+      // Optimistically add the payment method from response
+      if (response.paymentMethod) {
+        setPaymentMethods(prev => {
+          // Check if it's already in the list to avoid duplicates
+          const exists = prev.some(pm => pm.id === response.paymentMethod.id);
+          if (exists) return prev;
+          return [...prev, response.paymentMethod];
+        });
       }
+      
+      // Refresh payment methods and subscription from server to ensure sync
+      // Add a small delay to ensure database has committed
+      setTimeout(async () => {
+        try {
+          const [methodsRes, subscriptionRes] = await Promise.all([
+            subscriptionApi.getPaymentMethods(),
+            subscriptionReactivated ? subscriptionApi.getCurrentSubscription() : null,
+          ]);
+          
+          setPaymentMethods(methodsRes.paymentMethods || []);
+          if (methodsRes.paymentIcons) {
+            setPaymentIcons(methodsRes.paymentIcons);
+          }
+          
+          // Refresh subscription if it was reactivated
+          if (subscriptionReactivated && subscriptionRes) {
+            setCurrentSubscription(subscriptionRes.subscription);
+          }
+        } catch (refreshError) {
+          console.error('Error refreshing data:', refreshError);
+          // Don't show error to user, the optimistic update should be enough
+        }
+      }, 500);
       
       // Close modal after 1.5 seconds
       setTimeout(() => {
@@ -379,43 +428,93 @@ const SubscriptionTiers: React.FC = () => {
       ? `${method.brand || 'Visa'} ending in ${method.last4}`
       : `${method?.type.toUpperCase()} •••• ${method?.last4 || ''}`;
     
+    // Check if this is the only payment method
+    // Backend already filters inactive payment methods, so all in array are active
+    const onlyMethod = paymentMethods.length === 1;
+    
     setDeleteMethodId(paymentMethodId);
     setDeleteMethodName(methodName);
+    setIsOnlyPaymentMethod(onlyMethod);
     setShowDeleteConfirm(true);
   };
 
   const confirmDeleteCard = async () => {
     if (!deleteMethodId) return;
 
-    try {
-      setDeletingCard(deleteMethodId);
-      await subscriptionApi.deletePaymentMethod(deleteMethodId);
-      
+    setDeletingCard(deleteMethodId);
+    
+    // Use result-based pattern - no try/catch needed, no errors thrown
+    const result = await subscriptionApi.deletePaymentMethod(deleteMethodId);
+    
+    if (result.success) {
+      // Success case - no errors thrown, no console errors
       // Close delete modal first
       setShowDeleteConfirm(false);
+      const methodNameToDelete = deleteMethodName;
+      const wasOnlyMethod = isOnlyPaymentMethod;
       setDeleteMethodId(null);
       setDeleteMethodName('');
+      setIsOnlyPaymentMethod(false);
       
-      // Refresh payment methods immediately
-      const methodsRes = await subscriptionApi.getPaymentMethods();
-      const updatedMethods = methodsRes.paymentMethods || [];
-      setPaymentMethods(updatedMethods);
-      if (methodsRes.paymentIcons) {
-        setPaymentIcons(methodsRes.paymentIcons);
+      // Optimistically remove from list
+      setPaymentMethods(prev => prev.filter(pm => pm.id !== deleteMethodId));
+      
+      // Refresh payment methods from server to ensure sync
+      setTimeout(async () => {
+        try {
+          const methodsRes = await subscriptionApi.getPaymentMethods();
+          setPaymentMethods(methodsRes.paymentMethods || []);
+          if (methodsRes.paymentIcons) {
+            setPaymentIcons(methodsRes.paymentIcons);
+          }
+        } catch (refreshError) {
+          console.error('Error refreshing payment methods:', refreshError);
+          // Don't show error to user, the optimistic update should be enough
+        }
+      }, 300);
+      
+      // Check if subscription was suspended
+      const subscriptionSuspended = result.data?.subscriptionSuspended;
+      
+      if (subscriptionSuspended) {
+        // Subscription was suspended - show important warning
+        showToast(
+          result.data?.warning || 'Your subscription has been suspended. Please add a payment method to reactivate it.',
+          'warning',
+          8000 // Longer duration for important message
+        );
+      } else {
+        showToast(`${methodNameToDelete} has been removed successfully`, 'success');
       }
       
-      showToast(`${deleteMethodName} has been removed successfully`, 'success');
-      
-      // Automatically show add payment method modal after deletion
-      setTimeout(() => {
-        setShowAddCard(true);
-      }, 500);
-    } catch (error: any) {
-      console.error('Error deleting payment method:', error);
-      showToast(error.message || 'Failed to remove payment method', 'error');
-    } finally {
-      setDeletingCard(null);
+      // If it was the only payment method, show add payment method modal
+      // Give user a moment to see the success/warning message first
+      if (wasOnlyMethod || subscriptionSuspended) {
+        setTimeout(() => {
+          // Open add payment method modal after a short delay
+          setTimeout(() => {
+            setShowAddCard(true);
+          }, subscriptionSuspended ? 2000 : 1000); // Longer delay if suspended
+        }, 500);
+      }
+    } else if (result.error) {
+      // Handle expected errors gracefully - no error thrown, no console errors
+      if (result.error.isOnlyPaymentMethod) {
+        // This should not happen if user confirmed in the warning modal
+        // But handle it gracefully just in case
+        showToast(
+          'Unable to delete. A payment method is required for subscription billing.',
+          'error'
+        );
+        setShowDeleteConfirm(false);
+      } else {
+        // Other errors - still no error thrown, just show message
+        showToast(result.error.message || 'Failed to remove payment method', 'error');
+        setShowDeleteConfirm(false);
+      }
     }
+    
+    setDeletingCard(null);
   };
 
 
@@ -647,15 +746,41 @@ ${invoice.gatewayRef ? `Gateway Reference: ${invoice.gatewayRef}` : ''}
 
   const handleSetDefaultCard = async (paymentMethodId: string) => {
     try {
+      // Optimistic update - update UI immediately
+      setPaymentMethods(prev => prev.map(pm => ({
+        ...pm,
+        isDefault: pm.id === paymentMethodId
+      })));
+      
       await subscriptionApi.setDefaultPaymentMethod(paymentMethodId);
       showToast('Default payment method updated', 'success');
       
-      // Refresh payment methods
-      const methodsRes = await subscriptionApi.getPaymentMethods();
-      setPaymentMethods(methodsRes.paymentMethods || []);
+      // Refresh payment methods from server to ensure sync
+      setTimeout(async () => {
+        try {
+          const methodsRes = await subscriptionApi.getPaymentMethods();
+          setPaymentMethods(methodsRes.paymentMethods || []);
+          if (methodsRes.paymentIcons) {
+            setPaymentIcons(methodsRes.paymentIcons);
+          }
+        } catch (refreshError) {
+          console.error('Error refreshing payment methods:', refreshError);
+          // Don't show error to user, the optimistic update should be enough
+        }
+      }, 300);
     } catch (error: any) {
       console.error('Error setting default payment method:', error);
       showToast(error.message || 'Failed to set default payment method', 'error');
+      
+      // Revert optimistic update on error
+      setTimeout(async () => {
+        try {
+          const methodsRes = await subscriptionApi.getPaymentMethods();
+          setPaymentMethods(methodsRes.paymentMethods || []);
+        } catch (refreshError) {
+          console.error('Error refreshing payment methods:', refreshError);
+        }
+      }, 300);
     }
   };
 
@@ -1404,6 +1529,49 @@ ${invoice.gatewayRef ? `Gateway Reference: ${invoice.gatewayRef}` : ''}
                 ${tiers.find(t => t.id === selectedTier)?.price}/month
               </p>
             </div>
+            
+            {/* Check if payment method is needed */}
+            {(() => {
+              const selectedTierData = tiers.find(t => t.id === selectedTier);
+              const requiresPayment = selectedTierData && selectedTierData.price > 0;
+              // Backend already filters inactive payment methods, so if length > 0, we have active methods
+              const hasPaymentMethod = paymentMethods.length > 0;
+              
+              if (requiresPayment && !hasPaymentMethod) {
+                return (
+                  <div className="p-4 bg-amber-50 dark:bg-amber-900/20 rounded-lg border border-amber-200 dark:border-amber-700/50">
+                    <div className="flex items-start gap-3">
+                      <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
+                      <div className="flex-1">
+                        <p className="text-sm font-semibold text-amber-900 dark:text-amber-200 mb-2">
+                          Payment Method Required
+                        </p>
+                        <p className="text-sm text-amber-800 dark:text-amber-300 mb-3">
+                          To subscribe to a paid plan, you need to add a payment method first. This ensures secure billing for your subscription.
+                        </p>
+                        <Button
+                          className="bg-amber-600 hover:bg-amber-700 text-white text-sm"
+                          onClick={() => {
+                            setShowUpgradeModal(false);
+                            setTimeout(() => {
+                              setActiveTab('payment');
+                              setTimeout(() => {
+                                setShowAddCard(true);
+                              }, 300);
+                            }, 100);
+                          }}
+                        >
+                          <CreditCard className="w-4 h-4 mr-2" />
+                          Add Payment Method
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              }
+              return null;
+            })()}
+            
             <div className="flex justify-end gap-3">
               <Button variant="outline" onClick={() => setShowUpgradeModal(false)} disabled={upgrading}>
                 Cancel
@@ -1411,7 +1579,7 @@ ${invoice.gatewayRef ? `Gateway Reference: ${invoice.gatewayRef}` : ''}
               <Button 
                 className="bg-gradient-to-r from-red-500 to-orange-500 hover:from-red-600 hover:to-orange-600"
                 onClick={handleConfirmUpgrade}
-                disabled={upgrading}
+                disabled={upgrading || (tiers.find(t => t.id === selectedTier)?.price > 0 && paymentMethods.length === 0)}
               >
                 {upgrading ? (
                   <>
@@ -1719,24 +1887,46 @@ ${invoice.gatewayRef ? `Gateway Reference: ${invoice.gatewayRef}` : ''}
         if (!open) {
           setDeleteMethodId(null);
           setDeleteMethodName('');
+          setIsOnlyPaymentMethod(false);
         }
       }}>
         <DialogContent className="bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 max-w-md">
           <DialogHeader>
             <DialogTitle className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
-              <Trash2 className="w-5 h-5 text-red-500" />
-              Remove Payment Method
+              {isOnlyPaymentMethod ? (
+                <AlertTriangle className="w-5 h-5 text-amber-500" />
+              ) : (
+                <Trash2 className="w-5 h-5 text-red-500" />
+              )}
+              {isOnlyPaymentMethod ? 'Warning: Last Payment Method' : 'Remove Payment Method'}
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 mt-2">
-            <div className="p-4 bg-red-50 dark:bg-red-900/20 rounded-lg border border-red-200 dark:border-red-700/50">
-              <p className="text-sm text-gray-900 dark:text-white mb-2">
-                Are you sure you want to remove <strong>{deleteMethodName}</strong>?
-              </p>
-              <p className="text-xs text-gray-600 dark:text-gray-400">
-                This action cannot be undone. You'll need to add this payment method again if you want to use it later.
-              </p>
-            </div>
+            {isOnlyPaymentMethod ? (
+              <div className="p-4 bg-amber-50 dark:bg-amber-900/20 rounded-lg border border-amber-200 dark:border-amber-700/50">
+                <p className="text-sm font-semibold text-amber-900 dark:text-amber-200 mb-3">
+                  This is your only payment method
+                </p>
+                <p className="text-sm text-gray-900 dark:text-white mb-3">
+                  A payment method is required for subscription billing. If you remove this payment method, you'll need to add a new one immediately to keep your subscription active.
+                </p>
+                <p className="text-sm text-gray-700 dark:text-gray-300 mb-2">
+                  Are you sure you want to remove <strong>{deleteMethodName}</strong>?
+                </p>
+                <p className="text-xs text-amber-700 dark:text-amber-300 font-medium">
+                  After deletion, we'll help you add a new payment method.
+                </p>
+              </div>
+            ) : (
+              <div className="p-4 bg-red-50 dark:bg-red-900/20 rounded-lg border border-red-200 dark:border-red-700/50">
+                <p className="text-sm text-gray-900 dark:text-white mb-2">
+                  Are you sure you want to remove <strong>{deleteMethodName}</strong>?
+                </p>
+                <p className="text-xs text-gray-600 dark:text-gray-400">
+                  This action cannot be undone. You'll need to add this payment method again if you want to use it later.
+                </p>
+              </div>
+            )}
             <div className="flex justify-end gap-3 pt-2">
               <Button 
                 variant="outline" 

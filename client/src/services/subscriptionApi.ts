@@ -151,20 +151,58 @@ export const subscriptionApi = {
 
   /**
    * Delete a payment method
+   * Returns a result object instead of throwing errors for expected cases
    */
-  async deletePaymentMethod(paymentMethodId: string) {
-    const response = await fetch(`${API_BASE}/payment-methods/${paymentMethodId}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders(),
-      credentials: 'include',
-    });
+  async deletePaymentMethod(paymentMethodId: string): Promise<{
+    success: boolean;
+    data?: any;
+    error?: {
+      message: string;
+      code?: string;
+      isOnlyPaymentMethod?: boolean;
+    };
+  }> {
+    try {
+      const response = await fetch(`${API_BASE}/payment-methods/${paymentMethodId}`, {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+        credentials: 'include',
+      });
 
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.message || 'Failed to delete payment method');
+      if (!response.ok) {
+        const errorData = await response.json();
+        const errorMessage = errorData.message || 'Failed to delete payment method';
+        // Use server flag if available, otherwise check message
+        const isOnlyPaymentMethod = errorData.isOnlyPaymentMethod === true ||
+                                   errorMessage.toLowerCase().includes('only payment method') ||
+                                   errorMessage.toLowerCase().includes('cannot delete the only');
+
+        // Return result object instead of throwing - this prevents console errors
+        return {
+          success: false,
+          error: {
+            message: errorMessage,
+            code: response.status === 400 ? 'VALIDATION_ERROR' : 'SERVER_ERROR',
+            isOnlyPaymentMethod,
+          },
+        };
+      }
+
+      const data = await response.json();
+      return {
+        success: true,
+        data,
+      };
+    } catch (networkError: any) {
+      // Only catch network errors, not expected business logic errors
+      return {
+        success: false,
+        error: {
+          message: networkError.message || 'Network error occurred',
+          code: 'NETWORK_ERROR',
+        },
+      };
     }
-
-    return response.json();
   },
 
   /**
@@ -187,21 +225,61 @@ export const subscriptionApi = {
 
   /**
    * Upgrade subscription plan
+   * Returns a result object instead of throwing errors for expected cases
    */
-  async upgradeSubscription(tierId: string) {
-    const response = await fetch(`${API_BASE}/upgrade`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      credentials: 'include',
-      body: JSON.stringify({ tierId }),
-    });
+  async upgradeSubscription(tierId: string): Promise<{
+    success: boolean;
+    data?: any;
+    error?: {
+      message: string;
+      requiresPaymentMethod?: boolean;
+      code?: string;
+    };
+  }> {
+    try {
+      const response = await fetch(`${API_BASE}/upgrade`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        credentials: 'include',
+        body: JSON.stringify({ tierId }),
+      });
 
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.message || 'Failed to upgrade subscription');
+      if (!response.ok) {
+        const errorData = await response.json();
+        const errorMessage = errorData.message || 'Failed to upgrade subscription';
+        const requiresPaymentMethod = errorData.requiresPaymentMethod === true || 
+          (errorMessage && (
+            errorMessage.toLowerCase().includes('payment method') ||
+            errorMessage.toLowerCase().includes('add a payment method') ||
+            errorMessage.toLowerCase().includes('no default payment method')
+          ));
+
+        // Return result object instead of throwing - this prevents console errors
+        return {
+          success: false,
+          error: {
+            message: errorMessage,
+            requiresPaymentMethod,
+            code: response.status === 400 ? 'VALIDATION_ERROR' : 'SERVER_ERROR',
+          },
+        };
+      }
+
+      const data = await response.json();
+      return {
+        success: true,
+        data,
+      };
+    } catch (networkError: any) {
+      // Only catch network errors, not expected business logic errors
+      return {
+        success: false,
+        error: {
+          message: networkError.message || 'Network error occurred',
+          code: 'NETWORK_ERROR',
+        },
+      };
     }
-
-    return response.json();
   },
 
   /**

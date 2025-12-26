@@ -21,6 +21,16 @@ import {
 import mongoose from 'mongoose';
 
 /**
+ * Helper function to ensure payment_methods is always an array
+ * (handles Schema.Types.Mixed which might not be properly cast)
+ */
+function ensurePaymentMethodsArray(paymentMethods: any): any[] {
+  if (!paymentMethods) return [];
+  if (Array.isArray(paymentMethods)) return paymentMethods;
+  return [paymentMethods];
+}
+
+/**
  * Helper function to get payment method icons from plans collection
  */
 async function getPaymentMethodIcons() {
@@ -134,16 +144,22 @@ export async function getBillingHistory(req: AuthenticatedRequest, res: Response
       return res.status(401).json({ message: 'Authentication required' });
     }
 
+    // Don't use .lean() to ensure Mongoose properly handles Schema.Types.Mixed
     const subscription = await SellerSubscription.findOne({
       user_id: new mongoose.Types.ObjectId(req.user.id),
       is_active: true,
-    }).lean();
+    });
 
     if (!subscription) {
       return res.status(404).json({ message: 'No active subscription found' });
     }
 
-    let invoices = subscription.billing_history || [];
+    // Ensure billing_history is properly handled as an array
+    const billingHistoryArray = Array.isArray(subscription.billing_history) 
+      ? subscription.billing_history 
+      : (subscription.billing_history ? [subscription.billing_history] : []);
+    
+    let invoices = billingHistoryArray;
 
     // Apply filters if provided
     const { status, startDate, endDate, search } = req.query;
@@ -212,17 +228,23 @@ export async function downloadInvoice(req: AuthenticatedRequest, res: Response) 
 
     const { id } = req.params;
 
+    // Don't use .lean() to ensure Mongoose properly handles Schema.Types.Mixed
     const subscription = await SellerSubscription.findOne({
       user_id: new mongoose.Types.ObjectId(req.user.id),
       is_active: true,
-    }).lean();
+    });
 
     if (!subscription) {
       return res.status(404).json({ message: 'No active subscription found' });
     }
 
-    const invoice = subscription.billing_history.find(
-      (inv: any) => inv.invoice_id === id || inv.invoice_number === id
+    // Ensure billing_history is properly handled as an array
+    const billingHistoryArray = Array.isArray(subscription.billing_history) 
+      ? subscription.billing_history 
+      : (subscription.billing_history ? [subscription.billing_history] : []);
+
+    const invoice = billingHistoryArray.find(
+      (inv: any) => inv && (inv.invoice_id === id || inv.invoice_number === id)
     );
 
     if (!invoice) {
@@ -259,17 +281,22 @@ export async function getPaymentMethods(req: AuthenticatedRequest, res: Response
       return res.status(401).json({ message: 'Authentication required' });
     }
 
+    // Don't use .lean() to ensure Mongoose properly handles Schema.Types.Mixed
     const subscription = await SellerSubscription.findOne({
       user_id: new mongoose.Types.ObjectId(req.user.id),
       is_active: true,
-    }).lean();
+    });
 
     if (!subscription) {
       return res.status(404).json({ message: 'No active subscription found' });
     }
 
-    const paymentMethods = subscription.payment_methods
-      .filter((method) => method.is_active)
+    // Ensure payment_methods is properly handled as an array
+    const paymentMethodsArray = ensurePaymentMethodsArray(subscription.payment_methods);
+    
+    // Filter and transform payment methods
+    const paymentMethods = paymentMethodsArray
+      .filter((method) => method && method.is_active)
       .map((method) => transformPaymentMethodToFrontend(method));
 
     // Get payment method icons
@@ -525,18 +552,32 @@ export async function addPaymentMethod(req: AuthenticatedRequest, res: Response)
       });
     }
 
+    // Ensure payment_methods is an array
+    if (!subscription.payment_methods || !Array.isArray(subscription.payment_methods)) {
+      subscription.payment_methods = [];
+    }
+
     // Set all other payment methods as non-default
-    if (subscription.payment_methods && subscription.payment_methods.length > 0) {
+    if (subscription.payment_methods.length > 0) {
       subscription.payment_methods.forEach((method: any) => {
-        method.is_default = false;
+        if (method) method.is_default = false;
       });
     }
 
     // Add new payment method
     subscription.payment_methods.push(newPaymentMethod as any);
 
+    // Mark payment_methods as modified since it's Schema.Types.Mixed
+    subscription.markModified('payment_methods');
+
     // Update payment gateway default
     subscription.payment_gateway.default_payment_method_id = newPaymentMethod.payment_method_id;
+    subscription.markModified('payment_gateway');
+
+    // Ensure audit_logs is an array before pushing
+    if (!subscription.audit_logs || !Array.isArray(subscription.audit_logs)) {
+      subscription.audit_logs = [];
+    }
 
     // Add audit log
     subscription.audit_logs.push({
@@ -555,13 +596,65 @@ export async function addPaymentMethod(req: AuthenticatedRequest, res: Response)
         brand: newPaymentMethod.brand,
       },
     } as any);
+    subscription.markModified('audit_logs');
 
-    await subscription.save();
+    // SECURITY: Reactivate subscription if it was suspended due to missing payment method
+    const wasSuspended = subscription.current_plan?.status === 'payment_required';
+    if (wasSuspended) {
+      console.log('Reactivating subscription after payment method addition');
+      subscription.current_plan.status = 'active';
+      subscription.current_plan.auto_renew = true;
+      subscription.markModified('current_plan');
+      
+      // Add to subscription history
+      if (!subscription.subscription_history || !Array.isArray(subscription.subscription_history)) {
+        subscription.subscription_history = [];
+      }
+      
+      subscription.subscription_history.push({
+        plan_id: subscription.current_plan.plan_id,
+        tier_id: subscription.current_plan.tier_id,
+        tier_name: subscription.current_plan.tier_name,
+        start_date: new Date(),
+        price: subscription.current_plan.price,
+        billing_cycle: subscription.current_plan.billing_cycle,
+        reason: 'payment_method_added_reactivation',
+        changed_at: new Date(),
+        changed_by: req.user.id,
+        change_ip: req.ip,
+        change_user_agent: req.get('user-agent'),
+      } as any);
+      subscription.markModified('subscription_history');
+    }
 
-    res.json({
+    // Save and verify
+    const savedSubscription = await subscription.save();
+    
+    // Verify the payment method was saved
+    const savedMethods = ensurePaymentMethodsArray(savedSubscription.payment_methods);
+    const savedMethod = savedMethods.find((m: any) => m?.payment_method_id === newPaymentMethod.payment_method_id);
+    
+    if (!savedMethod) {
+      console.error('Error: Payment method was not saved correctly');
+      console.error('Expected payment_method_id:', newPaymentMethod.payment_method_id);
+      console.error('Saved payment_methods:', savedMethods);
+      return res.status(500).json({ 
+        message: 'Payment method was added but could not be verified. Please refresh the page.' 
+      });
+    }
+
+    // Return the saved payment method (use the one from database, not the one we created)
+    const response: any = {
       message: 'Payment method added successfully',
-      paymentMethod: transformPaymentMethodToFrontend(newPaymentMethod),
-    });
+      paymentMethod: transformPaymentMethodToFrontend(savedMethod),
+    };
+    
+    if (wasSuspended) {
+      response.subscriptionReactivated = true;
+      response.message = 'Payment method added and subscription reactivated successfully';
+    }
+
+    res.json(response);
   } catch (error: any) {
     console.error('Error adding payment method:', error);
     res.status(500).json({ message: 'Failed to add payment method' });
@@ -579,6 +672,11 @@ export async function deletePaymentMethod(req: AuthenticatedRequest, res: Respon
     }
 
     const { id } = req.params;
+    
+    console.log('Delete payment method request:', { 
+      userId: req.user.id, 
+      paymentMethodId: id 
+    });
 
     const subscription = await SellerSubscription.findOne({
       user_id: new mongoose.Types.ObjectId(req.user.id),
@@ -589,24 +687,98 @@ export async function deletePaymentMethod(req: AuthenticatedRequest, res: Respon
       return res.status(404).json({ message: 'No active subscription found' });
     }
 
-    const methodIndex = subscription.payment_methods.findIndex(
-      (method) => method.payment_method_id === id
+    // Ensure payment_methods is an array
+    const paymentMethodsArray = ensurePaymentMethodsArray(subscription.payment_methods);
+    
+    console.log('Payment methods found:', paymentMethodsArray.length);
+    console.log('Payment method IDs:', paymentMethodsArray.map((m: any) => ({
+      id: m?.payment_method_id,
+      active: m?.is_active,
+      default: m?.is_default
+    })));
+
+    const methodIndex = paymentMethodsArray.findIndex(
+      (method) => method && method.payment_method_id === id
     );
 
     if (methodIndex === -1) {
-      return res.status(404).json({ message: 'Payment method not found' });
+      console.error('Payment method not found:', id);
+      console.error('Available IDs:', paymentMethodsArray.map((m: any) => m?.payment_method_id));
+      return res.status(404).json({ 
+        message: 'Payment method not found',
+        receivedId: id,
+        availableIds: paymentMethodsArray.map((m: any) => m?.payment_method_id)
+      });
     }
 
-    // Don't allow deleting if it's the only payment method
-    const activeMethods = subscription.payment_methods.filter((m) => m.is_active);
-    if (activeMethods.length === 1) {
-      return res.status(400).json({ message: 'Cannot delete the only payment method' });
+    // Get the method to delete first
+    const methodToDelete = paymentMethodsArray[methodIndex];
+    
+    // Treat undefined is_active as active (backward compatibility)
+    const activeMethods = paymentMethodsArray.filter((m) => {
+      if (!m) return false;
+      // If is_active is undefined or true, consider it active
+      return m.is_active !== false;
+    });
+    
+    console.log('Active methods count:', activeMethods.length);
+    console.log('Method to delete is active:', methodToDelete?.is_active !== false);
+    
+    // Check if current plan requires payment
+    // Handle both Mongoose document and plain object cases
+    const currentPlan = subscription.current_plan || {};
+    const currentPlanPrice = typeof currentPlan === 'object' && 'price' in currentPlan 
+      ? (currentPlan.price || 0) 
+      : 0;
+    const requiresPayment = currentPlanPrice > 0;
+    
+    console.log('Current plan:', {
+      exists: !!subscription.current_plan,
+      price: currentPlanPrice,
+      requiresPayment,
+      planType: typeof subscription.current_plan
+    });
+    
+    // SECURITY: Handle deletion of the only payment method on paid plans
+    const isOnlyPaymentMethod = activeMethods.length === 1 && methodToDelete?.is_active !== false;
+    
+    if (isOnlyPaymentMethod && requiresPayment) {
+      console.log('Deleting only payment method on paid plan - suspending subscription');
+      
+      // Suspend subscription to prevent billing issues
+      // This maintains database integrity and prevents failed payment attempts
+      subscription.current_plan.status = 'payment_required';
+      subscription.current_plan.auto_renew = false;
+      subscription.markModified('current_plan');
+      
+      // Add to subscription history
+      if (!subscription.subscription_history || !Array.isArray(subscription.subscription_history)) {
+        subscription.subscription_history = [];
+      }
+      
+      subscription.subscription_history.push({
+        plan_id: subscription.current_plan.plan_id,
+        tier_id: subscription.current_plan.tier_id,
+        tier_name: subscription.current_plan.tier_name,
+        start_date: new Date(subscription.current_plan.start_date),
+        end_date: new Date(),
+        price: subscription.current_plan.price,
+        billing_cycle: subscription.current_plan.billing_cycle,
+        reason: 'payment_method_removed',
+        changed_at: new Date(),
+        changed_by: req.user.id,
+        change_ip: req.ip,
+        change_user_agent: req.get('user-agent'),
+      } as any);
+      subscription.markModified('subscription_history');
+      
+      console.log('Subscription suspended due to payment method removal');
     }
 
     // If it was default, set another one as default first
-    if (subscription.payment_methods[methodIndex].is_default) {
-      const otherActiveMethod = subscription.payment_methods.find(
-        (m) => m.is_active && m.payment_method_id !== id
+    if (methodToDelete?.is_default) {
+      const otherActiveMethod = paymentMethodsArray.find(
+        (m) => m && m.is_active !== false && m.payment_method_id !== id
       );
       if (otherActiveMethod) {
         otherActiveMethod.is_default = true;
@@ -614,21 +786,52 @@ export async function deletePaymentMethod(req: AuthenticatedRequest, res: Respon
     }
 
     // Actually remove the payment method from the array
-    subscription.payment_methods.splice(methodIndex, 1);
+    paymentMethodsArray.splice(methodIndex, 1);
+    
+    // Update the subscription with the modified array
+    subscription.payment_methods = paymentMethodsArray;
+    
+    // Mark payment_methods as modified since it's Schema.Types.Mixed
+    subscription.markModified('payment_methods');
 
     // Update payment gateway default if needed
-    if (subscription.payment_gateway.default_payment_method_id === id) {
-      const newDefault = subscription.payment_methods.find((m) => m.is_active);
+    if (subscription.payment_gateway?.default_payment_method_id === id) {
+      const newDefault = paymentMethodsArray.find((m) => m && m.is_active !== false);
       if (newDefault) {
         subscription.payment_gateway.default_payment_method_id = newDefault.payment_method_id;
       } else {
         subscription.payment_gateway.default_payment_method_id = undefined;
       }
+      subscription.markModified('payment_gateway');
     }
 
-    await subscription.save();
+    const savedSubscription = await subscription.save();
+    
+    // Verify deletion
+    const remainingMethods = ensurePaymentMethodsArray(savedSubscription.payment_methods);
+    const deletedMethodStillExists = remainingMethods.some((m: any) => m?.payment_method_id === id);
+    
+    if (deletedMethodStillExists) {
+      console.error('Warning: Payment method was not deleted correctly');
+      return res.status(500).json({ 
+        message: 'Payment method deletion failed. Please try again.' 
+      });
+    }
+    
+    console.log('Payment method deleted successfully. Remaining methods:', remainingMethods.length);
 
-    res.json({ message: 'Payment method deleted successfully' });
+    // Return response with subscription status if it was suspended
+    const response: any = { 
+      message: 'Payment method deleted successfully',
+      subscriptionSuspended: isOnlyPaymentMethod && requiresPayment
+    };
+    
+    if (isOnlyPaymentMethod && requiresPayment) {
+      response.warning = 'Your subscription has been suspended. Please add a payment method to reactivate it.';
+      response.subscriptionStatus = savedSubscription.current_plan.status;
+    }
+
+    res.json(response);
   } catch (error: any) {
     console.error('Error deleting payment method:', error);
     res.status(500).json({ message: 'Failed to delete payment method' });
@@ -656,15 +859,48 @@ export async function setDefaultPaymentMethod(req: AuthenticatedRequest, res: Re
       return res.status(404).json({ message: 'No active subscription found' });
     }
 
-    // Set all to non-default
-    subscription.payment_methods.forEach((method) => {
-      method.is_default = method.payment_method_id === id;
+    // Ensure payment_methods is an array
+    const paymentMethodsArray = ensurePaymentMethodsArray(subscription.payment_methods);
+
+    // Verify the payment method exists
+    const methodExists = paymentMethodsArray.some((m: any) => m && m.payment_method_id === id);
+    if (!methodExists) {
+      return res.status(404).json({ message: 'Payment method not found' });
+    }
+
+    // Set all to non-default, then set the selected one as default
+    paymentMethodsArray.forEach((method: any) => {
+      if (method) {
+        method.is_default = method.payment_method_id === id;
+      }
     });
+
+    // Update the subscription with the modified array
+    subscription.payment_methods = paymentMethodsArray;
+    
+    // Mark payment_methods as modified since it's Schema.Types.Mixed
+    subscription.markModified('payment_methods');
 
     // Update payment gateway default
     subscription.payment_gateway.default_payment_method_id = id;
+    subscription.markModified('payment_gateway');
 
-    await subscription.save();
+    const savedSubscription = await subscription.save();
+    
+    // Verify the default was set correctly
+    const savedMethods = ensurePaymentMethodsArray(savedSubscription.payment_methods);
+    const defaultMethod = savedMethods.find((m: any) => m && m.is_default === true);
+    
+    if (!defaultMethod || defaultMethod.payment_method_id !== id) {
+      console.error('Warning: Default payment method was not set correctly');
+      console.error('Expected ID:', id);
+      console.error('Found default:', defaultMethod?.payment_method_id);
+      return res.status(500).json({ 
+        message: 'Default payment method update failed. Please try again.' 
+      });
+    }
+    
+    console.log('Default payment method set successfully:', id);
 
     res.json({ message: 'Default payment method updated successfully' });
   } catch (error: any) {
@@ -684,9 +920,18 @@ export async function upgradeSubscription(req: AuthenticatedRequest, res: Respon
     }
 
     const { tierId } = req.body;
+    
+    console.log('Upgrade subscription request:', { 
+      userId: req.user.id, 
+      tierId, 
+      body: req.body 
+    });
 
     if (!tierId) {
-      return res.status(400).json({ message: 'Tier ID is required' });
+      return res.status(400).json({ 
+        message: 'Tier ID is required',
+        receivedBody: req.body 
+      });
     }
 
     // Find the new plan
@@ -853,25 +1098,40 @@ export async function upgradeSubscription(req: AuthenticatedRequest, res: Respon
 
       isNewSubscription = true;
     } else {
+      // Ensure current_plan exists and is properly structured
+      if (!subscription.current_plan) {
+        return res.status(400).json({ 
+          message: 'Current subscription plan is missing. Please contact support.',
+          requiresSupport: true 
+        });
+      }
+
       // Check if already on this plan
-      if (subscription.current_plan.tier_id === tierId) {
+      const currentTierId = subscription.current_plan?.tier_id;
+      if (currentTierId === tierId) {
         return res.status(400).json({ message: 'You are already on this plan' });
       }
 
-      oldPlanId = subscription.current_plan.plan_id;
-      oldTierId = subscription.current_plan.tier_id;
-      oldPrice = subscription.current_plan.price;
+      oldPlanId = subscription.current_plan?.plan_id || null;
+      oldTierId = currentTierId || null;
+      oldPrice = subscription.current_plan?.price || 0;
 
       // Calculate prorated amount for upgrade
-      const startDate = new Date(subscription.current_plan.start_date);
-      const renewalDate = new Date(subscription.current_plan.renewal_date);
+      const startDate = subscription.current_plan?.start_date 
+        ? new Date(subscription.current_plan.start_date) 
+        : now;
+      const renewalDate = subscription.current_plan?.renewal_date 
+        ? new Date(subscription.current_plan.renewal_date) 
+        : new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000); // Default to 30 days if missing
+      
       const daysRemaining = Math.ceil((renewalDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
       const totalDaysInCycle = Math.ceil((renewalDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
       paymentAmount = Math.abs(calculateProratedAmount(oldPrice, newPlan.price, daysRemaining, totalDaysInCycle));
     }
 
     // Get default payment method (only required for paid plans)
-    const defaultPaymentMethod = subscription.payment_methods?.find((m: any) => m.is_default && m.is_active);
+    const paymentMethods = ensurePaymentMethodsArray(subscription.payment_methods);
+    const defaultPaymentMethod = paymentMethods.find((m: any) => m && m.is_default && m.is_active);
 
     // If plan requires payment and no payment method exists
     if (newPlan.price > 0 && !defaultPaymentMethod) {
@@ -911,6 +1171,11 @@ export async function upgradeSubscription(req: AuthenticatedRequest, res: Respon
 
     // Add to subscription history (only if upgrading, not creating new)
     if (!isNewSubscription && oldPlanId) {
+      // Ensure subscription_history is an array before pushing
+      if (!subscription.subscription_history || !Array.isArray(subscription.subscription_history)) {
+        subscription.subscription_history = [];
+      }
+      
       subscription.subscription_history.push({
         plan_id: oldPlanId,
         tier_id: oldTierId,
@@ -925,6 +1190,9 @@ export async function upgradeSubscription(req: AuthenticatedRequest, res: Respon
         change_ip: req.ip,
         change_user_agent: req.get('user-agent'),
       } as any);
+      
+      // Mark subscription_history as modified since it's Schema.Types.Mixed
+      subscription.markModified('subscription_history');
     }
 
     // Update current plan
@@ -944,6 +1212,9 @@ export async function upgradeSubscription(req: AuthenticatedRequest, res: Respon
       trial_used: !newPlan.trial_enabled || subscription.trial?.trial_used || false,
       effective_price: newPlan.price,
     };
+    
+    // Mark current_plan as modified since it's Schema.Types.Mixed
+    subscription.markModified('current_plan');
 
     // Update plan features
     subscription.plan_features = {
@@ -961,9 +1232,17 @@ export async function upgradeSubscription(req: AuthenticatedRequest, res: Respon
       custom_integrations: false,
       dedicated_support: newPlan.limits.support_level === 'dedicated_24_7',
     };
+    
+    // Mark plan_features as modified since it's Schema.Types.Mixed
+    subscription.markModified('plan_features');
 
     // Add financial event (only if payment was processed)
     if (paymentResult) {
+      // Ensure financial_events is an array before pushing
+      if (!subscription.financial_events || !Array.isArray(subscription.financial_events)) {
+        subscription.financial_events = [];
+      }
+      
       subscription.financial_events.push({
         event_id: `evt_${Date.now()}`,
         type: 'subscription',
@@ -979,6 +1258,9 @@ export async function upgradeSubscription(req: AuthenticatedRequest, res: Respon
         processed_at: new Date(),
         created_at: new Date(),
       } as any);
+      
+      // Mark financial_events as modified since it's Schema.Types.Mixed
+      subscription.markModified('financial_events');
 
       // Create test billing history invoice
       const invoiceDate = new Date();
@@ -1026,7 +1308,15 @@ export async function upgradeSubscription(req: AuthenticatedRequest, res: Respon
         updated_at: invoiceDate,
       };
 
+      // Ensure billing_history is an array before pushing
+      if (!subscription.billing_history || !Array.isArray(subscription.billing_history)) {
+        subscription.billing_history = [];
+      }
+      
       subscription.billing_history.push(invoice as any);
+      
+      // Mark billing_history as modified since it's Schema.Types.Mixed
+      subscription.markModified('billing_history');
       
       // Update statistics
       subscription.statistics.total_subscription_paid += paymentAmount;
@@ -1035,6 +1325,12 @@ export async function upgradeSubscription(req: AuthenticatedRequest, res: Respon
       subscription.statistics.total_other_fees += otherFees;
       subscription.statistics.total_net_payouts += netPayout;
       subscription.statistics.last_updated = new Date();
+      subscription.markModified('statistics');
+    }
+
+    // Ensure audit_logs is an array
+    if (!subscription.audit_logs || !Array.isArray(subscription.audit_logs)) {
+      subscription.audit_logs = [];
     }
 
     // Add audit log
@@ -1057,7 +1353,17 @@ export async function upgradeSubscription(req: AuthenticatedRequest, res: Respon
       },
     } as any);
 
-    // Update metadata
+    // Ensure metadata exists and update it
+    if (!subscription.metadata) {
+      subscription.metadata = {
+        created_at: now,
+        updated_at: now,
+        created_by: 'seller',
+        last_modified_by: 'seller',
+        version: 1,
+        schema_version: '3.0',
+      };
+    }
     subscription.metadata.updated_at = now;
     subscription.metadata.last_modified_by = 'seller';
     subscription.metadata.version = (subscription.metadata.version || 0) + 1;
@@ -1075,7 +1381,18 @@ export async function upgradeSubscription(req: AuthenticatedRequest, res: Respon
     });
   } catch (error: any) {
     console.error('Error upgrading subscription:', error);
-    res.status(500).json({ message: 'Failed to upgrade subscription' });
+    console.error('Error stack:', error.stack);
+    console.error('Request body:', req.body);
+    console.error('User ID:', req.user?.id);
+    
+    // Return more detailed error information
+    const errorMessage = error.message || 'Failed to upgrade subscription';
+    const statusCode = error.statusCode || 500;
+    
+    res.status(statusCode).json({ 
+      message: errorMessage,
+      error: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
   }
 }
 
