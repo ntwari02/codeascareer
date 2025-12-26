@@ -1,16 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  Plus, Filter, MoreVertical, Eye, Copy, 
-  Download, Trash2, Star, Package, Search,
-  X, ExternalLink, Edit,
-  Grid3x3, List
+  Plus, Filter, SortAsc, SortDesc, MoreVertical, Eye, Copy, 
+  Download, Upload, Trash2, Star, Calendar, Package, Search,
+  ChevronDown, X, Check, ExternalLink, BarChart3, TrendingUp, Edit,
+  Grid3x3, List, Image as ImageIcon, GripVertical, Home, Layout, Monitor
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import {
-  createCollection,
-  updateCollection,
-  deleteCollection,
   getCollectionProducts,
   addProductToCollection,
   removeProductFromCollection,
@@ -22,173 +19,6 @@ import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
 import { ProductCard } from '@/components/ProductCard';
 import { ProductDetailModal } from '@/components/ProductDetailModal';
-
-// Mock collections data for seller dashboard demonstration
-const MOCK_SELLER_COLLECTIONS: Collection[] = [
-  {
-    id: 'mock-1',
-    seller_id: 'current-seller',
-    name: 'Best Sellers',
-    slug: 'best-sellers',
-    description: 'Our top-performing products that customers love the most',
-    cover_image_url: 'https://images.pexels.com/photos/1300550/pexels-photo-1300550.jpeg?auto=compress&cs=tinysrgb&w=800',
-    image_url: 'https://images.pexels.com/photos/1300550/pexels-photo-1300550.jpeg?auto=compress&cs=tinysrgb&w=800',
-    type: 'smart',
-    sort_order: 'best_selling',
-    visibility: { storefront: true, mobile_app: true },
-    is_active: true,
-    is_featured: true,
-    product_count: 24,
-    created_at: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
-    updated_at: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(),
-  },
-  {
-    id: 'mock-2',
-    seller_id: 'current-seller',
-    name: 'New Arrivals',
-    slug: 'new-arrivals',
-    description: 'Fresh products just added to our store',
-    cover_image_url: 'https://images.pexels.com/photos/163117/keyboard-white-computer-keyboard-desktop-163117.jpeg?auto=compress&cs=tinysrgb&w=800',
-    image_url: 'https://images.pexels.com/photos/163117/keyboard-white-computer-keyboard-desktop-163117.jpeg?auto=compress&cs=tinysrgb&w=800',
-    type: 'smart',
-    sort_order: 'newest',
-    visibility: { storefront: true, mobile_app: true },
-    is_active: true,
-    is_featured: true,
-    product_count: 18,
-    products: Array.from({ length: 18 }).map((_, i) => ({
-      id: `prod-${i + 1}`,
-      seller_id: 'current-seller',
-      title: `Product ${i + 1}`,
-      price: 29.99 + i * 5,
-      is_shippable: true,
-      stock_quantity: 100 - i,
-      low_stock_threshold: 10,
-      status: 'active' as const,
-      views_count: 0,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })),
-    created_at: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-  {
-    id: 'mock-3',
-    seller_id: 'current-seller',
-    name: 'Sale Items',
-    slug: 'sale-items',
-    description: 'Special discounted products - limited time offers',
-    cover_image_url: 'https://images.pexels.com/photos/1571460/pexels-photo-1571460.jpeg?auto=compress&cs=tinysrgb&w=800',
-    image_url: 'https://images.pexels.com/photos/1571460/pexels-photo-1571460.jpeg?auto=compress&cs=tinysrgb&w=800',
-    type: 'smart',
-    sort_order: 'price_asc',
-    visibility: { storefront: true, mobile_app: true },
-    is_active: true,
-    is_featured: false,
-    product_count: 12,
-    products: Array.from({ length: 12 }).map((_, i) => ({
-      id: `prod-${i + 1}`,
-      seller_id: 'current-seller',
-      title: `Product ${i + 1}`,
-      price: 29.99 + i * 5,
-      is_shippable: true,
-      stock_quantity: 100 - i,
-      low_stock_threshold: 10,
-      status: 'active' as const,
-      views_count: 0,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })),
-    created_at: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString(),
-    updated_at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
-  },
-  {
-    id: 'mock-4',
-    seller_id: 'current-seller',
-    name: 'Premium Collection',
-    slug: 'premium-collection',
-    description: 'Our handpicked selection of premium quality products',
-    type: 'manual',
-    sort_order: 'manual',
-    visibility: { storefront: true, mobile_app: true },
-    is_active: true,
-    is_featured: false,
-    product_count: 8,
-    products: Array.from({ length: 8 }).map((_, i) => ({
-      id: `prod-${i + 1}`,
-      seller_id: 'current-seller',
-      title: `Product ${i + 1}`,
-      price: 29.99 + i * 5,
-      is_shippable: true,
-      stock_quantity: 100 - i,
-      low_stock_threshold: 10,
-      status: 'active' as const,
-      views_count: 0,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })),
-    created_at: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString(),
-    updated_at: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
-  },
-  {
-    id: 'mock-5',
-    seller_id: 'current-seller',
-    name: 'Under $50',
-    slug: 'under-50',
-    description: 'Affordable products under $50 - great value for money',
-    cover_image_url: 'https://images.pexels.com/photos/996329/pexels-photo-996329.jpeg?auto=compress&cs=tinysrgb&w=800',
-    image_url: 'https://images.pexels.com/photos/996329/pexels-photo-996329.jpeg?auto=compress&cs=tinysrgb&w=800',
-    type: 'smart',
-    sort_order: 'price_asc',
-    visibility: { storefront: true, mobile_app: true },
-    is_active: true,
-    is_featured: false,
-    product_count: 35,
-    products: Array.from({ length: 35 }).map((_, i) => ({
-      id: `prod-${i + 1}`,
-      seller_id: 'current-seller',
-      title: `Product ${i + 1}`,
-      price: 29.99 + i * 5,
-      is_shippable: true,
-      stock_quantity: 100 - i,
-      low_stock_threshold: 10,
-      status: 'active' as const,
-      views_count: 0,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })),
-    created_at: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
-    updated_at: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(),
-  },
-  {
-    id: 'mock-6',
-    seller_id: 'current-seller',
-    name: 'Gift Ideas',
-    slug: 'gift-ideas',
-    description: 'Perfect gift options for any occasion',
-    type: 'manual',
-    sort_order: 'name_asc',
-    visibility: { storefront: true, mobile_app: false },
-    is_active: true,
-    is_featured: false,
-    product_count: 15,
-    products: Array.from({ length: 15 }).map((_, i) => ({
-      id: `prod-${i + 1}`,
-      seller_id: 'current-seller',
-      title: `Product ${i + 1}`,
-      price: 29.99 + i * 5,
-      is_shippable: true,
-      stock_quantity: 100 - i,
-      low_stock_threshold: 10,
-      status: 'active' as const,
-      views_count: 0,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })),
-    created_at: new Date(Date.now() - 20 * 24 * 60 * 60 * 1000).toISOString(),
-    updated_at: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
-  },
-];
 
 export default function CollectionManagement() {
   const { toast } = useToast();
@@ -243,61 +73,65 @@ export default function CollectionManagement() {
   const [showProductModal, setShowProductModal] = useState(false);
 
   useEffect(() => {
-    loadUser();
-    // Load collections immediately with mock data
     loadCollections();
   }, []);
-
-  useEffect(() => {
-    if (user) {
-      loadCollections();
-    }
-  }, [user]);
-
-  const loadUser = async () => {
-    const { data: { user: authUser } } = await supabase.auth.getUser();
-    if (authUser) {
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', authUser.id)
-        .single();
-      setUser(profile || { id: authUser.id, email: authUser.email });
-    } else {
-      // Set a mock user for demonstration
-      setUser({ id: 'current-seller', email: 'seller@example.com' });
-    }
-  };
 
   const loadCollections = async () => {
     setLoading(true);
     try {
-      // Always show mock data for demonstration
-      // In production, you would load real collections here
-      const sellerId = user?.id || 'current-seller';
-      const mockWithSellerId = MOCK_SELLER_COLLECTIONS.map(c => ({
-        ...c,
-        seller_id: sellerId,
+      const token = localStorage.getItem('auth_token');
+      const res = await fetch('http://localhost:5000/api/seller/collections', {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        credentials: 'include',
+      });
+
+      if (res.status === 401) {
+        window.location.href = '/login';
+        return;
+      }
+      if (res.status === 403) {
+        window.location.href = '/';
+        return;
+      }
+
+      if (!res.ok) {
+        throw new Error('Failed to load collections');
+      }
+
+      const data = await res.json();
+      const mapped: Collection[] = (data.collections || []).map((c: any) => ({
+        id: c._id,
+        seller_id: c.sellerId,
+        name: c.name,
+        slug: c.slug,
+        description: c.description,
+        image_url: c.imageUrl,
+        cover_image_url: c.coverImageUrl,
+        type: c.type,
+        sort_order: c.sortOrder,
+        visibility: {
+          storefront: c.visibility?.storefront ?? true,
+          mobile_app: c.visibility?.mobile_app ?? true,
+        },
+        is_active: c.isActive,
+        is_featured: c.isFeatured,
+        created_at: c.createdAt,
+        updated_at: c.updatedAt,
+        product_count: c.productCount ?? 0,
       }));
-      setCollections(mockWithSellerId);
-      // Update current collections count
+
+      setCollections(mapped);
       setSellerRestrictions(prev => ({
         ...prev,
-        currentCollections: mockWithSellerId.length,
+        currentCollections: mapped.length,
       }));
     } catch (error: any) {
-      // On error, still show mock data
-      const sellerId = user?.id || 'current-seller';
-      const mockWithSellerId = MOCK_SELLER_COLLECTIONS.map(c => ({
-        ...c,
-        seller_id: sellerId,
-      }));
-      setCollections(mockWithSellerId);
-      // Update current collections count
-      setSellerRestrictions(prev => ({
-        ...prev,
-        currentCollections: mockWithSellerId.length,
-      }));
+      console.error('Failed to load collections', error);
+      setCollections([]);
     } finally {
       setLoading(false);
     }
@@ -310,8 +144,21 @@ export default function CollectionManagement() {
       message: 'Are you sure you want to delete this collection?',
       onConfirm: async () => {
         try {
-          const { error } = await deleteCollection(id);
-          if (error) throw error;
+          const token = localStorage.getItem('auth_token');
+          const res = await fetch(`http://localhost:5000/api/seller/collections/${id}`, {
+            method: 'DELETE',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+            credentials: 'include',
+          });
+
+          if (!res.ok) {
+            const data = await res.json().catch(() => null);
+            throw new Error(data?.message || 'Failed to delete collection');
+          }
+
           toast({
             title: 'Success',
             description: 'Collection deleted successfully',
@@ -483,50 +330,109 @@ export default function CollectionManagement() {
 
     try {
       switch (action) {
-        case 'delete':
+        case 'delete': {
           setConfirmDialog({
             isOpen: true,
             title: 'Delete Collections',
             message: `Are you sure you want to delete ${selectedCollections.length} collection(s)?`,
             onConfirm: async () => {
-              for (const id of selectedCollections) {
-                await deleteCollection(id);
+              try {
+                const token = localStorage.getItem('auth_token');
+                await Promise.all(
+                  selectedCollections.map((id) =>
+                    fetch(`http://localhost:5000/api/seller/collections/${id}`, {
+                      method: 'DELETE',
+                      headers: {
+                        'Content-Type': 'application/json',
+                        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                      },
+                      credentials: 'include',
+                    })
+                  )
+                );
+                toast({
+                  title: 'Success',
+                  description: `${selectedCollections.length} collection(s) deleted`,
+                });
+                setSelectedCollections([]);
+                loadCollections();
+              } catch (error: any) {
+                toast({
+                  title: 'Error',
+                  description: error.message || 'Failed to delete collections',
+                  variant: 'destructive',
+                });
               }
-              toast({
-                title: 'Success',
-                description: `${selectedCollections.length} collection(s) deleted`,
-              });
-              setSelectedCollections([]);
             },
           });
           break;
-        case 'feature':
-          for (const id of selectedCollections) {
-            await updateCollection(id, { is_featured: true });
-          }
+        }
+        case 'feature': {
+          const token = localStorage.getItem('auth_token');
+          await Promise.all(
+            selectedCollections.map((id) =>
+              fetch(`http://localhost:5000/api/seller/collections/${id}`, {
+                method: 'PATCH',
+                headers: {
+                  'Content-Type': 'application/json',
+                  ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                },
+                credentials: 'include',
+                body: JSON.stringify({ is_featured: true }),
+              })
+            )
+          );
           toast({
             title: 'Success',
             description: `${selectedCollections.length} collection(s) marked as featured`,
           });
+          loadCollections();
           break;
-        case 'publish':
-          for (const id of selectedCollections) {
-            await updateCollection(id, { is_active: true, published_at: new Date().toISOString() });
-          }
+        }
+        case 'publish': {
+          const token = localStorage.getItem('auth_token');
+          await Promise.all(
+            selectedCollections.map((id) =>
+              fetch(`http://localhost:5000/api/seller/collections/${id}`, {
+                method: 'PATCH',
+                headers: {
+                  'Content-Type': 'application/json',
+                  ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                },
+                credentials: 'include',
+                body: JSON.stringify({ is_active: true }),
+              })
+            )
+          );
           toast({
             title: 'Success',
             description: `${selectedCollections.length} collection(s) published`,
           });
+          loadCollections();
           break;
-        case 'unpublish':
-          for (const id of selectedCollections) {
-            await updateCollection(id, { is_active: false });
-          }
+        }
+        case 'unpublish': {
+          const token = localStorage.getItem('auth_token');
+          await Promise.all(
+            selectedCollections.map((id) =>
+              fetch(`http://localhost:5000/api/seller/collections/${id}`, {
+                method: 'PATCH',
+                headers: {
+                  'Content-Type': 'application/json',
+                  ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                },
+                credentials: 'include',
+                body: JSON.stringify({ is_active: false }),
+              })
+            )
+          );
           toast({
             title: 'Success',
             description: `${selectedCollections.length} collection(s) unpublished`,
           });
+          loadCollections();
           break;
+        }
         case 'duplicate':
           toast({
             title: 'Info',
@@ -1002,7 +908,7 @@ export default function CollectionManagement() {
                 </div>
 
                 {/* Quick Actions */}
-                <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
                   <Button
                     variant="outline"
                     size="sm"
@@ -1014,6 +920,19 @@ export default function CollectionManagement() {
                   >
                     <Package className="h-4 w-4 mr-1" />
                     Manage Products
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      const url = `/collections/${collection.slug || collection.name.toLowerCase().replace(/\s+/g, '-')}`;
+                      window.open(url, '_blank');
+                    }}
+                    className="flex-1"
+                    title="View collection page"
+                  >
+                    <ExternalLink className="h-4 w-4 mr-1" />
+                    View Page
                   </Button>
                   <div className="relative">
                     <Button
@@ -1249,6 +1168,14 @@ function CollectionFormModal({
     conditions: collection?.conditions || ([] as CollectionCondition[]),
     published_at: collection?.published_at || new Date().toISOString().split('T')[0],
     scheduled_publish_at: collection?.scheduled_publish_at?.split('T')[0] || '',
+    placement: (collection as any)?.placement || {
+      homepage_banner: false,
+      homepage_featured: false,
+      homepage_tabs: false,
+      category_page: false,
+      navigation_menu: false,
+    },
+    placement_priority: (collection as any)?.placement_priority || 0,
   });
 
   const [showConditionBuilder, setShowConditionBuilder] = useState(false);
@@ -1259,38 +1186,125 @@ function CollectionFormModal({
   });
   const [previewProducts, setPreviewProducts] = useState<Product[]>([]);
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [showTemplates, setShowTemplates] = useState(!collection);
+
+  const collectionTemplates = [
+    {
+      name: 'New Arrivals',
+      description: 'Showcase recently added products',
+      type: 'smart' as const,
+      conditions: [{ type: 'tag', operator: 'contains', value: 'new' }],
+      is_featured: true,
+      is_trending: true,
+    },
+    {
+      name: 'Best Sellers',
+      description: 'Top-performing products',
+      type: 'smart' as const,
+      sort_order: 'best_selling',
+      is_featured: true,
+    },
+    {
+      name: 'Sale Items',
+      description: 'Discounted products',
+      type: 'smart' as const,
+      conditions: [{ type: 'price', operator: 'less_than', value: '50' }],
+      is_sale: true,
+    },
+    {
+      name: 'Seasonal Collection',
+      description: 'Products for current season',
+      type: 'manual' as const,
+      is_seasonal: true,
+    },
+    {
+      name: 'Bundle Collection',
+      description: 'Product bundles and packages',
+      type: 'manual' as const,
+    },
+    {
+      name: 'Premium Collection',
+      description: 'High-end products',
+      type: 'smart' as const,
+      conditions: [{ type: 'price', operator: 'greater_than', value: '100' }],
+    },
+  ];
+
+  const applyTemplate = (template: typeof collectionTemplates[0]) => {
+    setFormData({
+      ...formData,
+      name: template.name,
+      description: template.description,
+      type: template.type,
+      sort_order: template.sort_order || 'manual',
+      is_featured: template.is_featured || false,
+      is_trending: template.is_trending || false,
+      is_seasonal: template.is_seasonal || false,
+      is_sale: template.is_sale || false,
+      conditions: template.conditions || [],
+    });
+    setShowTemplates(false);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!sellerId) return;
-
     setLoading(true);
     try {
-      const collectionData = {
-        ...formData,
-        seller_id: sellerId,
+      const token = localStorage.getItem('auth_token');
+
+      const payload: any = {
+        name: formData.name,
+        description: formData.description,
+        type: formData.type,
+        slug: formData.slug,
+        image_url: formData.image_url,
+        cover_image_url: formData.cover_image_url,
+        sort_order: formData.sort_order,
+        is_active: formData.is_active,
+        is_featured: formData.is_featured,
+        is_draft: formData.is_draft,
+        is_trending: formData.is_trending,
+        is_seasonal: formData.is_seasonal,
+        is_sale: formData.is_sale,
+        visibility: formData.visibility,
+        seo_title: formData.seo_title,
+        seo_description: formData.seo_description,
         conditions: formData.type === 'smart' ? formData.conditions : [],
-        published_at: formData.published_at ? new Date(formData.published_at).toISOString() : undefined,
-        scheduled_publish_at: formData.scheduled_publish_at
-          ? new Date(formData.scheduled_publish_at).toISOString()
-          : undefined,
+        placement: formData.placement,
+        placement_priority: formData.placement_priority,
       };
 
-      if (collection) {
-        const { error } = await updateCollection(collection.id, collectionData);
-        if (error) throw error;
-        toast({
-          title: 'Success',
-          description: 'Collection updated successfully',
-        });
-      } else {
-        const { error } = await createCollection(collectionData);
-        if (error) throw error;
-        toast({
-          title: 'Success',
-          description: 'Collection created successfully',
-        });
+      if (formData.published_at) {
+        payload.published_at = new Date(formData.published_at).toISOString();
       }
+      if (formData.scheduled_publish_at) {
+        payload.scheduled_publish_at = new Date(formData.scheduled_publish_at).toISOString();
+      }
+
+      const url = collection
+        ? `http://localhost:5000/api/seller/collections/${collection.id}`
+        : 'http://localhost:5000/api/seller/collections';
+      const method = collection ? 'PATCH' : 'POST';
+
+      const res = await fetch(url, {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        credentials: 'include',
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.message || 'Failed to save collection');
+      }
+
+      toast({
+        title: 'Success',
+        description: collection ? 'Collection updated successfully' : 'Collection created successfully',
+      });
       onSuccess();
     } catch (error: any) {
       toast({
@@ -1370,6 +1384,77 @@ function CollectionFormModal({
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 space-y-6">
+          {/* Collection Templates */}
+          {!collection && showTemplates && (
+            <div className="mb-6 p-4 bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-900/20 dark:to-purple-900/20 rounded-lg border border-blue-200 dark:border-blue-500/30">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-semibold text-gray-900 dark:text-white">Quick Start Templates</h3>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowTemplates(false)}
+                >
+                  <X className="w-4 h-4" />
+                </Button>
+              </div>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                Choose a template to get started quickly, or create a custom collection
+              </p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {collectionTemplates.map((template, index) => (
+                  <button
+                    key={index}
+                    type="button"
+                    onClick={() => applyTemplate(template)}
+                    className="text-left p-3 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 hover:border-blue-500 dark:hover:border-blue-500 hover:shadow-md transition-all"
+                  >
+                    <div className="font-medium text-gray-900 dark:text-white mb-1">
+                      {template.name}
+                    </div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400">
+                      {template.description}
+                    </div>
+                    <div className="mt-2 flex items-center gap-2">
+                      <span className="text-xs px-2 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded">
+                        {template.type}
+                      </span>
+                      {template.is_featured && (
+                        <span className="text-xs px-2 py-0.5 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded">
+                          Featured
+                        </span>
+                      )}
+                    </div>
+                  </button>
+                ))}
+              </div>
+              <div className="mt-4 pt-4 border-t border-blue-200 dark:border-blue-500/30">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setShowTemplates(false)}
+                  className="w-full"
+                >
+                  Create Custom Collection Instead
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {!collection && !showTemplates && (
+            <div className="mb-4">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowTemplates(true)}
+                className="text-blue-600 dark:text-blue-400"
+              >
+                ← Back to Templates
+              </Button>
+            </div>
+          )}
+
           {/* Basic Info */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
@@ -1717,6 +1802,290 @@ function CollectionFormModal({
             </div>
           </div>
 
+          {/* Thumbnail Image Selection */}
+          <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
+            <h3 className="font-semibold mb-4 flex items-center gap-2">
+              <ImageIcon className="w-5 h-5 text-red-400" />
+              Collection Thumbnail Image
+            </h3>
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Cover Image URL
+                  </label>
+                  <input
+                    type="url"
+                    value={formData.cover_image_url}
+                    onChange={(e) => setFormData({ ...formData, cover_image_url: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
+                    placeholder="https://example.com/image.jpg"
+                  />
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                    Main image displayed on collection page
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Thumbnail Image URL
+                  </label>
+                  <input
+                    type="url"
+                    value={formData.image_url}
+                    onChange={(e) => setFormData({ ...formData, image_url: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
+                    placeholder="https://example.com/thumbnail.jpg"
+                  />
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                    Small image for cards and listings
+                  </p>
+                </div>
+              </div>
+              
+              {/* Image Preview */}
+              {(formData.cover_image_url || formData.image_url) && (
+                <div className="grid grid-cols-2 gap-4">
+                  {formData.cover_image_url && (
+                    <div className="space-y-2">
+                      <label className="text-xs font-medium text-gray-600 dark:text-gray-400">Cover Preview</label>
+                      <div className="relative aspect-video rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 bg-gray-100 dark:bg-gray-800">
+                        <img
+                          src={formData.cover_image_url}
+                          alt="Cover preview"
+                          className="w-full h-full object-cover"
+                          onError={(e) => {
+                            e.currentTarget.src = 'https://via.placeholder.com/800x450?text=Invalid+Image';
+                          }}
+                        />
+                      </div>
+                    </div>
+                  )}
+                  {formData.image_url && (
+                    <div className="space-y-2">
+                      <label className="text-xs font-medium text-gray-600 dark:text-gray-400">Thumbnail Preview</label>
+                      <div className="relative aspect-square rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 bg-gray-100 dark:bg-gray-800">
+                        <img
+                          src={formData.image_url}
+                          alt="Thumbnail preview"
+                          className="w-full h-full object-cover"
+                          onError={(e) => {
+                            e.currentTarget.src = 'https://via.placeholder.com/400x400?text=Invalid+Image';
+                          }}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+              
+              {/* Upload Button */}
+              <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-6 text-center">
+                <Upload className="w-8 h-8 mx-auto text-gray-400 dark:text-gray-500 mb-2" />
+                <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">
+                  Upload image files or paste image URLs above
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    const url = prompt('Enter image URL:');
+                    if (url) {
+                      setFormData({ ...formData, image_url: url, cover_image_url: url });
+                    }
+                  }}
+                >
+                  <ImageIcon className="w-4 h-4 mr-2" />
+                  Choose Image URL
+                </Button>
+              </div>
+            </div>
+          </div>
+
+          {/* Collection Placement Control */}
+          <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
+            <h3 className="font-semibold mb-4 flex items-center gap-2">
+              <Layout className="w-5 h-5 text-red-400" />
+              Collection Placement Control
+            </h3>
+            <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+              Control where this collection appears on your storefront
+            </p>
+            <div className="space-y-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <label className="flex items-start gap-3 p-3 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={formData.placement.homepage_banner}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        placement: { ...formData.placement, homepage_banner: e.target.checked },
+                      })
+                    }
+                    className="mt-1"
+                  />
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <Home className="w-4 h-4 text-gray-500" />
+                      <span className="font-medium text-gray-900 dark:text-white">Homepage Banner</span>
+                    </div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      Display as featured banner on homepage
+                    </p>
+                  </div>
+                </label>
+                
+                <label className="flex items-start gap-3 p-3 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={formData.placement.homepage_featured}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        placement: { ...formData.placement, homepage_featured: e.target.checked },
+                      })
+                    }
+                    className="mt-1"
+                  />
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <Star className="w-4 h-4 text-yellow-500" />
+                      <span className="font-medium text-gray-900 dark:text-white">Homepage Featured</span>
+                    </div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      Show in featured collections section
+                    </p>
+                  </div>
+                </label>
+                
+                <label className="flex items-start gap-3 p-3 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={formData.placement.homepage_tabs}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        placement: { ...formData.placement, homepage_tabs: e.target.checked },
+                      })
+                    }
+                    className="mt-1"
+                  />
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <Monitor className="w-4 h-4 text-gray-500" />
+                      <span className="font-medium text-gray-900 dark:text-white">Homepage Tabs</span>
+                    </div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      Include in homepage tab navigation
+                    </p>
+                  </div>
+                </label>
+                
+                <label className="flex items-start gap-3 p-3 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={formData.placement.category_page}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        placement: { ...formData.placement, category_page: e.target.checked },
+                      })
+                    }
+                    className="mt-1"
+                  />
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <Package className="w-4 h-4 text-gray-500" />
+                      <span className="font-medium text-gray-900 dark:text-white">Category Pages</span>
+                    </div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      Show on related category pages
+                    </p>
+                  </div>
+                </label>
+                
+                <label className="flex items-start gap-3 p-3 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer transition-colors md:col-span-2">
+                  <input
+                    type="checkbox"
+                    checked={formData.placement.navigation_menu}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        placement: { ...formData.placement, navigation_menu: e.target.checked },
+                      })
+                    }
+                    className="mt-1"
+                  />
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <Layout className="w-4 h-4 text-gray-500" />
+                      <span className="font-medium text-gray-900 dark:text-white">Navigation Menu</span>
+                    </div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      Add to main navigation menu
+                    </p>
+                  </div>
+                </label>
+              </div>
+              
+              {/* Placement Priority */}
+              <div className="mt-4">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Placement Priority
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  value={formData.placement_priority}
+                  onChange={(e) =>
+                    setFormData({ ...formData, placement_priority: parseInt(e.target.value) || 0 })
+                  }
+                  className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
+                  placeholder="0 (lower = higher priority)"
+                />
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  Lower numbers appear first. Use 0-100 range.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Dynamic Collection Page Preview */}
+          <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
+            <h3 className="font-semibold mb-4 flex items-center gap-2">
+              <ExternalLink className="w-5 h-5 text-red-400" />
+              Collection Page
+            </h3>
+            <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-500/30 rounded-lg p-4">
+              <p className="text-sm text-blue-800 dark:text-blue-300 mb-3">
+                A dedicated page for this collection will be automatically generated and accessible at:
+              </p>
+              <div className="flex items-center gap-2 bg-white dark:bg-gray-800 rounded-lg p-3 border border-blue-200 dark:border-blue-500/30">
+                <code className="text-sm text-blue-600 dark:text-blue-400 flex-1">
+                  /collections/{formData.slug || formData.name.toLowerCase().replace(/\s+/g, '-')}
+                </code>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    const url = `/collections/${formData.slug || formData.name.toLowerCase().replace(/\s+/g, '-')}`;
+                    window.open(url, '_blank');
+                  }}
+                  disabled={!formData.name}
+                >
+                  <ExternalLink className="w-4 h-4 mr-2" />
+                  Preview Page
+                </Button>
+              </div>
+              <p className="text-xs text-blue-600 dark:text-blue-400 mt-2">
+                The page will include all products in this collection with filtering, sorting, and search capabilities.
+              </p>
+            </div>
+          </div>
+
           {/* SEO */}
           <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
             <h3 className="font-semibold mb-4">SEO Settings</h3>
@@ -1777,6 +2146,8 @@ function CollectionProductsModal({
   const [currentPage, setCurrentPage] = useState(1);
   const [productsPerPage] = useState(10);
   const [showSmartRules, setShowSmartRules] = useState(false);
+  const [draggedProduct, setDraggedProduct] = useState<string | null>(null);
+  const [dragOverProduct, setDragOverProduct] = useState<string | null>(null);
 
   // Close modal on outside click
   useEffect(() => {
@@ -2162,6 +2533,55 @@ function CollectionProductsModal({
     }
   };
 
+  // Drag and Drop Handlers
+  const handleDragStart = (productId: string) => {
+    setDraggedProduct(productId);
+  };
+
+  const handleDragOver = (e: React.DragEvent, productId: string) => {
+    e.preventDefault();
+    setDragOverProduct(productId);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedProduct(null);
+    setDragOverProduct(null);
+  };
+
+  const handleDrop = async (e: React.DragEvent, targetProductId: string) => {
+    e.preventDefault();
+    if (!draggedProduct || draggedProduct === targetProductId) {
+      setDraggedProduct(null);
+      setDragOverProduct(null);
+      return;
+    }
+
+    const draggedIndex = products.findIndex(p => p.id === draggedProduct);
+    const targetIndex = products.findIndex(p => p.id === targetProductId);
+    
+    if (draggedIndex === -1 || targetIndex === -1) {
+      setDraggedProduct(null);
+      setDragOverProduct(null);
+      return;
+    }
+
+    // Reorder products array
+    const newProducts = [...products];
+    const [removed] = newProducts.splice(draggedIndex, 1);
+    newProducts.splice(targetIndex, 0, removed);
+    
+    setProducts(newProducts);
+    
+    // In a real app, you would save the new order to the backend
+    toast({
+      title: 'Success',
+      description: 'Product order updated',
+    });
+    
+    setDraggedProduct(null);
+    setDragOverProduct(null);
+  };
+
   const availableProducts = allProducts.filter(
     (p) => !products.some((cp) => cp.id === p.id) && p.title.toLowerCase().includes(searchTerm.toLowerCase())
   );
@@ -2370,12 +2790,32 @@ function CollectionProductsModal({
             ) : (
               <>
                 <div className="space-y-2">
+                  {collection.type === 'manual' && (
+                    <div className="mb-2 p-2 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-500/30">
+                      <p className="text-xs text-blue-800 dark:text-blue-300 flex items-center gap-2">
+                        <GripVertical className="w-4 h-4" />
+                        Drag products to reorder them in the collection
+                      </p>
+                    </div>
+                  )}
                   {paginatedProducts.map((product) => (
                     <div
                       key={product.id}
-                      className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700 rounded hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors"
+                      draggable={collection.type === 'manual'}
+                      onDragStart={() => handleDragStart(product.id)}
+                      onDragOver={(e) => handleDragOver(e, product.id)}
+                      onDragEnd={handleDragEnd}
+                      onDrop={(e) => handleDrop(e, product.id)}
+                      className={`flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700 rounded hover:bg-gray-100 dark:hover:bg-gray-600 transition-all ${
+                        draggedProduct === product.id ? 'opacity-50' : ''
+                      } ${
+                        dragOverProduct === product.id ? 'border-2 border-blue-500 bg-blue-50 dark:bg-blue-900/20' : 'border border-transparent'
+                      } ${collection.type === 'manual' ? 'cursor-move' : ''}`}
                     >
                       <div className="flex items-center gap-3 flex-1">
+                        {collection.type === 'manual' && (
+                          <GripVertical className="w-5 h-5 text-gray-400 dark:text-gray-500 cursor-grab active:cursor-grabbing" />
+                        )}
                         {product.images && product.images.length > 0 && (
                           <img
                             src={product.images.find(img => img.is_primary)?.url || product.images[0]?.url || '/placeholder.png'}

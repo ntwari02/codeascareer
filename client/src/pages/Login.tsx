@@ -65,29 +65,18 @@ export function Login() {
         return;
       }
 
-      // Login successful, show success message and redirect to home after a short delay
+      // Login successful: show success message and redirect based on role
       showToast('Login successful. Welcome back to Reaglex!', 'success');
 
-      // Role-based redirect after login
-      setTimeout(() => {
-        try {
-          const storedUser = localStorage.getItem('user');
-          if (storedUser) {
-            const parsed = JSON.parse(storedUser);
-            if (parsed.role === 'seller') {
-              navigate('/seller');
-              return;
-            }
-            if (parsed.role === 'admin') {
-              navigate('/admin');
-              return;
-            }
-          }
-          navigate('/');
-        } catch {
-          navigate('/');
-        }
-      }, 2000);
+      const { user } = useAuthStore.getState();
+
+      if (user?.role === 'seller') {
+        navigate('/seller');
+      } else if (user?.role === 'admin') {
+        navigate('/admin');
+      } else {
+        navigate('/');
+      }
     } catch (err: any) {
       setError(err.message || 'An unexpected error occurred. Please try again.');
     } finally {

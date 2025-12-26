@@ -14,6 +14,7 @@ import ProfilePage from '@/pages/seller/ProfilePage';
 import InboxPage from '@/pages/seller/InboxPage';
 import SupportCenter from '@/pages/seller/SupportCenter';
 import NotificationsPage from '@/pages/seller/NotificationsPage';
+import OrderDetailsPage from '@/pages/seller/OrderDetailsPage';
 import Notifications from '@/components/dashboard/Notifications';
 import { useAuthStore } from '../stores/authStore';
 
@@ -123,6 +124,7 @@ const SellerDashboard: React.FC = () => {
             <Route path="dashboard" element={<DashboardOverview />} />
             <Route path="inventory" element={<InventoryManagement />} />
             <Route path="orders" element={<OrdersPage />} />
+            <Route path="orders/:orderId" element={<OrderDetailsPage />} />
             <Route path="disputes" element={<DisputeResolution />} />
             <Route path="products" element={<ProductManagement />} />
             <Route path="collections" element={<CollectionManagement />} />

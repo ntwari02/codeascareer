@@ -8,6 +8,7 @@ import cookieParser from 'cookie-parser';
 import mongoose from 'mongoose';
 import path from 'path';
 import authRoutes from './src/routes/authRoutes';
+import sellerRoutes from './src/routes/sellerRoutes';
 import inventoryRoutes from './src/routes/inventoryRoutes';
 import profileRoutes from './src/routes/profileRoutes';
 import sellerSettingsRoutes from './src/routes/sellerSettingsRoutes';
@@ -16,6 +17,7 @@ import knowledgeBaseRoutes from './src/routes/knowledgeBaseRoutes';
 import disputeRoutes from './src/routes/disputeRoutes';
 import accountHealthRoutes from './src/routes/accountHealthRoutes';
 import systemNotificationRoutes from './src/routes/systemNotificationRoutes';
+import subscriptionRoutes from './src/routes/subscriptionRoutes';
 
 dotenv.config();
 
@@ -67,6 +69,12 @@ app.use('/api/seller/disputes', disputeRoutes);
 app.use('/api/seller/account-health', accountHealthRoutes);
 // Seller system notification routes
 app.use('/api/seller/notifications', systemNotificationRoutes);
+
+// Seller routes
+app.use('/api/seller', sellerRoutes);
+
+// Subscription routes
+app.use('/api/seller/subscription', subscriptionRoutes);
 
 // 404 handler
 app.use((req: Request, res: Response) => {
