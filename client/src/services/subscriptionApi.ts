@@ -152,14 +152,17 @@ export const subscriptionApi = {
   /**
    * Delete a payment method
    * Returns a result object instead of throwing errors for expected cases
+   * @param paymentMethodId - The ID of the payment method to delete
+   * @param password - User password for verification
    */
-  async deletePaymentMethod(paymentMethodId: string): Promise<{
+  async deletePaymentMethod(paymentMethodId: string, password: string): Promise<{
     success: boolean;
     data?: any;
     error?: {
       message: string;
       code?: string;
       isOnlyPaymentMethod?: boolean;
+      requiresPassword?: boolean;
     };
   }> {
     try {
@@ -167,6 +170,7 @@ export const subscriptionApi = {
         method: 'DELETE',
         headers: getAuthHeaders(),
         credentials: 'include',
+        body: JSON.stringify({ password }),
       });
 
       if (!response.ok) {

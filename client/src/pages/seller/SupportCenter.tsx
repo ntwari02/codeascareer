@@ -176,6 +176,7 @@ const SupportCenter: React.FC = () => {
   const [kbCategory, setKbCategory] = useState<string>('all');
   const [selectedArticle, setSelectedArticle] = useState<KnowledgeArticle | null>(null);
   const [showArticleModal, setShowArticleModal] = useState(false);
+  const [isLoadingArticles, setIsLoadingArticles] = useState(false);
   
   // Disputes state
   const [disputes, setDisputes] = useState<Dispute[]>([]);
@@ -543,11 +544,11 @@ const SupportCenter: React.FC = () => {
   // Get status badge
   const getStatusBadge = (status: SupportTicket['status']) => {
     const styles: Record<string, string> = {
-      open: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300',
-      in_progress: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300',
-      waiting_customer: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300',
-      resolved: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300',
-      closed: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300',
+      open: 'bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 border border-amber-200 dark:border-amber-700/50',
+      in_progress: 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 border border-blue-200 dark:border-blue-700/50',
+      waiting_customer: 'bg-orange-50 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300 border border-orange-200 dark:border-orange-700/50',
+      resolved: 'bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-300 border border-green-200 dark:border-green-700/50',
+      closed: 'bg-gray-50 text-gray-700 dark:bg-gray-800 dark:text-gray-300 border border-gray-200 dark:border-gray-700',
     };
     return (
       <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${styles[status] || ''}`}>
@@ -559,10 +560,10 @@ const SupportCenter: React.FC = () => {
   // Get priority badge
   const getPriorityBadge = (priority: SupportTicket['priority']) => {
     const styles: Record<string, string> = {
-      low: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300',
-      medium: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300',
-      high: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300',
-      urgent: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300',
+      low: 'bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-300 border border-green-200 dark:border-green-700/50',
+      medium: 'bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 border border-amber-200 dark:border-amber-700/50',
+      high: 'bg-orange-50 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300 border border-orange-200 dark:border-orange-700/50',
+      urgent: 'bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300 border border-red-200 dark:border-red-700/50',
     };
     return (
       <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${styles[priority] || ''}`}>
@@ -587,6 +588,7 @@ const SupportCenter: React.FC = () => {
 
   // Knowledge Base Functions
   const fetchArticles = async () => {
+    setIsLoadingArticles(true);
     try {
       const token = localStorage.getItem('auth_token');
       const params = new URLSearchParams();
@@ -598,11 +600,21 @@ const SupportCenter: React.FC = () => {
         credentials: 'include',
       });
       
-      if (!response.ok) throw new Error('Failed to fetch articles');
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || 'Failed to fetch articles');
+      }
       const data = await response.json();
       setArticles(data.articles || []);
+      
+      // Log for debugging
+      console.log('Knowledge base articles loaded:', data.articles?.length || 0);
     } catch (error: any) {
       console.error('Failed to fetch articles:', error);
+      showToast(error.message || 'Failed to load knowledge base articles', 'error');
+      setArticles([]);
+    } finally {
+      setIsLoadingArticles(false);
     }
   };
 
@@ -752,6 +764,10 @@ const SupportCenter: React.FC = () => {
     fetchAccountHealth();
     fetchNotifications();
     fetchUnreadCount();
+    // Fetch articles on initial load if knowledge tab is active
+    if (activeTab === 'knowledge') {
+      fetchArticles();
+    }
 
     // Poll for updates every 30 seconds
     pollingIntervalRef.current = setInterval(() => {
@@ -814,11 +830,11 @@ const SupportCenter: React.FC = () => {
   return (
     <div className="space-y-6">
       {/* Enhanced Header with Seller Info */}
-      <div className="bg-gray-50 dark:bg-gray-900/20 rounded-xl p-6 border border-gray-200 dark:border-gray-800">
+      <div className="bg-gradient-to-r from-red-50/50 to-orange-50/50 dark:from-red-900/10 dark:to-orange-900/10 rounded-xl p-6 border border-red-100 dark:border-red-500/20">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div className="flex-1">
             <h1 className="text-3xl font-bold text-gray-900 dark:text-white flex items-center gap-2 transition-colors duration-300">
-              <LifeBuoy className="w-8 h-8 text-gray-500" />
+              <LifeBuoy className="w-8 h-8 text-red-400 dark:text-red-400" />
               Seller Support Center
             </h1>
             <p className="text-gray-600 dark:text-gray-400 mt-1 text-sm transition-colors duration-300">
@@ -827,7 +843,7 @@ const SupportCenter: React.FC = () => {
             {user && (
               <div className="mt-3 flex items-center gap-3 flex-wrap">
                 <div className="flex items-center gap-2">
-                  <User className="w-4 h-4 text-gray-500" />
+                  <User className="w-4 h-4 text-red-400" />
                   <span className="text-sm text-gray-700 dark:text-gray-300">{user.full_name || user.email}</span>
                 </div>
                 <span className="text-xs text-gray-500 dark:text-gray-400">ID: {user.id?.slice(0, 8)}...</span>
@@ -840,7 +856,7 @@ const SupportCenter: React.FC = () => {
               setActiveTab('tickets');
               setShowCreateModal(true);
             }}
-            className="bg-red-500 hover:bg-red-600"
+            className="bg-gradient-to-r from-red-500 to-orange-500 hover:from-red-600 hover:to-orange-600 text-white shadow-md hover:shadow-lg transition-all"
           >
             <Plus className="w-4 h-4 mr-2" />
             New Ticket
@@ -863,7 +879,7 @@ const SupportCenter: React.FC = () => {
                 }}
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
-                className="bg-white dark:bg-transparent hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded-xl p-4 text-gray-900 dark:text-gray-200 hover:shadow-lg transition-all border border-gray-200 dark:border-gray-700"
+                className="bg-white/80 dark:bg-gray-800/30 hover:bg-red-50/50 dark:hover:bg-red-900/10 rounded-xl p-4 text-gray-900 dark:text-gray-200 hover:shadow-lg transition-all border border-red-100 dark:border-red-500/20 hover:border-red-200 dark:hover:border-red-500/30"
               >
                 <Icon className="w-6 h-6 mb-2" />
                 <p className="text-xs font-semibold text-center">{item.label}</p>
@@ -891,14 +907,14 @@ const SupportCenter: React.FC = () => {
               onClick={() => setActiveTab(tab.id as any)}
               className={`flex items-center gap-2 px-4 py-2 border-b-2 transition-colors ${
                 activeTab === tab.id
-                  ? 'border-gray-500 text-gray-600 dark:text-gray-400'
-                  : 'border-transparent text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
+                  ? 'border-red-400 text-red-600 dark:text-red-400 font-medium'
+                  : 'border-transparent text-gray-600 dark:text-gray-400 hover:text-red-500 dark:hover:text-red-400'
               }`}
             >
               <Icon className="w-4 h-4" />
               <span>{tab.label}</span>
               {tab.badge !== undefined && tab.badge > 0 && (
-                <span className="bg-gray-500 text-white text-xs rounded-full px-2 py-0.5">{tab.badge}</span>
+                <span className="bg-gradient-to-r from-red-500 to-orange-500 text-white text-xs rounded-full px-2 py-0.5 font-semibold shadow-sm">{tab.badge}</span>
               )}
             </button>
           );
@@ -910,63 +926,67 @@ const SupportCenter: React.FC = () => {
         <div className="space-y-6">
           {/* Statistics Cards */}
           <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-            <div className="bg-white/50 dark:bg-gray-900/50 rounded-xl p-4 border border-gray-200 dark:border-gray-700/30">
+            <div className="bg-gradient-to-br from-red-50/80 to-orange-50/80 dark:from-red-900/20 dark:to-orange-900/20 rounded-xl p-4 border border-red-100 dark:border-red-500/20 shadow-sm">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-xs text-gray-600 dark:text-gray-400">Total Tickets</p>
-                  <p className="text-2xl font-bold text-gray-900 dark:text-white">{stats.total}</p>
+                  <p className="text-xs text-gray-600 dark:text-gray-400 font-medium">Total Tickets</p>
+                  <p className="text-2xl font-bold text-gray-900 dark:text-white mt-1">{stats.total}</p>
                 </div>
-                <FileText className="w-8 h-8 text-gray-400" />
+                <FileText className="w-8 h-8 text-red-400 dark:text-red-400" />
               </div>
             </div>
-            <div className="bg-gray-50 dark:bg-gray-900/20 rounded-xl p-4 border border-gray-200 dark:border-gray-800">
+            <div className="bg-gradient-to-br from-amber-50/80 to-orange-50/80 dark:from-amber-900/20 dark:to-orange-900/20 rounded-xl p-4 border border-amber-100 dark:border-amber-500/20 shadow-sm">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-xs text-gray-600 dark:text-gray-400">Open</p>
-                  <p className="text-2xl font-bold text-gray-700 dark:text-gray-300">{stats.open}</p>
+                  <p className="text-xs text-gray-600 dark:text-gray-400 font-medium">Open</p>
+                  <p className="text-2xl font-bold text-amber-700 dark:text-amber-300 mt-1">{stats.open}</p>
                 </div>
-                <Clock className="w-8 h-8 text-gray-500" />
+                <Clock className="w-8 h-8 text-amber-500 dark:text-amber-400" />
               </div>
             </div>
-            <div className="bg-gray-50 dark:bg-gray-900/20 rounded-xl p-4 border border-gray-200 dark:border-gray-800">
+            <div className="bg-gradient-to-br from-blue-50/80 to-cyan-50/80 dark:from-blue-900/20 dark:to-cyan-900/20 rounded-xl p-4 border border-blue-100 dark:border-blue-500/20 shadow-sm">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-xs text-gray-600 dark:text-gray-400">In Progress</p>
-                  <p className="text-2xl font-bold text-gray-700 dark:text-gray-300">{stats.inProgress}</p>
+                  <p className="text-xs text-gray-600 dark:text-gray-400 font-medium">In Progress</p>
+                  <p className="text-2xl font-bold text-blue-700 dark:text-blue-300 mt-1">{stats.inProgress}</p>
                 </div>
-                <Loader2 className="w-8 h-8 text-gray-500 animate-spin" />
+                <Loader2 className="w-8 h-8 text-blue-500 dark:text-blue-400 animate-spin" />
               </div>
             </div>
-            <div className="bg-gray-50 dark:bg-gray-900/20 rounded-xl p-4 border border-gray-200 dark:border-gray-800">
+            <div className="bg-gradient-to-br from-green-50/80 to-emerald-50/80 dark:from-green-900/20 dark:to-emerald-900/20 rounded-xl p-4 border border-green-100 dark:border-green-500/20 shadow-sm">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-xs text-gray-600 dark:text-gray-400">Resolved</p>
-                  <p className="text-2xl font-bold text-gray-700 dark:text-gray-300">{stats.resolved}</p>
+                  <p className="text-xs text-gray-600 dark:text-gray-400 font-medium">Resolved</p>
+                  <p className="text-2xl font-bold text-green-700 dark:text-green-300 mt-1">{stats.resolved}</p>
                 </div>
-                <CheckCircle className="w-8 h-8 text-gray-500" />
+                <CheckCircle className="w-8 h-8 text-green-500 dark:text-green-400" />
               </div>
             </div>
-            <div className="bg-gray-50 dark:bg-gray-800/50 rounded-xl p-4 border border-gray-200 dark:border-gray-700/30">
+            <div className="bg-gradient-to-br from-gray-50/80 to-slate-50/80 dark:from-gray-800/30 dark:to-slate-800/30 rounded-xl p-4 border border-gray-200 dark:border-gray-700/30 shadow-sm">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-xs text-gray-600 dark:text-gray-400">Closed</p>
-                  <p className="text-2xl font-bold text-gray-900 dark:text-white">{stats.closed}</p>
+                  <p className="text-xs text-gray-600 dark:text-gray-400 font-medium">Closed</p>
+                  <p className="text-2xl font-bold text-gray-700 dark:text-gray-300 mt-1">{stats.closed}</p>
                 </div>
-                <XCircle className="w-8 h-8 text-gray-400" />
+                <XCircle className="w-8 h-8 text-gray-400 dark:text-gray-500" />
               </div>
             </div>
           </div>
 
           {/* Account Health Summary */}
           {accountHealth && (
-            <div className="bg-white/50 dark:bg-gray-900/50 rounded-xl p-6 border border-gray-200 dark:border-gray-700/30">
+            <div className="bg-gradient-to-br from-red-50/50 to-orange-50/50 dark:from-red-900/10 dark:to-orange-900/10 rounded-xl p-6 border border-red-100 dark:border-red-500/20">
               <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
-                <Activity className="w-5 h-5 text-gray-500" />
+                <Activity className="w-5 h-5 text-red-400" />
                 Account Health
               </h3>
               <div className="flex items-center gap-4 mb-4">
                 <div className={`px-4 py-2 rounded-lg ${
-                  'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300'
+                  accountHealth.overallStatus === 'good' 
+                    ? 'bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-300 border border-green-200 dark:border-green-700/50'
+                    : accountHealth.overallStatus === 'warning'
+                    ? 'bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 border border-amber-200 dark:border-amber-700/50'
+                    : 'bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300 border border-red-200 dark:border-red-700/50'
                 }`}>
                   Status: {accountHealth.overallStatus.toUpperCase()}
                 </div>
@@ -975,15 +995,63 @@ const SupportCenter: React.FC = () => {
                 </div>
               </div>
               {accountHealth.warnings.length > 0 && (
-                <div className="mt-4 p-3 bg-gray-50 dark:bg-gray-900/20 rounded-lg">
-                  <p className="text-sm font-semibold text-gray-800 dark:text-gray-200 mb-2">Warnings:</p>
-                  <ul className="list-disc list-inside text-sm text-gray-700 dark:text-gray-300">
+                <div className="mt-4 p-3 bg-amber-50/50 dark:bg-amber-900/20 rounded-lg border border-amber-200 dark:border-amber-700/50">
+                  <p className="text-sm font-semibold text-amber-800 dark:text-amber-200 mb-2">Warnings:</p>
+                  <ul className="list-disc list-inside text-sm text-amber-700 dark:text-amber-300">
                     {accountHealth.warnings.map((warning, i) => (
                       <li key={i}>{warning}</li>
                     ))}
                   </ul>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Recent Tickets Preview */}
+          {tickets.length > 0 && (
+            <div className="bg-gradient-to-br from-white/80 to-red-50/30 dark:from-gray-900/50 dark:to-red-900/10 rounded-xl p-6 border border-red-100 dark:border-red-500/20">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                  <FileText className="w-5 h-5 text-red-400" />
+                  Recent Tickets
+                </h3>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setActiveTab('tickets')}
+                  className="text-red-600 dark:text-red-400 border-red-200 dark:border-red-700/50 hover:bg-red-50 dark:hover:bg-red-900/20"
+                >
+                  View All
+                </Button>
+              </div>
+              <div className="space-y-3">
+                {tickets.slice(0, 3).map((ticket) => (
+                  <div
+                    key={ticket._id}
+                    onClick={() => {
+                      setSelectedTicket(ticket);
+                      setShowDetailModal(true);
+                      fetchTicket(ticket._id);
+                    }}
+                    className="p-3 bg-white/60 dark:bg-gray-800/30 rounded-lg border border-red-100 dark:border-red-500/20 hover:border-red-200 dark:hover:border-red-500/30 cursor-pointer transition-all hover:shadow-sm"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <h4 className="font-medium text-gray-900 dark:text-white text-sm truncate">
+                            {ticket.subject}
+                          </h4>
+                          {getStatusBadge(ticket.status)}
+                        </div>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                          {ticket.ticketNumber} • {formatDate(ticket.updatedAt)}
+                        </p>
+                      </div>
+                      <ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </div>
@@ -993,7 +1061,7 @@ const SupportCenter: React.FC = () => {
       {activeTab === 'knowledge' && (
         <div className="space-y-6">
           {/* Search Bar */}
-          <div className="bg-white/50 dark:bg-gray-900/50 rounded-xl p-4 border border-gray-200 dark:border-gray-700/30">
+          <div className="bg-gradient-to-r from-white/80 to-red-50/30 dark:from-gray-900/50 dark:to-red-900/10 rounded-xl p-4 border border-red-100 dark:border-red-500/20">
             <div className="flex gap-4">
               <div className="flex-1 relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -1023,19 +1091,48 @@ const SupportCenter: React.FC = () => {
           </div>
 
           {/* Articles List */}
-          <div className="bg-white/50 dark:bg-gray-900/50 rounded-xl border border-gray-200 dark:border-gray-700/30 overflow-hidden">
-            {articles.length === 0 ? (
-              <div className="text-center py-12">
-                <BookOpen className="w-16 h-16 mx-auto text-gray-400 mb-4" />
-                <p className="text-gray-600 dark:text-gray-400">No articles found</p>
+          <div className="bg-gradient-to-br from-white/80 to-red-50/20 dark:from-gray-900/50 dark:to-red-900/10 rounded-xl border border-red-100 dark:border-red-500/20 overflow-hidden shadow-sm">
+            {isLoadingArticles ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="w-8 h-8 animate-spin text-red-400" />
+                <span className="ml-3 text-gray-600 dark:text-gray-400">Loading articles...</span>
+              </div>
+            ) : articles.length === 0 ? (
+              <div className="text-center py-12 px-4">
+                <BookOpen className="w-16 h-16 mx-auto text-red-300 dark:text-red-500/50 mb-4" />
+                <p className="text-gray-600 dark:text-gray-400 mb-2 font-medium">No articles found</p>
+                <p className="text-sm text-gray-500 dark:text-gray-500 mb-4">
+                  {kbSearchQuery || kbCategory !== 'all' 
+                    ? 'Try adjusting your search or category filter'
+                    : 'The knowledge base is currently empty. Articles will appear here once they are published by administrators.'}
+                </p>
+                {(kbSearchQuery || kbCategory !== 'all') ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setKbSearchQuery('');
+                      setKbCategory('all');
+                    }}
+                    className="text-red-600 dark:text-red-400 border-red-200 dark:border-red-700/50 hover:bg-red-50 dark:hover:bg-red-900/20"
+                  >
+                    Clear Filters
+                  </Button>
+                ) : (
+                  <div className="mt-4 p-4 bg-gradient-to-r from-red-50/50 to-orange-50/50 dark:from-red-900/10 dark:to-orange-900/10 rounded-lg border border-red-100 dark:border-red-500/20">
+                    <p className="text-xs text-gray-600 dark:text-gray-400">
+                      💡 <strong>Tip:</strong> If you need help, you can create a support ticket by clicking "New Ticket" above.
+                    </p>
+                  </div>
+                )}
               </div>
             ) : (
-              <div className="divide-y divide-gray-200 dark:divide-gray-700">
+              <div className="divide-y divide-red-100 dark:divide-red-500/20">
                 {articles.map((article) => (
                   <div
                     key={article._id}
                     onClick={() => fetchArticle(article._id)}
-                    className="p-4 hover:bg-gray-50 dark:hover:bg-gray-800/50 cursor-pointer transition-colors"
+                    className="p-4 hover:bg-red-50/50 dark:hover:bg-red-900/10 cursor-pointer transition-colors border-l-4 border-transparent hover:border-red-300 dark:hover:border-red-500/50"
                   >
                     <h3 className="font-semibold text-gray-900 dark:text-white mb-2">{article.title}</h3>
                     <p className="text-sm text-gray-600 dark:text-gray-400 line-clamp-2 mb-2">{article.content}</p>
@@ -1227,7 +1324,7 @@ const SupportCenter: React.FC = () => {
       {activeTab === 'tickets' && (
         <>
           {/* Filters and Search */}
-          <div className="bg-white/50 dark:bg-gray-900/50 rounded-xl p-4 border border-gray-200 dark:border-gray-700/30">
+          <div className="bg-gradient-to-r from-white/80 to-red-50/30 dark:from-gray-900/50 dark:to-red-900/10 rounded-xl p-4 border border-red-100 dark:border-red-500/20">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
               <div className="lg:col-span-2">
                 <div className="relative">
@@ -1280,7 +1377,7 @@ const SupportCenter: React.FC = () => {
           </div>
 
           {/* Tickets List */}
-          <div className="bg-white/50 dark:bg-gray-900/50 rounded-xl border border-gray-200 dark:border-gray-700/30 overflow-hidden">
+          <div className="bg-gradient-to-br from-white/80 to-red-50/20 dark:from-gray-900/50 dark:to-red-900/10 rounded-xl border border-red-100 dark:border-red-500/20 overflow-hidden shadow-sm">
         {isLoading ? (
           <div className="flex items-center justify-center py-12">
             <Loader2 className="w-8 h-8 animate-spin text-gray-500" />
@@ -1291,7 +1388,7 @@ const SupportCenter: React.FC = () => {
             <p className="text-gray-600 dark:text-gray-400">No tickets found</p>
             <Button
               onClick={() => setShowCreateModal(true)}
-              className="mt-4 bg-red-500 hover:bg-red-600"
+              className="mt-4 bg-gradient-to-r from-red-500 to-orange-500 hover:from-red-600 hover:to-orange-600 text-white shadow-md"
             >
               <Plus className="w-4 h-4 mr-2" />
               Create Your First Ticket
@@ -1307,7 +1404,7 @@ const SupportCenter: React.FC = () => {
                   setShowDetailModal(true);
                   fetchTicket(ticket._id);
                 }}
-                className="p-4 hover:bg-gray-50 dark:hover:bg-gray-800/50 cursor-pointer transition-colors"
+                className="p-4 hover:bg-red-50/50 dark:hover:bg-red-900/10 cursor-pointer transition-colors border-l-4 border-transparent hover:border-red-300 dark:hover:border-red-500/50"
               >
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex-1 min-w-0">

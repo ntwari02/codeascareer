@@ -228,7 +228,7 @@ export async function createSellerCollection(req: AuthenticatedRequest, res: Res
 
     // Calculate product count
     const productCount = await calculateProductCount(created, sellerObjectId);
-    const createdWithCount = { ...created.toObject(), productCount };
+    const createdWithCount = { ...(created as any).toObject(), productCount };
 
     return res.status(201).json({ collection: createdWithCount });
   } catch (err: any) {
@@ -359,7 +359,7 @@ export async function getCollectionProducts(req: AuthenticatedRequest, res: Resp
 
     if (collection.type === 'manual') {
       // Manual: return stored product IDs
-      productIds = collection.productIds || [];
+      productIds = ((collection.productIds || []) as unknown) as mongoose.Types.ObjectId[];
     } else if (collection.type === 'smart') {
       // Automated: resolve products dynamically
       productIds = await resolveAutomatedCollectionProducts(
@@ -426,10 +426,10 @@ export async function addProductToCollection(req: AuthenticatedRequest, res: Res
     }
 
     // Add product if not already in collection
-    const productIds = collection.productIds || [];
+    const productIds = ((collection.productIds || []) as unknown) as mongoose.Types.ObjectId[];
     if (!productIds.some((id) => id.toString() === productObjectId.toString())) {
-      productIds.push(productObjectId);
-      collection.productIds = productIds;
+      productIds.push(productObjectId as any);
+      collection.productIds = productIds as any;
       await collection.save();
     }
 
@@ -517,7 +517,7 @@ export async function reorderCollectionProducts(req: AuthenticatedRequest, res: 
     }
 
     // Update product order
-    collection.productIds = product_ids.map((id: string) => new mongoose.Types.ObjectId(id));
+    collection.productIds = product_ids.map((id: string) => new mongoose.Types.ObjectId(id)) as any;
     await collection.save();
 
     return res.json({ success: true });

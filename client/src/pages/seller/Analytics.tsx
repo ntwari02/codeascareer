@@ -1,84 +1,171 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { BarChart3, TrendingUp, Users, DollarSign, ShoppingCart, Eye, Star, TrendingDown, Filter, ArrowUpRight, ArrowDownRight } from 'lucide-react';
+import { BarChart3, TrendingUp, Users, DollarSign, ShoppingCart, Eye, Star, TrendingDown, Filter, ArrowUpRight, ArrowDownRight, Loader2 } from 'lucide-react';
 import StatCard from '@/components/dashboard/StatCard';
 import SalesChart from '@/components/dashboard/SalesChart';
 import { FunnelChart } from '@/components/charts/FunnelChart';
 import { ParetoChart } from '@/components/charts/ParetoChart';
+import { useToastStore } from '@/stores/toastStore';
+
+const API_BASE = 'http://localhost:5000/api/seller/analytics';
+
+interface AnalyticsData {
+  salesStats: {
+    totalRevenue: { value: number; formatted: string; change: string; trend: 'up' | 'down' };
+    totalOrders: { value: number; formatted: string; change: string; trend: 'up' | 'down' };
+    averageOrderValue: { value: number; formatted: string; change: string; trend: 'up' | 'down' };
+    repeatCustomerRate: { value: number; formatted: string; change: string; trend: 'up' | 'down' };
+  };
+  productAnalytics: {
+    mostViewed: Array<{ name: string; views: number; sold: number; revenue: number; rating: number }>;
+    mostSold: Array<{ name: string; views: number; sold: number; revenue: number; rating: number }>;
+    highestRevenue: Array<{ name: string; views: number; sold: number; revenue: number; rating: number }>;
+    lowPerforming: Array<{ name: string; views: number; sold: number; revenue: number }>;
+  };
+  customerMetrics: {
+    returnRate: { value: number; formatted: string; change: string; trend: 'up' | 'down' };
+    customerLifetimeValue: { value: number; formatted: string; change: string; trend: 'up' | 'down' };
+    newCustomers: { value: number; formatted: string; change: string; trend: 'up' | 'down' };
+  };
+  rfqStats: {
+    totalRfqs: number;
+    quotesSent: number;
+    quotesAccepted: number;
+    rfqConversionRate: string;
+    rfqToOrderRate: string;
+  };
+  salesChartData: Array<{ date: string; revenue: number; orders: number }>;
+  marketingInsights: Array<{ source: string; traffic: number; conversions: number }>;
+  conversionFunnel: Array<{ label: string; value: number; percentage: number }>;
+}
 
 const Analytics: React.FC = () => {
+  const { showToast } = useToastStore();
   const [timeRange, setTimeRange] = useState<'week' | 'month' | 'year'>('month');
   const [buyerGroup, setBuyerGroup] = useState<'all' | 'enterprise' | 'smb' | 'long_tail'>('all');
   const [paymentTerms, setPaymentTerms] = useState<'all' | 'prepaid' | 'net30' | 'net60'>('all');
   const [salesRep, setSalesRep] = useState<'all' | 'team_north' | 'team_south' | 'team_inbound'>('all');
+  const [analyticsData, setAnalyticsData] = useState<AnalyticsData | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
-  const salesStats = [
+  // Fetch analytics data
+  const fetchAnalytics = async () => {
+    setIsLoading(true);
+    try {
+      const token = localStorage.getItem('auth_token');
+      const params = new URLSearchParams();
+      params.append('timeRange', timeRange);
+      if (buyerGroup !== 'all') params.append('buyerGroup', buyerGroup);
+      if (paymentTerms !== 'all') params.append('paymentTerms', paymentTerms);
+      if (salesRep !== 'all') params.append('salesRep', salesRep);
+
+      const response = await fetch(`${API_BASE}?${params.toString()}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        credentials: 'include',
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch analytics');
+      }
+
+      const data = await response.json();
+      setAnalyticsData(data);
+    } catch (error: any) {
+      console.error('Failed to fetch analytics:', error);
+      showToast('Failed to load analytics data', 'error');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchAnalytics();
+  }, [timeRange, buyerGroup, paymentTerms, salesRep]);
+
+  // Transform data for components
+  const salesStats = analyticsData ? [
     {
       title: 'Total Revenue',
-      value: '$125,430',
-      change: '+18.2%',
-      trend: 'up' as const,
+      value: analyticsData.salesStats.totalRevenue.formatted,
+      change: analyticsData.salesStats.totalRevenue.change,
+      trend: analyticsData.salesStats.totalRevenue.trend,
       icon: DollarSign,
       color: 'from-green-500 to-emerald-500',
     },
     {
       title: 'Total Orders',
-      value: '1,247',
-      change: '+12.5%',
-      trend: 'up' as const,
+      value: analyticsData.salesStats.totalOrders.formatted,
+      change: analyticsData.salesStats.totalOrders.change,
+      trend: analyticsData.salesStats.totalOrders.trend,
       icon: ShoppingCart,
       color: 'from-blue-500 to-cyan-500',
     },
     {
       title: 'Average Order Value',
-      value: '$100.58',
-      change: '+5.3%',
-      trend: 'up' as const,
+      value: analyticsData.salesStats.averageOrderValue.formatted,
+      change: analyticsData.salesStats.averageOrderValue.change,
+      trend: analyticsData.salesStats.averageOrderValue.trend,
       icon: TrendingUp,
       color: 'from-purple-500 to-pink-500',
     },
     {
       title: 'Repeat Customer Rate',
-      value: '42.3%',
-      change: '+3.1%',
-      trend: 'up' as const,
+      value: analyticsData.salesStats.repeatCustomerRate.formatted,
+      change: analyticsData.salesStats.repeatCustomerRate.change,
+      trend: analyticsData.salesStats.repeatCustomerRate.trend,
       icon: Users,
       color: 'from-orange-500 to-red-500',
     },
-  ];
+  ] : [];
 
-  const topProducts = [
-    { name: 'Wireless Headphones', views: 1234, sold: 234, revenue: 35100, rating: 4.8 },
-    { name: 'Smart Watch', views: 987, sold: 189, revenue: 56700, rating: 4.6 },
-    { name: 'USB-C Cable', views: 2341, sold: 456, revenue: 9120, rating: 4.9 },
-    { name: 'Laptop Stand', views: 45, sold: 0, revenue: 0, rating: 0 },
-  ];
-
-  const lowPerformingProducts = [
-    { name: 'Laptop Stand', views: 45, sold: 0, revenue: 0 },
-    { name: 'Old Product A', views: 12, sold: 1, revenue: 50 },
-  ];
-
-  const customerMetrics = [
-    { label: 'Return Rate', value: '2.3%', trend: 'down', change: '-0.5%' },
-    { label: 'Customer Lifetime Value', value: '$245', trend: 'up', change: '+12%' },
-    { label: 'New Customers', value: '156', trend: 'up', change: '+8%' },
-  ];
-
-  const marketingInsights = [
-    { source: 'Organic Search', traffic: 45, conversions: 3.2 },
-    { source: 'Direct', traffic: 28, conversions: 4.1 },
-    { source: 'Social Media', traffic: 18, conversions: 2.8 },
-    { source: 'Referral', traffic: 9, conversions: 3.5 },
-  ];
-
-  const rfqStats = {
-    totalRfqs: 248,
-    quotesSent: 210,
-    quotesAccepted: 132,
-    rfqConversionRate: ((132 / 210) * 100).toFixed(1),
-    rfqToOrderRate: ((132 / 248) * 100).toFixed(1),
+  const customerMetrics = analyticsData ? [
+    { 
+      label: 'Return Rate', 
+      value: analyticsData.customerMetrics.returnRate.formatted, 
+      trend: analyticsData.customerMetrics.returnRate.trend, 
+      change: analyticsData.customerMetrics.returnRate.change 
+    },
+    { 
+      label: 'Customer Lifetime Value', 
+      value: analyticsData.customerMetrics.customerLifetimeValue.formatted, 
+      trend: analyticsData.customerMetrics.customerLifetimeValue.trend, 
+      change: analyticsData.customerMetrics.customerLifetimeValue.change 
+    },
+    { 
+      label: 'New Customers', 
+      value: analyticsData.customerMetrics.newCustomers.formatted, 
+      trend: analyticsData.customerMetrics.newCustomers.trend, 
+      change: analyticsData.customerMetrics.newCustomers.change 
+    },
+  ] : [];
+  const marketingInsights = analyticsData?.marketingInsights || [];
+  const rfqStats = analyticsData?.rfqStats || {
+    totalRfqs: 0,
+    quotesSent: 0,
+    quotesAccepted: 0,
+    rfqConversionRate: '0.0',
+    rfqToOrderRate: '0.0',
   };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="text-center">
+          <Loader2 className="w-12 h-12 animate-spin text-red-400 mx-auto mb-4" />
+          <p className="text-gray-600 dark:text-gray-400">Loading analytics data...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!analyticsData) {
+    return (
+      <div className="text-center py-12">
+        <BarChart3 className="w-16 h-16 mx-auto text-gray-400 mb-4" />
+        <p className="text-gray-600 dark:text-gray-400">No analytics data available</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -116,8 +203,8 @@ const Analytics: React.FC = () => {
         </motion.div>
 
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-          <div className="xl:col-span-2 bg-white/50 dark:bg-gray-900/50 rounded-xl p-6 border border-gray-200 dark:border-gray-700/30 transition-colors duration-300">
-            <SalesChart />
+          <div className="xl:col-span-2 bg-white/50 dark:bg-gray-900/50 rounded-xl p-6 border border-gray-200 dark:border-gray-700/30 transition-colors duration-300 min-h-[400px]">
+            <SalesChart data={analyticsData.salesChartData} timeRange={timeRange} />
           </div>
 
           {/* RFQ Conversion Metrics */}
@@ -197,7 +284,7 @@ const Analytics: React.FC = () => {
             <div>
               <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 transition-colors duration-300">Most Viewed</h3>
               <div className="space-y-2">
-                {topProducts.slice().sort((a, b) => b.views - a.views).slice(0, 3).map((product, index) => (
+                {analyticsData?.productAnalytics.mostViewed.slice(0, 3).map((product, index) => (
                   <div key={index} className="flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-800/50 rounded-lg transition-colors duration-300">
                     <span className="text-sm text-gray-900 dark:text-white transition-colors duration-300">{product.name}</span>
                     <div className="flex items-center gap-2">
@@ -211,43 +298,55 @@ const Analytics: React.FC = () => {
             <div>
               <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 transition-colors duration-300">Most Sold</h3>
               <div className="space-y-2">
-                {topProducts.slice().sort((a, b) => b.sold - a.sold).slice(0, 3).map((product, index) => (
-                  <div key={index} className="flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-800/50 rounded-lg transition-colors duration-300">
-                    <span className="text-sm text-gray-900 dark:text-white transition-colors duration-300">{product.name}</span>
-                    <div className="flex items-center gap-2">
-                      <ShoppingCart className="w-4 h-4 text-green-500" />
-                      <span className="text-sm font-semibold text-green-500 dark:text-green-400 transition-colors duration-300">{product.sold}</span>
+                {analyticsData?.productAnalytics.mostSold && analyticsData.productAnalytics.mostSold.length > 0 ? (
+                  analyticsData.productAnalytics.mostSold.slice(0, 3).map((product, index) => (
+                    <div key={index} className="flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-800/50 rounded-lg transition-colors duration-300">
+                      <span className="text-sm text-gray-900 dark:text-white transition-colors duration-300">{product.name}</span>
+                      <div className="flex items-center gap-2">
+                        <ShoppingCart className="w-4 h-4 text-green-500" />
+                        <span className="text-sm font-semibold text-green-500 dark:text-green-400 transition-colors duration-300">{product.sold}</span>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ))
+                ) : (
+                  <p className="text-xs text-gray-500 dark:text-gray-400 text-center py-2">No sales data available</p>
+                )}
               </div>
             </div>
             <div>
-              <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 transition-colors duration-300">Highest Rated</h3>
+              <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 transition-colors duration-300">Highest Revenue</h3>
               <div className="space-y-2">
-                {topProducts.filter(p => p.rating > 0).sort((a, b) => b.rating - a.rating).slice(0, 3).map((product, index) => (
-                  <div key={index} className="flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-800/50 rounded-lg transition-colors duration-300">
-                    <span className="text-sm text-gray-900 dark:text-white transition-colors duration-300">{product.name}</span>
-                    <div className="flex items-center gap-1">
-                      <Star className="w-4 h-4 text-yellow-400 fill-yellow-400" />
-                      <span className="text-sm font-semibold text-gray-900 dark:text-white transition-colors duration-300">{product.rating}</span>
+                {analyticsData?.productAnalytics.highestRevenue && analyticsData.productAnalytics.highestRevenue.length > 0 ? (
+                  analyticsData.productAnalytics.highestRevenue.slice(0, 3).map((product, index) => (
+                    <div key={index} className="flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-800/50 rounded-lg transition-colors duration-300">
+                      <span className="text-sm text-gray-900 dark:text-white transition-colors duration-300">{product.name}</span>
+                      <div className="flex items-center gap-2">
+                        <DollarSign className="w-4 h-4 text-green-500" />
+                        <span className="text-sm font-semibold text-green-500 dark:text-green-400 transition-colors duration-300">${product.revenue.toLocaleString()}</span>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ))
+                ) : (
+                  <p className="text-xs text-gray-500 dark:text-gray-400 text-center py-2">No revenue data available</p>
+                )}
               </div>
             </div>
             <div>
               <h3 className="text-sm font-semibold text-red-600 dark:text-red-400 mb-3 transition-colors duration-300">Low Performing</h3>
               <div className="space-y-2">
-                {lowPerformingProducts.map((product, index) => (
-                  <div key={index} className="flex items-center justify-between p-2 bg-red-50 dark:bg-red-900/20 rounded-lg border border-red-200 dark:border-red-500/30 transition-colors duration-300">
-                    <span className="text-sm text-gray-900 dark:text-white transition-colors duration-300">{product.name}</span>
-                    <div className="flex items-center gap-2">
-                      <TrendingDown className="w-4 h-4 text-red-500" />
-                      <span className="text-sm font-semibold text-red-600 dark:text-red-400 transition-colors duration-300">{product.sold} sold</span>
+                {analyticsData?.productAnalytics.lowPerforming && analyticsData.productAnalytics.lowPerforming.length > 0 ? (
+                  analyticsData.productAnalytics.lowPerforming.slice(0, 5).map((product, index) => (
+                    <div key={index} className="flex items-center justify-between p-2 bg-red-50 dark:bg-red-900/20 rounded-lg border border-red-200 dark:border-red-500/30 transition-colors duration-300">
+                      <span className="text-sm text-gray-900 dark:text-white transition-colors duration-300">{product.name}</span>
+                      <div className="flex items-center gap-2">
+                        <TrendingDown className="w-4 h-4 text-red-500" />
+                        <span className="text-sm font-semibold text-red-600 dark:text-red-400 transition-colors duration-300">{product.sold} sold</span>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ))
+                ) : (
+                  <p className="text-xs text-gray-500 dark:text-gray-400 text-center py-2">No low performing products</p>
+                )}
               </div>
             </div>
           </div>
@@ -357,13 +456,7 @@ const Analytics: React.FC = () => {
           <div>
             <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 transition-colors duration-300">Conversion Funnel</h3>
             <FunnelChart
-              data={[
-                { label: 'Visitors', value: 10000, percentage: 100 },
-                { label: 'Product Views', value: 3500, percentage: 35 },
-                { label: 'Add to Cart', value: 1200, percentage: 12 },
-                { label: 'Checkout', value: 450, percentage: 4.5 },
-                { label: 'Completed', value: 324, percentage: 3.24 },
-              ]}
+              data={analyticsData.conversionFunnel}
               height={300}
             />
           </div>

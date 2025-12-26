@@ -62,6 +62,9 @@ const SubscriptionTiers: React.FC = () => {
   const [deleteMethodId, setDeleteMethodId] = useState<string | null>(null);
   const [deleteMethodName, setDeleteMethodName] = useState<string>('');
   const [isOnlyPaymentMethod, setIsOnlyPaymentMethod] = useState(false);
+  const [deletePassword, setDeletePassword] = useState<string>('');
+  const [passwordError, setPasswordError] = useState<string>('');
+  const [verifyingPassword, setVerifyingPassword] = useState(false);
   
   // Billing history filters
   const [billingFilters, setBillingFilters] = useState({
@@ -438,13 +441,57 @@ const SubscriptionTiers: React.FC = () => {
     setShowDeleteConfirm(true);
   };
 
+  // Verify password before deletion
+  const verifyPassword = async (password: string): Promise<boolean> => {
+    try {
+      const token = localStorage.getItem('auth_token');
+      const response = await fetch('http://localhost:5000/api/profile/me/verify-password', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        credentials: 'include',
+        body: JSON.stringify({ password }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        setPasswordError(error.message || 'Invalid password');
+        return false;
+      }
+
+      setPasswordError('');
+      return true;
+    } catch (error: any) {
+      setPasswordError('Failed to verify password. Please try again.');
+      return false;
+    }
+  };
+
   const confirmDeleteCard = async () => {
     if (!deleteMethodId) return;
+
+    // Verify password first
+    if (!deletePassword) {
+      setPasswordError('Password is required to confirm deletion');
+      return;
+    }
+
+    setVerifyingPassword(true);
+    setPasswordError('');
+
+    const isValidPassword = await verifyPassword(deletePassword);
+    setVerifyingPassword(false);
+
+    if (!isValidPassword) {
+      return; // Error already set by verifyPassword
+    }
 
     setDeletingCard(deleteMethodId);
     
     // Use result-based pattern - no try/catch needed, no errors thrown
-    const result = await subscriptionApi.deletePaymentMethod(deleteMethodId);
+    const result = await subscriptionApi.deletePaymentMethod(deleteMethodId, deletePassword);
     
     if (result.success) {
       // Success case - no errors thrown, no console errors
@@ -455,6 +502,8 @@ const SubscriptionTiers: React.FC = () => {
       setDeleteMethodId(null);
       setDeleteMethodName('');
       setIsOnlyPaymentMethod(false);
+      setDeletePassword('');
+      setPasswordError('');
       
       // Optimistically remove from list
       setPaymentMethods(prev => prev.filter(pm => pm.id !== deleteMethodId));
@@ -507,10 +556,14 @@ const SubscriptionTiers: React.FC = () => {
           'error'
         );
         setShowDeleteConfirm(false);
+        setDeletePassword('');
+        setPasswordError('');
       } else {
         // Other errors - still no error thrown, just show message
         showToast(result.error.message || 'Failed to remove payment method', 'error');
         setShowDeleteConfirm(false);
+        setDeletePassword('');
+        setPasswordError('');
       }
     }
     
@@ -1927,6 +1980,33 @@ ${invoice.gatewayRef ? `Gateway Reference: ${invoice.gatewayRef}` : ''}
                 </p>
               </div>
             )}
+            
+            {/* Password Verification */}
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Enter your password to confirm deletion
+              </label>
+              <input
+                type="password"
+                value={deletePassword}
+                onChange={(e) => {
+                  setDeletePassword(e.target.value);
+                  setPasswordError('');
+                }}
+                placeholder="Enter your password"
+                className={`w-full bg-white dark:bg-gray-800 border ${
+                  passwordError 
+                    ? 'border-red-500 dark:border-red-500' 
+                    : 'border-gray-300 dark:border-gray-700'
+                } rounded-lg px-3 py-2 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500`}
+                disabled={deletingCard !== null || verifyingPassword}
+                autoComplete="current-password"
+              />
+              {passwordError && (
+                <p className="text-xs text-red-600 dark:text-red-400">{passwordError}</p>
+              )}
+            </div>
+            
             <div className="flex justify-end gap-3 pt-2">
               <Button 
                 variant="outline" 
@@ -1934,17 +2014,24 @@ ${invoice.gatewayRef ? `Gateway Reference: ${invoice.gatewayRef}` : ''}
                   setShowDeleteConfirm(false);
                   setDeleteMethodId(null);
                   setDeleteMethodName('');
+                  setDeletePassword('');
+                  setPasswordError('');
                 }}
-                disabled={deletingCard !== null}
+                disabled={deletingCard !== null || verifyingPassword}
               >
                 Cancel
               </Button>
               <Button 
                 className="bg-red-600 hover:bg-red-700 text-white"
                 onClick={confirmDeleteCard}
-                disabled={deletingCard !== null}
+                disabled={deletingCard !== null || verifyingPassword || !deletePassword}
               >
-                {deletingCard ? (
+                {verifyingPassword ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Verifying...
+                  </>
+                ) : deletingCard ? (
                   <>
                     <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                     Removing...

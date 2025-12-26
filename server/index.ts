@@ -18,6 +18,7 @@ import disputeRoutes from './src/routes/disputeRoutes';
 import accountHealthRoutes from './src/routes/accountHealthRoutes';
 import systemNotificationRoutes from './src/routes/systemNotificationRoutes';
 import subscriptionRoutes from './src/routes/subscriptionRoutes';
+import analyticsRoutes from './src/routes/analyticsRoutes';
 
 dotenv.config();
 
@@ -75,6 +76,8 @@ app.use('/api/seller', sellerRoutes);
 
 // Subscription routes
 app.use('/api/seller/subscription', subscriptionRoutes);
+// Analytics routes
+app.use('/api/seller/analytics', analyticsRoutes);
 
 // 404 handler
 app.use((req: Request, res: Response) => {

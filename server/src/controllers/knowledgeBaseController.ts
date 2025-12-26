@@ -19,18 +19,37 @@ export async function searchArticles(req: AuthenticatedRequest, res: Response) {
 
     let articles;
     if (query && typeof query === 'string' && query.trim()) {
-      // Text search
-      articles = await KnowledgeBase.find({
-        ...filter,
-        $text: { $search: query },
-      })
-        .select('title content category tags views helpfulCount')
-        .sort({ score: { $meta: 'textScore' } })
-        .limit(Number(limit))
-        .skip(skip)
-        .lean();
+      // Text search - fallback to regex if text index doesn't exist
+      try {
+        articles = await KnowledgeBase.find({
+          ...filter,
+          $text: { $search: query },
+        })
+          .select('title content category tags views helpfulCount')
+          .sort({ score: { $meta: 'textScore' } })
+          .limit(Number(limit))
+          .skip(skip)
+          .lean();
+      } catch (textSearchError: any) {
+        // Fallback to regex search if text index doesn't exist
+        console.log('Text search index not available, using regex search');
+        const searchRegex = new RegExp(query, 'i');
+        articles = await KnowledgeBase.find({
+          ...filter,
+          $or: [
+            { title: searchRegex },
+            { content: searchRegex },
+            { tags: { $in: [searchRegex] } },
+          ],
+        })
+          .select('title content category tags views helpfulCount')
+          .sort({ createdAt: -1 })
+          .limit(Number(limit))
+          .skip(skip)
+          .lean();
+      }
     } else {
-      // Regular query
+      // Regular query - get all published articles
       articles = await KnowledgeBase.find(filter)
         .select('title content category tags views helpfulCount')
         .sort({ createdAt: -1 })
@@ -41,8 +60,11 @@ export async function searchArticles(req: AuthenticatedRequest, res: Response) {
 
     const total = await KnowledgeBase.countDocuments(filter);
 
+    // Log for debugging
+    console.log(`Knowledge base search: Found ${articles.length} articles (Total: ${total})`);
+
     return res.json({
-      articles,
+      articles: articles || [],
       pagination: {
         page: Number(page),
         limit: Number(limit),

@@ -671,6 +671,30 @@ export async function deletePaymentMethod(req: AuthenticatedRequest, res: Respon
       return res.status(401).json({ message: 'Authentication required' });
     }
 
+    // Require password verification for security
+    const { password } = req.body;
+    if (!password) {
+      return res.status(400).json({ 
+        message: 'Password confirmation is required to delete payment methods',
+        requiresPassword: true 
+      });
+    }
+
+    // Verify password
+    const bcrypt = (await import('bcryptjs')).default;
+    const user = await User.findById(req.user.id);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
+    if (!isPasswordValid) {
+      return res.status(401).json({ 
+        message: 'Invalid password. Password confirmation required for deleting payment methods.',
+        requiresPassword: true 
+      });
+    }
+
     const { id } = req.params;
     
     console.log('Delete payment method request:', { 
