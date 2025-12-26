@@ -280,6 +280,7 @@ export interface ISellerSubscription extends Document {
     trial_start_date?: Date;
     trial_end_date?: Date;
     trial_days: number;
+    trial_used?: boolean;
   };
 }
 
@@ -292,16 +293,16 @@ const sellerSubscriptionSchema = new Schema<ISellerSubscription>(
     payment_gateway: { type: Schema.Types.Mixed, required: true },
     current_plan: { type: Schema.Types.Mixed, required: true },
     plan_features: { type: Schema.Types.Mixed, required: true },
-    financial_events: { type: [Schema.Types.Mixed], default: [] },
-    billing_history: { type: [Schema.Types.Mixed], default: [] },
-    payment_methods: { type: [Schema.Types.Mixed], default: [] },
+    financial_events: { type: Schema.Types.Mixed, default: [] },
+    billing_history: { type: Schema.Types.Mixed, default: [] },
+    payment_methods: { type: Schema.Types.Mixed, default: [] },
     payout_settings: { type: Schema.Types.Mixed, required: true },
     risk_and_defense: { type: Schema.Types.Mixed, required: true },
-    subscription_history: { type: [Schema.Types.Mixed], default: [] },
-    audit_logs: { type: [Schema.Types.Mixed], default: [] },
+    subscription_history: { type: Schema.Types.Mixed, default: [] },
+    audit_logs: { type: Schema.Types.Mixed, default: [] },
     statistics: { type: Schema.Types.Mixed, required: true },
     metadata: { type: Schema.Types.Mixed, required: true },
-    b2b_payment_requests: { type: [Schema.Types.Mixed], default: [] },
+    b2b_payment_requests: { type: Schema.Types.Mixed, default: [] },
     status: { type: String, default: 'active' },
     is_active: { type: Boolean, default: true },
     trial: { type: Schema.Types.Mixed, required: true },

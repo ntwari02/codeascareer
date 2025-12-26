@@ -99,7 +99,7 @@ export interface ISubscriptionPlansDocument extends Document {
 
 const subscriptionPlansSchema = new Schema<ISubscriptionPlansDocument>(
   {
-    plans: { type: [Schema.Types.Mixed], required: true },
+    plans: { type: [Schema.Types.Mixed], required: true, default: [] } as any,
     metadata: { type: Schema.Types.Mixed, required: true },
   },
   { collection: 'plans', timestamps: false }

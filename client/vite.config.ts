@@ -10,7 +10,7 @@ export default defineConfig({
     },
   },
   optimizeDeps: {
-    include: ['framer-motion'],
+    include: ['framer-motion', 'xlsx'],
     exclude: ['lucide-react'],
   },
   server: {
