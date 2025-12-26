@@ -18,7 +18,13 @@ import {
   updatePrivacySettings,
   updatePreferences,
   changePassword,
+  verifyPassword,
   updateSecuritySettings,
+  generate2FAQR,
+  verifyAndEnable2FA,
+  disable2FA,
+  get2FAStatus,
+  getLoginHistory,
 } from '../controllers/profileController';
 
 const router = Router();
@@ -84,6 +90,16 @@ router.patch('/me/security', updateSecuritySettings);
 
 // Password management
 router.post('/me/change-password', changePassword);
+router.post('/me/verify-password', verifyPassword);
+
+// 2FA management
+router.get('/me/2fa/status', get2FAStatus);
+router.get('/me/2fa/qr', generate2FAQR);
+router.post('/me/2fa/verify', verifyAndEnable2FA);
+router.post('/me/2fa/disable', disable2FA);
+
+// Login history
+router.get('/me/login-history', getLoginHistory);
 
 export default router;
 

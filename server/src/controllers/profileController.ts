@@ -1,6 +1,8 @@
 import { Response } from 'express';
 import { z } from 'zod';
 import path from 'path';
+import speakeasy from 'speakeasy';
+import QRCode from 'qrcode';
 import { User, IAddress, IPaymentMethod } from '../models/User';
 import { AuthenticatedRequest } from '../middleware/auth';
 import bcrypt from 'bcryptjs';
@@ -594,6 +596,42 @@ export async function changePassword(req: AuthenticatedRequest, res: Response) {
 }
 
 /**
+ * Verify password for security-sensitive operations
+ */
+export async function verifyPassword(req: AuthenticatedRequest, res: Response) {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ message: 'Authentication required' });
+    }
+
+    const verifyPasswordSchema = z.object({
+      password: z.string().min(1, 'Password is required'),
+    });
+
+    const { password } = verifyPasswordSchema.parse(req.body);
+
+    const user = await User.findById(req.user.id);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    // Verify password
+    const isMatch = await bcrypt.compare(password, user.passwordHash);
+    if (!isMatch) {
+      return res.status(401).json({ message: 'Invalid password. Please try again.' });
+    }
+
+    return res.json({ message: 'Password verified successfully', verified: true });
+  } catch (err: any) {
+    if (err instanceof z.ZodError) {
+      return res.status(400).json({ message: 'Invalid data', errors: err.flatten() });
+    }
+    console.error('Verify password error:', err);
+    return res.status(500).json({ message: 'Failed to verify password' });
+  }
+}
+
+/**
  * Upload avatar image
  */
 export async function uploadAvatar(req: AuthenticatedRequest, res: Response) {
@@ -653,10 +691,11 @@ export async function updateSecuritySettings(req: AuthenticatedRequest, res: Res
       return res.status(404).json({ message: 'User not found' });
     }
 
-    // If disabling 2FA, clear the method
+    // If disabling 2FA, clear the method and secret
     if (validatedSettings.twoFactorEnabled === false) {
       user.security.twoFactorEnabled = false;
       user.security.twoFactorMethod = null;
+      user.security.twoFactorSecret = undefined;
     } else {
       if (validatedSettings.twoFactorEnabled !== undefined) {
         user.security.twoFactorEnabled = validatedSettings.twoFactorEnabled;
@@ -670,7 +709,11 @@ export async function updateSecuritySettings(req: AuthenticatedRequest, res: Res
 
     return res.json({
       message: 'Security settings updated successfully',
-      security: user.security,
+      security: {
+        twoFactorEnabled: user.security.twoFactorEnabled,
+        twoFactorMethod: user.security.twoFactorMethod,
+        lastPasswordChangeAt: user.security.lastPasswordChangeAt,
+      },
     });
   } catch (err: any) {
     if (err instanceof z.ZodError) {
@@ -678,6 +721,202 @@ export async function updateSecuritySettings(req: AuthenticatedRequest, res: Res
     }
     console.error('Update security settings error:', err);
     return res.status(500).json({ message: 'Failed to update security settings' });
+  }
+}
+
+/**
+ * Generate 2FA QR code for authenticator app setup
+ */
+export async function generate2FAQR(req: AuthenticatedRequest, res: Response) {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ message: 'Authentication required' });
+    }
+
+    const user = await User.findById(req.user.id).select('+security.twoFactorSecret');
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    // Generate a secret if one doesn't exist
+    let secret = user.security.twoFactorSecret;
+    if (!secret) {
+      secret = speakeasy.generateSecret({
+        name: `${user.fullName} (${process.env.APP_NAME || 'E-Commerce'})`,
+        length: 32,
+      }).base32;
+      
+      user.security.twoFactorSecret = secret;
+      await user.save();
+    }
+
+    // Generate QR code
+    const otpAuthUrl = speakeasy.otpauthURL({
+      secret: secret,
+      label: encodeURIComponent(`${user.fullName} (${process.env.APP_NAME || 'E-Commerce'})`),
+      issuer: process.env.APP_NAME || 'E-Commerce',
+      encoding: 'base32',
+    });
+
+    const qrCodeDataUrl = await QRCode.toDataURL(otpAuthUrl);
+
+    return res.json({
+      qrCode: qrCodeDataUrl,
+      secret: secret, // For manual entry if QR code can't be scanned
+      manualEntryKey: secret ? secret.replace(/(.{4})/g, '$1 ').trim() : '', // Formatted for manual entry
+    });
+  } catch (err: any) {
+    console.error('Generate 2FA QR error:', err);
+    return res.status(500).json({ message: 'Failed to generate QR code' });
+  }
+}
+
+/**
+ * Verify 2FA code and enable 2FA
+ */
+export async function verifyAndEnable2FA(req: AuthenticatedRequest, res: Response) {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ message: 'Authentication required' });
+    }
+
+    const verifySchema = z.object({
+      token: z.string().length(6, 'Token must be 6 digits'),
+    });
+
+    const { token } = verifySchema.parse(req.body);
+
+    const user = await User.findById(req.user.id).select('+security.twoFactorSecret');
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    if (!user.security.twoFactorSecret) {
+      return res.status(400).json({ message: '2FA secret not found. Please generate QR code first.' });
+    }
+
+    // Verify the token
+    const verified = speakeasy.totp.verify({
+      secret: user.security.twoFactorSecret,
+      encoding: 'base32',
+      token: token,
+      window: 2, // Allow 2 time steps (60 seconds) before/after current time
+    });
+
+    if (!verified) {
+      return res.status(400).json({ message: 'Invalid verification code. Please try again.' });
+    }
+
+    // Enable 2FA
+    user.security.twoFactorEnabled = true;
+    user.security.twoFactorMethod = 'app';
+    await user.save();
+
+    return res.json({
+      message: 'Two-factor authentication enabled successfully',
+      security: {
+        twoFactorEnabled: user.security.twoFactorEnabled,
+        twoFactorMethod: user.security.twoFactorMethod,
+        lastPasswordChangeAt: user.security.lastPasswordChangeAt,
+      },
+    });
+  } catch (err: any) {
+    if (err instanceof z.ZodError) {
+      return res.status(400).json({ message: 'Invalid data', errors: err.flatten() });
+    }
+    console.error('Verify 2FA error:', err);
+    return res.status(500).json({ message: 'Failed to verify 2FA code' });
+  }
+}
+
+/**
+ * Disable 2FA
+ */
+export async function disable2FA(req: AuthenticatedRequest, res: Response) {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ message: 'Authentication required' });
+    }
+
+    const user = await User.findById(req.user.id).select('+security.twoFactorSecret');
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    // Disable 2FA and clear secret
+    user.security.twoFactorEnabled = false;
+    user.security.twoFactorMethod = null;
+    user.security.twoFactorSecret = undefined;
+    await user.save();
+
+    return res.json({
+      message: 'Two-factor authentication disabled successfully',
+      security: {
+        twoFactorEnabled: false,
+        twoFactorMethod: null,
+        lastPasswordChangeAt: user.security.lastPasswordChangeAt,
+      },
+    });
+  } catch (err: any) {
+    console.error('Disable 2FA error:', err);
+    return res.status(500).json({ message: 'Failed to disable 2FA' });
+  }
+}
+
+/**
+ * Get 2FA status
+ */
+export async function get2FAStatus(req: AuthenticatedRequest, res: Response) {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ message: 'Authentication required' });
+    }
+
+    const user = await User.findById(req.user.id);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    return res.json({
+      twoFactorEnabled: user.security.twoFactorEnabled,
+      twoFactorMethod: user.security.twoFactorMethod,
+    });
+  } catch (err: any) {
+    console.error('Get 2FA status error:', err);
+    return res.status(500).json({ message: 'Failed to get 2FA status' });
+  }
+}
+
+/**
+ * Get login history
+ */
+export async function getLoginHistory(req: AuthenticatedRequest, res: Response) {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ message: 'Authentication required' });
+    }
+
+    const user = await User.findById(req.user.id);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const loginHistory = user.security.loginHistory || [];
+    
+    // Format dates and return
+    const formattedHistory = loginHistory.map((entry) => ({
+      date: entry.date,
+      ip: entry.ip,
+      location: entry.location || 'Unknown',
+      device: entry.device || 'Unknown',
+    }));
+
+    return res.json({
+      loginHistory: formattedHistory,
+    });
+  } catch (err: any) {
+    console.error('Get login history error:', err);
+    return res.status(500).json({ message: 'Failed to get login history' });
   }
 }
 

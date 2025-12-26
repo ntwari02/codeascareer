@@ -60,10 +60,20 @@ export interface IUserPreferences {
   currency: string; // ISO 4217 code, e.g., "RWF", "USD"
 }
 
+export interface ILoginHistory {
+  date: Date;
+  ip: string;
+  location?: string;
+  device?: string;
+  userAgent?: string;
+}
+
 export interface ISecuritySettings {
   twoFactorEnabled: boolean;
   twoFactorMethod: TwoFactorMethod;
+  twoFactorSecret?: string; // TOTP secret for authenticator apps
   lastPasswordChangeAt: Date;
+  loginHistory?: ILoginHistory[];
 }
 
 export interface IUser extends Document {
@@ -171,6 +181,17 @@ const userPreferencesSchema = new Schema<IUserPreferences>(
   { _id: false }
 );
 
+const loginHistorySchema = new Schema<ILoginHistory>(
+  {
+    date: { type: Date, required: true, default: Date.now },
+    ip: { type: String, required: true },
+    location: { type: String },
+    device: { type: String },
+    userAgent: { type: String },
+  },
+  { _id: false }
+);
+
 const securitySettingsSchema = new Schema<ISecuritySettings>(
   {
     twoFactorEnabled: { type: Boolean, default: false },
@@ -179,7 +200,9 @@ const securitySettingsSchema = new Schema<ISecuritySettings>(
       enum: ['email', 'sms', 'app', null],
       default: null,
     },
+    twoFactorSecret: { type: String, select: false }, // Don't include in default queries for security
     lastPasswordChangeAt: { type: Date, default: Date.now },
+    loginHistory: { type: [loginHistorySchema], default: [] },
   },
   { _id: false }
 );
@@ -235,10 +258,6 @@ const userSchema = new Schema<IUser>(
   },
   { timestamps: true }
 );
-
-// Index for faster queries
-userSchema.index({ email: 1 });
-userSchema.index({ role: 1 });
 
 export const User = mongoose.model<IUser>('User', userSchema);
 
