@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { 
   AlertTriangle, 
@@ -115,11 +115,7 @@ const DisputeResolution: React.FC = () => {
   const [submittingResponse, setSubmittingResponse] = useState(false);
 
   // Fetch disputes from backend
-  useEffect(() => {
-    fetchDisputes();
-  }, [statusFilter, reasonFilter, dateRangeFilter, sortOrder]);
-
-  const fetchDisputes = async () => {
+  const fetchDisputes = useCallback(async () => {
     setLoading(true);
     try {
       const params = new URLSearchParams();
@@ -157,10 +153,15 @@ const DisputeResolution: React.FC = () => {
     } catch (error: any) {
       console.error('Error fetching disputes:', error);
       showToast(error.message || 'Failed to load disputes', 'error');
+      setDisputes([]);
     } finally {
       setLoading(false);
     }
-  };
+  }, [statusFilter, reasonFilter, dateRangeFilter.start, dateRangeFilter.end, sortOrder, showToast]);
+
+  useEffect(() => {
+    fetchDisputes();
+  }, [fetchDisputes]);
 
   const fetchDisputeDetails = async (disputeId: string) => {
     try {
@@ -546,32 +547,32 @@ const DisputeResolution: React.FC = () => {
         <div className="flex flex-col gap-4 mb-6">
           {/* Search and basic filters */}
           <div className="flex flex-col sm:flex-row items-center gap-4">
-            <div className="relative flex-1 max-w-md">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-500" />
-              <input
-                type="text"
+          <div className="relative flex-1 max-w-md">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-500" />
+            <input
+              type="text"
                 placeholder="Search by dispute ID, order ID, or reason..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
                 className="w-full bg-gray-100 dark:bg-gray-800/50 border border-gray-300 dark:border-gray-700/50 rounded-lg pl-10 pr-4 py-2 text-gray-900 dark:text-white placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-red-500"
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <Filter className="w-5 h-5 text-gray-500" />
-              <select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-                className="bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
-              >
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <Filter className="w-5 h-5 text-gray-500" />
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+            >
                 <option value="all">All Statuses</option>
                 <option value="new">Open</option>
                 <option value="seller_response">Awaiting Seller Response</option>
                 <option value="buyer_response">Awaiting Buyer Response</option>
-                <option value="under_review">Under Review</option>
-                <option value="resolved">Resolved</option>
+              <option value="under_review">Under Review</option>
+              <option value="resolved">Resolved</option>
                 <option value="approved">Approved</option>
-                <option value="rejected">Rejected</option>
-              </select>
+              <option value="rejected">Rejected</option>
+            </select>
             </div>
             <div className="flex items-center gap-2">
               <select
@@ -662,11 +663,11 @@ const DisputeResolution: React.FC = () => {
                     const needsAction = requiresAction(dispute);
                     const deadline = getTimeUntilDeadline(dispute.responseDeadline);
 
-                    return (
+            return (
                       <motion.tr
                         key={dispute._id}
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
                         className={`border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800/50 ${
                           needsAction ? 'bg-orange-50/50 dark:bg-orange-900/10' : ''
                         }`}
@@ -683,10 +684,10 @@ const DisputeResolution: React.FC = () => {
                             <div>
                               <div className="text-sm text-gray-900 dark:text-white">
                                 {buyer?.fullName || 'Unknown'}
-                              </div>
+                    </div>
                               <div className="text-xs text-gray-500">{maskEmail(buyer?.email)}</div>
-                            </div>
-                          </div>
+                    </div>
+                  </div>
                         </td>
                         <td className="py-3 px-4">
                           <div className="text-sm text-gray-700 dark:text-gray-300 capitalize">{dispute.reason}</div>
@@ -718,19 +719,19 @@ const DisputeResolution: React.FC = () => {
                                 )}
                               </div>
                             )}
-                            <Button
-                              variant="ghost"
+                  <Button 
+                    variant="ghost" 
                               size="sm"
-                              onClick={() => handleViewDispute(dispute)}
+                    onClick={() => handleViewDispute(dispute)}
                               className="text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
-                            >
+                  >
                               View
-                            </Button>
-                          </div>
+                  </Button>
+                </div>
                         </td>
                       </motion.tr>
-                    );
-                  })}
+            );
+          })}
                 </tbody>
               </table>
             </div>
@@ -740,13 +741,13 @@ const DisputeResolution: React.FC = () => {
 
       {/* Dispute Details Dialog */}
       {selectedDispute && (
-        <Dialog open={showDisputeDetails} onOpenChange={setShowDisputeDetails}>
+      <Dialog open={showDisputeDetails} onOpenChange={setShowDisputeDetails}>
           <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle className="text-2xl font-bold text-gray-900 dark:text-white">
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-bold text-gray-900 dark:text-white">
                 Dispute Details - {selectedDispute.disputeNumber}
-              </DialogTitle>
-            </DialogHeader>
+            </DialogTitle>
+          </DialogHeader>
 
             <div className="space-y-6 mt-4">
               {/* Dispute Summary Panel */}
@@ -894,7 +895,7 @@ const DisputeResolution: React.FC = () => {
                       <div>
                         <span className="text-gray-600 dark:text-gray-400">Resolution:</span>
                         <p className="mt-1 text-gray-900 dark:text-white">{selectedDispute.resolution}</p>
-                      </div>
+                        </div>
                     )}
                     {selectedDispute.resolvedAt && (
                       <div>
@@ -915,7 +916,7 @@ const DisputeResolution: React.FC = () => {
                 <div className="space-y-4 pt-4 border-t border-gray-200 dark:border-gray-700">
                   <h3 className="font-semibold text-gray-900 dark:text-white">Your Response Options</h3>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                    <Button
+                    <Button 
                       variant="outline"
                       onClick={() => handleOpenResponseModal('accept')}
                       className="flex flex-col items-center gap-2 h-auto py-4 border-green-200 dark:border-green-500/30 hover:bg-green-50 dark:hover:bg-green-900/20"
@@ -923,7 +924,7 @@ const DisputeResolution: React.FC = () => {
                       <CheckCircle className="w-6 h-6 text-green-500" />
                       <span className="text-sm">Accept the Claim</span>
                     </Button>
-                    <Button
+                    <Button 
                       variant="outline"
                       onClick={() => handleOpenResponseModal('evidence')}
                       className="flex flex-col items-center gap-2 h-auto py-4 border-blue-200 dark:border-blue-500/30 hover:bg-blue-50 dark:hover:bg-blue-900/20"
@@ -931,7 +932,7 @@ const DisputeResolution: React.FC = () => {
                       <FileCheck className="w-6 h-6 text-blue-500" />
                       <span className="text-sm">Provide Evidence</span>
                     </Button>
-                    <Button
+                    <Button 
                       variant="outline"
                       onClick={() => handleOpenResponseModal('dispute')}
                       className="flex flex-col items-center gap-2 h-auto py-4 border-red-200 dark:border-red-500/30 hover:bg-red-50 dark:hover:bg-red-900/20"
@@ -985,8 +986,8 @@ const DisputeResolution: React.FC = () => {
                   <Upload className="w-4 h-4 mr-2" />
                   Upload Evidence Files
                 </Button>
-              </div>
-            )}
+            </div>
+          )}
             <div className="flex justify-end gap-3">
               <Button
                 variant="outline"
@@ -1070,23 +1071,23 @@ const DisputeResolution: React.FC = () => {
               />
             </div>
             <div className="flex justify-end gap-3">
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setShowEvidenceModal(false);
-                  setEvidenceFiles([]);
-                  setEvidenceNotes('');
-                }}
-              >
-                Cancel
-              </Button>
-              <Button
-                onClick={handleSubmitEvidence}
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setShowEvidenceModal(false);
+                    setEvidenceFiles([]);
+                    setEvidenceNotes('');
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={handleSubmitEvidence}
                 disabled={(evidenceFiles.length === 0 && !evidenceNotes.trim()) || uploadingEvidence}
-                className="bg-gradient-to-r from-red-500 to-orange-500 hover:from-red-600 hover:to-orange-600"
-              >
+                  className="bg-gradient-to-r from-red-500 to-orange-500 hover:from-red-600 hover:to-orange-600"
+                >
                 {uploadingEvidence ? 'Uploading...' : 'Submit Evidence'}
-              </Button>
+                </Button>
             </div>
           </div>
         </DialogContent>

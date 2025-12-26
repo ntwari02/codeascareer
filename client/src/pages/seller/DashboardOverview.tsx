@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { DollarSign, ShoppingCart, AlertTriangle, Package, TrendingUp, MessageCircle, Star, ShieldCheck, Calendar, Clock, CheckCircle, XCircle, Truck } from 'lucide-react';
 import StatCard from '@/components/dashboard/StatCard';
@@ -7,6 +7,8 @@ import SalesChart from '@/components/dashboard/SalesChart';
 import { BarChart } from '@/components/charts/BarChart';
 import { ComboChart } from '@/components/charts/ComboChart';
 import { DonutChart } from '@/components/charts/DonutChart';
+import { useAuthStore } from '@/stores/authStore';
+import { useToastStore } from '@/stores/toastStore';
 
 interface Stat {
   title: string;
@@ -17,84 +19,184 @@ interface Stat {
   color: string;
 }
 
+interface DashboardStats {
+  stats: {
+    totalSales: { value: string; change: string; trend: 'up' | 'down' };
+    activeOrders: { value: string; change: string; trend: 'up' | 'down' };
+    conversionRate: { value: string; change: string; trend: 'up' | 'down' };
+    lowStockItems: { value: string; change: string; trend: 'up' | 'down' };
+    avgOrderValue: { value: string; change: string; trend: 'up' | 'down' };
+    pendingRFQs: { value: string; change: string; trend: 'up' | 'down' };
+  };
+  orderStats: {
+    pending: number;
+    inTransit: number;
+    completed: number;
+    cancelled: number;
+  };
+  bestSellingProducts: Array<{
+    name: string;
+    sales: number;
+    revenue: string;
+    stock: number;
+  }>;
+  recentOrders: Array<{
+    id: string;
+    customer: string;
+    amount: string;
+    status: 'processing' | 'shipped' | 'delivered';
+    time: string;
+  }>;
+  revenueTrend: Array<{ date: string; value: number }>;
+  dailySales: Array<{ day: string; sales: number }>;
+  conversionData: {
+    value: number;
+    thisWeek: number;
+    lastWeek: number;
+  };
+  performanceData: Array<{ label: string; barValue: number; lineValue: number }>;
+  accountStatus: {
+    tier: string;
+    verificationStatus: string;
+    isVerified: boolean;
+    storeRating: number;
+    reviewCount: number;
+  };
+  actionRequired: Array<{
+    title: string;
+    meta: string;
+    priority: 'High' | 'Medium' | 'Low';
+    due: string;
+  }>;
+  timeRange: string;
+}
+
+const API_BASE = 'http://localhost:5000/api/seller/dashboard/stats';
+
 const DashboardOverview: React.FC = () => {
   const [timeRange, setTimeRange] = useState<'today' | 'week' | 'month'>('week');
+  const [loading, setLoading] = useState(true);
+  const [dashboardData, setDashboardData] = useState<DashboardStats | null>(null);
+  const { user } = useAuthStore();
+  const { showToast } = useToastStore();
 
-  const salesStats: Stat[] = [
+  // Fetch dashboard stats from backend
+  useEffect(() => {
+    fetchDashboardStats();
+  }, [timeRange]);
+
+  const fetchDashboardStats = async () => {
+    setLoading(true);
+    try {
+      const token = localStorage.getItem('auth_token');
+      const response = await fetch(`${API_BASE}?timeRange=${timeRange}`, {
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+        },
+        credentials: 'include',
+      });
+
+      if (response.status === 401) {
+        window.location.href = '/login';
+        return;
+      }
+      if (response.status === 403) {
+        window.location.href = '/';
+        return;
+      }
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ message: 'Failed to fetch dashboard stats' }));
+        throw new Error(errorData.message || 'Failed to fetch dashboard stats');
+      }
+
+      const data = await response.json();
+      console.log('Dashboard data received:', data);
+      // API returns { stats: {...}, orderStats: {...}, ... } directly
+      if (data && data.stats) {
+        setDashboardData(data);
+      } else {
+        throw new Error('Invalid response format from server');
+      }
+    } catch (error: any) {
+      console.error('Error fetching dashboard stats:', error);
+      showToast(error.message || 'Failed to load dashboard', 'error');
+      setDashboardData(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Build stats arrays from API data
+  const salesStats: Stat[] = dashboardData ? [
     {
       title: 'Total Sales',
-      value: timeRange === 'today' ? '$2,450' : timeRange === 'week' ? '$45,231' : '$189,450',
-      change: '+12.5%',
-      trend: 'up',
+      value: dashboardData.stats.totalSales.value,
+      change: dashboardData.stats.totalSales.change,
+      trend: dashboardData.stats.totalSales.trend,
       icon: DollarSign,
       color: 'from-green-500 to-emerald-500',
     },
     {
       title: 'Active Orders',
-      value: '342',
-      change: '+8.2%',
-      trend: 'up',
+      value: dashboardData.stats.activeOrders.value,
+      change: dashboardData.stats.activeOrders.change,
+      trend: dashboardData.stats.activeOrders.trend,
       icon: ShoppingCart,
       color: 'from-blue-500 to-cyan-500',
     },
     {
       title: 'Conversion Rate',
-      value: '3.24%',
-      change: '+2.3%',
-      trend: 'up',
+      value: dashboardData.stats.conversionRate.value,
+      change: dashboardData.stats.conversionRate.change,
+      trend: dashboardData.stats.conversionRate.trend,
       icon: TrendingUp,
       color: 'from-purple-500 to-pink-500',
     },
     {
       title: 'Low Stock Items',
-      value: '28',
-      change: '+5.4%',
-      trend: 'up',
+      value: dashboardData.stats.lowStockItems.value,
+      change: dashboardData.stats.lowStockItems.change,
+      trend: dashboardData.stats.lowStockItems.trend,
       icon: Package,
       color: 'from-red-500 to-orange-500',
     },
-  ];
+  ] : [];
 
   // B2B-focused KPIs
-  const b2bStats: Stat[] = [
+  const b2bStats: Stat[] = dashboardData ? [
     {
       title: 'Pending RFQs',
-      value: '18',
-      change: '+6 new today',
-      trend: 'up',
+      value: dashboardData.stats.pendingRFQs.value,
+      change: dashboardData.stats.pendingRFQs.change,
+      trend: dashboardData.stats.pendingRFQs.trend,
       icon: AlertTriangle,
       color: 'from-amber-500 to-orange-500',
     },
     {
       title: 'Avg. Order Value (AOV)',
-      value: timeRange === 'today' ? '$1,240' : timeRange === 'week' ? '$1,180' : '$1,095',
-      change: '+3.1%',
-      trend: 'up',
+      value: dashboardData.stats.avgOrderValue.value,
+      change: dashboardData.stats.avgOrderValue.change,
+      trend: dashboardData.stats.avgOrderValue.trend,
       icon: DollarSign,
       color: 'from-sky-500 to-indigo-500',
     },
-  ];
+  ] : [];
 
-  const orderStats = [
-    { label: 'Pending', count: 12, color: 'bg-yellow-500', icon: Clock },
-    { label: 'In Transit', count: 45, color: 'bg-blue-500', icon: Truck },
-    { label: 'Completed', count: 234, color: 'bg-green-500', icon: CheckCircle },
-    { label: 'Cancelled', count: 3, color: 'bg-red-500', icon: XCircle },
-  ];
+  const orderStats = dashboardData ? [
+    { label: 'Pending', count: dashboardData.orderStats.pending, color: 'bg-yellow-500', icon: Clock },
+    { label: 'In Transit', count: dashboardData.orderStats.inTransit, color: 'bg-blue-500', icon: Truck },
+    { label: 'Completed', count: dashboardData.orderStats.completed, color: 'bg-green-500', icon: CheckCircle },
+    { label: 'Cancelled', count: dashboardData.orderStats.cancelled, color: 'bg-red-500', icon: XCircle },
+  ] : [];
 
-  const bestSellingProducts = [
-    { name: 'Wireless Headphones', sales: 234, revenue: '$35,100', stock: 45 },
-    { name: 'Smart Watch', sales: 189, revenue: '$56,700', stock: 12 },
-    { name: 'USB-C Cable', sales: 456, revenue: '$9,120', stock: 128 },
-    { name: 'Laptop Stand', sales: 78, revenue: '$6,240', stock: 0 },
-  ];
-
-  const notifications = [
-    { type: 'message', text: 'New message from Alice Johnson', time: '2m ago', unread: true },
-    { type: 'review', text: 'New 5-star review for Wireless Headphones', time: '15m ago', unread: true },
-    { type: 'dispute', text: 'New dispute opened for order #ORD-2847', time: '1h ago', unread: false },
-    { type: 'subscription', text: 'Subscription renewal in 5 days', time: '2h ago', unread: false },
-  ];
+  const bestSellingProducts = dashboardData?.bestSellingProducts || [];
+  const actionRequired = dashboardData?.actionRequired || [];
+  const accountStatus = dashboardData?.accountStatus;
+  
+  // Placeholder notifications (would come from notifications API)
+  const notifications: Array<{ type: string; text: string; time: string; unread: boolean }> = [];
 
   const containerVariants = {
     hidden: { opacity: 0 },
@@ -105,6 +207,30 @@ const DashboardOverview: React.FC = () => {
       },
     },
   };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-gray-500">Loading dashboard...</div>
+      </div>
+    );
+  }
+
+  if (!dashboardData) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center">
+          <p className="text-gray-500 mb-2">Failed to load dashboard data</p>
+          <button
+            onClick={fetchDashboardStats}
+            className="text-red-500 hover:text-red-600 underline"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -163,12 +289,12 @@ const DashboardOverview: React.FC = () => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Revenue Chart */}
         <div className="lg:col-span-2">
-          <SalesChart />
+          <SalesChart data={dashboardData?.dailySales || []} />
         </div>
 
         {/* Recent Orders */}
         <div>
-          <RecentOrders />
+          <RecentOrders orders={dashboardData?.recentOrders || []} />
         </div>
       </div>
 
@@ -178,26 +304,8 @@ const DashboardOverview: React.FC = () => {
         <div className="bg-white/50 dark:bg-gray-900/50 rounded-xl p-6 border border-gray-200 dark:border-gray-700/30 shadow-xl transition-colors duration-300 h-full">
           <BarChart
             title="Revenue Trend & Forecast"
-            data={[
-              { date: '2024-01-01', value: 45000 },
-              { date: '2024-01-08', value: 52000 },
-              { date: '2024-01-15', value: 48000 },
-              { date: '2024-01-22', value: 61000 },
-              { date: '2024-01-29', value: 55000 },
-              { date: '2024-02-05', value: 67000 },
-              { date: '2024-02-12', value: 72000 },
-              { date: '2024-02-19', value: 68000 },
-              { date: '2024-02-26', value: 75000 },
-              { date: '2024-03-05', value: 82000 },
-              { date: '2024-03-12', value: 78000 },
-              { date: '2024-03-19', value: 89000 },
-            ]}
-            forecastData={[
-              { date: '2024-03-26', value: 92000, isForecast: true },
-              { date: '2024-04-02', value: 95000, isForecast: true },
-              { date: '2024-04-09', value: 98000, isForecast: true },
-              { date: '2024-04-16', value: 101000, isForecast: true },
-            ]}
+            data={dashboardData?.revenueTrend.map(item => ({ date: item.date, value: item.value })) || []}
+            forecastData={[]}
             height={350}
             yAxisLabel="Revenue ($)"
           />
@@ -207,7 +315,7 @@ const DashboardOverview: React.FC = () => {
         <div className="bg-white/50 dark:bg-gray-900/50 rounded-xl p-6 border border-gray-200 dark:border-gray-700/30 shadow-xl transition-colors duration-300 flex flex-col h-full">
           <DonutChart
             title="Conversions"
-            value={65.2}
+            value={dashboardData?.conversionData.value || 0}
             maxValue={100}
             label="Returning Customer"
             size={180}
@@ -216,11 +324,15 @@ const DashboardOverview: React.FC = () => {
           <div className="mt-6 space-y-3">
             <div className="flex justify-between items-center">
               <span className="text-sm text-gray-600 dark:text-gray-400">This Week</span>
-              <span className="text-lg font-semibold text-gray-900 dark:text-white">23.5k</span>
+              <span className="text-lg font-semibold text-gray-900 dark:text-white">
+                {dashboardData?.conversionData.thisWeek.toLocaleString() || '0'}
+              </span>
             </div>
             <div className="flex justify-between items-center">
               <span className="text-sm text-gray-600 dark:text-gray-400">Last Week</span>
-              <span className="text-lg font-semibold text-gray-900 dark:text-white">41.05k</span>
+              <span className="text-lg font-semibold text-gray-900 dark:text-white">
+                {dashboardData?.conversionData.lastWeek.toLocaleString() || '0'}
+              </span>
             </div>
             <button className="w-full mt-4 bg-red-600 hover:bg-red-700 text-white text-sm py-2 rounded-lg transition-colors">
               View Details
@@ -232,22 +344,9 @@ const DashboardOverview: React.FC = () => {
         <div className="bg-white/50 dark:bg-gray-900/50 rounded-xl p-6 border border-gray-200 dark:border-gray-700/30 shadow-xl transition-colors duration-300 h-full">
           <ComboChart
             title="Performance"
-            data={[
-              { label: 'Jan', barValue: 45, lineValue: 28 },
-              { label: 'Feb', barValue: 68, lineValue: 32 },
-              { label: 'Mar', barValue: 52, lineValue: 35 },
-              { label: 'Apr', barValue: 75, lineValue: 48 },
-              { label: 'May', barValue: 58, lineValue: 45 },
-              { label: 'Jun', barValue: 62, lineValue: 38 },
-              { label: 'Jul', barValue: 55, lineValue: 42 },
-              { label: 'Aug', barValue: 70, lineValue: 50 },
-              { label: 'Sep', barValue: 78, lineValue: 55 },
-              { label: 'Oct', barValue: 65, lineValue: 52 },
-              { label: 'Nov', barValue: 72, lineValue: 48 },
-              { label: 'Dec', barValue: 80, lineValue: 60 },
-            ]}
-            barLabel="Page Views"
-            lineLabel="Clicks"
+            data={dashboardData?.performanceData || []}
+            barLabel="Revenue (scaled)"
+            lineLabel="Orders"
             height={350}
           />
         </div>
@@ -337,26 +436,8 @@ const DashboardOverview: React.FC = () => {
               Action Required
             </h2>
             <div className="space-y-3">
-              {[
-                {
-                  title: 'Review high-value RFQs',
-                  meta: '5 RFQs over $10k waiting for response',
-                  priority: 'High',
-                  due: 'Due in 2 hours',
-                },
-                {
-                  title: 'Approve new B2B buyer accounts',
-                  meta: '3 enterprise buyers pending verification',
-                  priority: 'Medium',
-                  due: 'Today',
-                },
-                {
-                  title: 'Follow up on expiring contracts',
-                  meta: '2 key accounts renew in the next 7 days',
-                  priority: 'High',
-                  due: 'This week',
-                },
-              ].map((task, index) => (
+              {actionRequired.length > 0 ? (
+                actionRequired.map((task, index) => (
                 <motion.div
                   key={task.title}
                   initial={{ opacity: 0, y: 12 }}
@@ -399,7 +480,12 @@ const DashboardOverview: React.FC = () => {
                     <CheckCircle className="h-4 w-4" />
                   </button>
                 </motion.div>
-              ))}
+              ))
+              ) : (
+                <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-4">
+                  No actions required at this time
+                </p>
+              )}
             </div>
           </div>
 
@@ -442,23 +528,37 @@ const DashboardOverview: React.FC = () => {
               <div className="flex items-center justify-between p-3 bg-gradient-to-r from-red-500/10 to-orange-500/10 dark:from-red-500/20 dark:to-orange-500/20 rounded-lg border border-red-200 dark:border-red-500/30">
                 <div>
                   <p className="text-sm text-gray-600 dark:text-gray-400 transition-colors duration-300">Seller Tier</p>
-                  <p className="font-bold text-gray-900 dark:text-white transition-colors duration-300">Premium</p>
+                  <p className="font-bold text-gray-900 dark:text-white transition-colors duration-300">
+                    {accountStatus?.tier || 'Starter'}
+                  </p>
                 </div>
                 <Star className="w-8 h-8 text-yellow-400 fill-yellow-400" />
               </div>
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-gray-600 dark:text-gray-400 transition-colors duration-300">Verification Status</span>
-                  <span className="px-2 py-1 bg-green-100 dark:bg-green-900/20 text-green-600 dark:text-green-400 rounded text-xs font-medium">Verified</span>
+                  <span className={`px-2 py-1 rounded text-xs font-medium ${
+                    accountStatus?.isVerified
+                      ? 'bg-green-100 dark:bg-green-900/20 text-green-600 dark:text-green-400'
+                      : 'bg-yellow-100 dark:bg-yellow-900/20 text-yellow-600 dark:text-yellow-400'
+                  }`}>
+                    {accountStatus?.verificationStatus === 'approved' ? 'Verified' : accountStatus?.verificationStatus || 'Pending'}
+                  </span>
                 </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-gray-600 dark:text-gray-400 transition-colors duration-300">Store Rating</span>
-                  <div className="flex items-center gap-1">
-                    <Star className="w-4 h-4 text-yellow-400 fill-yellow-400" />
-                    <span className="text-sm font-semibold text-gray-900 dark:text-white transition-colors duration-300">4.8</span>
-                    <span className="text-xs text-gray-600 dark:text-gray-400 transition-colors duration-300">(1,234 reviews)</span>
+                {accountStatus && accountStatus.storeRating > 0 && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-gray-600 dark:text-gray-400 transition-colors duration-300">Store Rating</span>
+                    <div className="flex items-center gap-1">
+                      <Star className="w-4 h-4 text-yellow-400 fill-yellow-400" />
+                      <span className="text-sm font-semibold text-gray-900 dark:text-white transition-colors duration-300">
+                        {accountStatus.storeRating.toFixed(1)}
+                      </span>
+                      <span className="text-xs text-gray-600 dark:text-gray-400 transition-colors duration-300">
+                        ({accountStatus.reviewCount.toLocaleString()} reviews)
+                      </span>
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
             </div>
           </div>

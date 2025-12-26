@@ -11,10 +11,14 @@ interface Order {
   time: string;
 }
 
-const RecentOrders: React.FC = () => {
+interface RecentOrdersProps {
+  orders?: Order[];
+}
+
+const RecentOrders: React.FC<RecentOrdersProps> = ({ orders: ordersProp = [] }) => {
   const navigate = useNavigate();
   
-  const orders: Order[] = [
+  const orders: Order[] = ordersProp.length > 0 ? ordersProp : [
     { id: '#ORD-2847', customer: 'Alice Johnson', amount: '$124.99', status: 'processing', time: '5m ago' },
     { id: '#ORD-2846', customer: 'Bob Smith', amount: '$89.50', status: 'shipped', time: '12m ago' },
     { id: '#ORD-2845', customer: 'Carol White', amount: '$256.00', status: 'delivered', time: '1h ago' },
