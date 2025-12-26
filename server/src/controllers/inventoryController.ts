@@ -394,6 +394,30 @@ export async function deleteWarehouse(req: AuthenticatedRequest, res: Response) 
 
 // ===== Stock history =====
 
+// Temporary helper endpoint to transfer all products to current seller (for testing)
+export async function transferAllProductsToMe(req: AuthenticatedRequest, res: Response) {
+  const sellerId = getSellerId(req);
+  if (!sellerId) {
+    return res.status(401).json({ message: 'Authentication required' });
+  }
+
+  try {
+    const result = await Product.updateMany(
+      {},
+      { $set: { sellerId: sellerId } }
+    );
+    
+    console.log(`[TRANSFER] Transferred ${result.modifiedCount} products to seller ${sellerId}`);
+    return res.json({ 
+      message: `Transferred ${result.modifiedCount} products to your account`,
+      modifiedCount: result.modifiedCount 
+    });
+  } catch (err: any) {
+    console.error('Error transferring products:', err);
+    return res.status(500).json({ message: 'Failed to transfer products', error: err.message });
+  }
+}
+
 export async function listStockHistory(req: AuthenticatedRequest, res: Response) {
   const sellerId = getSellerId(req);
   if (!sellerId) {

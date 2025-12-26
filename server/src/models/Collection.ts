@@ -51,6 +51,9 @@ export interface ICollection extends Document {
   isSale?: boolean;
   seoTitle?: string;
   seoDescription?: string;
+  // For Manual collections: explicit product IDs
+  productIds?: Schema.Types.ObjectId[];
+  // For Automated (smart) collections: rule definitions
   conditions?: ICollectionCondition[];
   placement?: ICollectionPlacement;
   placementPriority?: number;
@@ -132,6 +135,9 @@ const collectionSchema = new Schema<ICollection>(
     isSale: { type: Boolean, default: false },
     seoTitle: { type: String },
     seoDescription: { type: String },
+    // Manual collections: store explicit product IDs
+    productIds: [{ type: Schema.Types.ObjectId, ref: 'Product' }],
+    // Automated collections: store rule definitions
     conditions: { type: [collectionConditionSchema], default: [] },
     placement: { type: collectionPlacementSchema },
     placementPriority: { type: Number, default: 0 },
