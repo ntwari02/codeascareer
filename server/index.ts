@@ -10,6 +10,7 @@ import path from 'path';
 import authRoutes from './src/routes/authRoutes';
 import sellerRoutes from './src/routes/sellerRoutes';
 import inventoryRoutes from './src/routes/inventoryRoutes';
+import subscriptionRoutes from './src/routes/subscriptionRoutes';
 
 dotenv.config();
 
@@ -50,6 +51,9 @@ app.use('/api/seller/inventory', inventoryRoutes);
 
 // Seller routes
 app.use('/api/seller', sellerRoutes);
+
+// Subscription routes
+app.use('/api/seller/subscription', subscriptionRoutes);
 
 // 404 handler
 app.use((req: Request, res: Response) => {
