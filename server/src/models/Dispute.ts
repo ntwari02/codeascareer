@@ -27,6 +27,7 @@ export interface IDispute extends Document {
   resolvedBy?: mongoose.Types.ObjectId;
   resolvedAt?: Date;
   resolution?: string;
+  responseDeadline?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -57,7 +58,6 @@ const disputeSchema = new Schema<IDispute>(
       type: Schema.Types.ObjectId,
       ref: 'Order',
       required: true,
-      index: true,
     },
     sellerId: {
       type: Schema.Types.ObjectId,
@@ -100,6 +100,7 @@ const disputeSchema = new Schema<IDispute>(
     resolvedBy: { type: Schema.Types.ObjectId, ref: 'User' },
     resolvedAt: { type: Date },
     resolution: { type: String },
+    responseDeadline: { type: Date, index: true },
   },
   { timestamps: true }
 );

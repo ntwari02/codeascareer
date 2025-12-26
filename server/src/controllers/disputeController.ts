@@ -13,6 +13,52 @@ const getSellerId = (req: AuthenticatedRequest): mongoose.Types.ObjectId | null 
 };
 
 /**
+ * Get next action information for a dispute
+ */
+const getNextAction = (dispute: any) => {
+  if (dispute.status === 'new') {
+    return {
+      message: 'This dispute requires your response. Please review and respond.',
+      deadline: dispute.responseDeadline || null,
+      actionRequired: true,
+    };
+  }
+  if (dispute.status === 'buyer_response') {
+    return {
+      message: 'The buyer has responded. Please review their response and take action.',
+      deadline: dispute.responseDeadline || null,
+      actionRequired: true,
+    };
+  }
+  if (dispute.status === 'under_review') {
+    return {
+      message: 'This dispute is under review. No action required at this time.',
+      deadline: null,
+      actionRequired: false,
+    };
+  }
+  if (dispute.status === 'resolved' || dispute.status === 'approved' || dispute.status === 'rejected') {
+    return {
+      message: 'This dispute has been resolved.',
+      deadline: null,
+      actionRequired: false,
+    };
+  }
+  if (dispute.status === 'seller_response') {
+    return {
+      message: 'Your response has been submitted. Awaiting platform review.',
+      deadline: null,
+      actionRequired: false,
+    };
+  }
+  return {
+    message: 'Awaiting platform review.',
+    deadline: null,
+    actionRequired: false,
+  };
+};
+
+/**
  * Get all disputes for seller
  */
 export async function getDisputes(req: AuthenticatedRequest, res: Response) {
@@ -22,7 +68,7 @@ export async function getDisputes(req: AuthenticatedRequest, res: Response) {
       return res.status(401).json({ message: 'Authentication required' });
     }
 
-    const { status, type, page = 1, limit = 20 } = req.query;
+    const { status, type, page = 1, limit = 20, startDate, endDate, sort } = req.query;
     const skip = (Number(page) - 1) * Number(limit);
 
     const filter: any = { sellerId };
@@ -35,10 +81,27 @@ export async function getDisputes(req: AuthenticatedRequest, res: Response) {
       filter.type = type;
     }
 
+    // Date range filter
+    if (startDate || endDate) {
+      filter.createdAt = {};
+      if (startDate) {
+        filter.createdAt.$gte = new Date(startDate as string);
+      }
+      if (endDate) {
+        const end = new Date(endDate as string);
+        end.setHours(23, 59, 59, 999);
+        filter.createdAt.$lte = end;
+      }
+    }
+
+    // Sort order (1 for ascending, -1 for descending)
+    // Sort by updatedAt (last updated) instead of createdAt for better relevance
+    const sortOrder = sort === '1' ? 1 : -1;
+
     const disputes = await Dispute.find(filter)
-      .populate('orderId', 'orderNumber totalAmount')
+      .populate('orderId', 'orderNumber total items customer customerEmail')
       .populate('buyerId', 'fullName email')
-      .sort({ createdAt: -1 })
+      .sort({ updatedAt: sortOrder })
       .limit(Number(limit))
       .skip(skip)
       .lean();
@@ -80,7 +143,7 @@ export async function getDispute(req: AuthenticatedRequest, res: Response) {
       _id: disputeId,
       sellerId,
     })
-      .populate('orderId')
+      .populate('orderId', 'orderNumber total items customer customerEmail')
       .populate('buyerId', 'fullName email')
       .populate('resolvedBy', 'fullName email')
       .lean();
@@ -89,7 +152,21 @@ export async function getDispute(req: AuthenticatedRequest, res: Response) {
       return res.status(404).json({ message: 'Dispute not found' });
     }
 
-    return res.json({ dispute });
+    // Build next action information
+    const nextAction = getNextAction(dispute);
+    const requiresAction = dispute.status === 'new' || dispute.status === 'buyer_response';
+    const deadlineExpired = dispute.responseDeadline 
+      ? new Date(dispute.responseDeadline) < new Date() 
+      : false;
+
+    return res.json({ 
+      dispute: {
+        ...dispute,
+        nextAction,
+        requiresAction,
+        deadlineExpired,
+      }
+    });
   } catch (error: any) {
     console.error('Get dispute error:', error);
     return res.status(500).json({ message: 'Failed to fetch dispute' });
@@ -107,7 +184,7 @@ export async function submitSellerResponse(req: AuthenticatedRequest, res: Respo
     }
 
     const { disputeId } = req.params;
-    const { response, evidence } = req.body;
+    const { response, evidence, actionType } = req.body;
 
     if (!mongoose.Types.ObjectId.isValid(disputeId)) {
       return res.status(400).json({ message: 'Invalid dispute ID' });
@@ -130,6 +207,12 @@ export async function submitSellerResponse(req: AuthenticatedRequest, res: Respo
       return res.status(400).json({ message: 'Dispute is already resolved' });
     }
 
+    // Check if deadline has passed (if applicable)
+    if (dispute.responseDeadline && new Date(dispute.responseDeadline) < new Date()) {
+      // Allow response even after deadline, but log it
+      console.warn(`Seller response submitted after deadline for dispute ${dispute._id}`);
+    }
+
     // Add evidence if provided
     const evidenceArray = Array.isArray(evidence) ? evidence : [];
     const newEvidence = evidenceArray.map((ev: any) => ({
@@ -139,10 +222,26 @@ export async function submitSellerResponse(req: AuthenticatedRequest, res: Respo
       uploadedAt: new Date(),
     }));
 
+    // Ensure immutability - don't allow editing existing responses
+    if (dispute.sellerResponse) {
+      return res.status(400).json({ message: 'Response already submitted. Cannot modify existing response.' });
+    }
+
     dispute.sellerResponse = response;
     dispute.sellerResponseAt = new Date();
     dispute.evidence = [...dispute.evidence, ...newEvidence];
-    dispute.status = 'seller_response';
+    
+    // Update status based on action type and current state
+    if (dispute.status === 'new' || dispute.status === 'buyer_response') {
+      // After seller responds, move to under_review for platform mediation
+      dispute.status = 'seller_response';
+      // Platform will review and transition to under_review
+    }
+
+    // Clear response deadline as seller has responded
+    if (dispute.responseDeadline) {
+      dispute.responseDeadline = undefined;
+    }
 
     await dispute.save();
 
@@ -172,8 +271,12 @@ export async function uploadEvidence(req: AuthenticatedRequest, res: Response) {
       return res.status(400).json({ message: 'Invalid dispute ID' });
     }
 
+    const { notes } = req.body;
+
     if (!req.files || (req.files as Express.Multer.File[]).length === 0) {
-      return res.status(400).json({ message: 'No files uploaded' });
+      if (!notes || !notes.trim()) {
+        return res.status(400).json({ message: 'No files uploaded and no notes provided' });
+      }
     }
 
     const dispute = await Dispute.findOne({
@@ -185,12 +288,29 @@ export async function uploadEvidence(req: AuthenticatedRequest, res: Response) {
       return res.status(404).json({ message: 'Dispute not found' });
     }
 
-    const files = (req.files as Express.Multer.File[]).map((file) => ({
-      type: 'document' as const,
-      url: `/uploads/disputes/${file.filename}`,
-      description: file.originalname,
-      uploadedAt: new Date(),
-    }));
+    // Check if dispute is resolved
+    if (dispute.status === 'resolved' || dispute.status === 'approved' || dispute.status === 'rejected') {
+      return res.status(400).json({ message: 'Cannot upload evidence to a resolved dispute' });
+    }
+
+    const files = (req.files as Express.Multer.File[] || []).map((file) => {
+      // Determine file type based on extension
+      const ext = file.originalname.split('.').pop()?.toLowerCase();
+      let evidenceType: 'photo' | 'document' | 'message' | 'receipt' | 'other' = 'document';
+      
+      if (['jpg', 'jpeg', 'png', 'gif'].includes(ext || '')) {
+        evidenceType = 'photo';
+      } else if (['pdf'].includes(ext || '')) {
+        evidenceType = 'document';
+      }
+
+      return {
+        type: evidenceType,
+        url: `/uploads/disputes/${file.filename}`,
+        description: notes || file.originalname,
+        uploadedAt: new Date(),
+      };
+    });
 
     dispute.evidence = [...dispute.evidence, ...files];
     await dispute.save();

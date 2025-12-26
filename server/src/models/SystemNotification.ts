@@ -46,7 +46,7 @@ const systemNotificationSchema = new Schema<ISystemNotification>(
     actionRequired: { type: Boolean, default: false },
     actionUrl: { type: String },
     actionText: { type: String },
-    expiresAt: { type: Date, index: true },
+    expiresAt: { type: Date },
     createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
   },
   { timestamps: true }
