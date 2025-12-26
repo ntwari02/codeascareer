@@ -7,18 +7,22 @@ interface ChartData {
   sales: number;
 }
 
-const SalesChart: React.FC = () => {
-  const data: ChartData[] = [
-    { day: 'Mon', sales: 4200 },
-    { day: 'Tue', sales: 3800 },
-    { day: 'Wed', sales: 5100 },
-    { day: 'Thu', sales: 4600 },
-    { day: 'Fri', sales: 6200 },
-    { day: 'Sat', sales: 7800 },
-    { day: 'Sun', sales: 6500 },
+interface SalesChartProps {
+  data?: ChartData[];
+}
+
+const SalesChart: React.FC<SalesChartProps> = ({ data: dataProp = [] }) => {
+  const data: ChartData[] = dataProp.length > 0 ? dataProp : [
+    { day: 'Mon', sales: 0 },
+    { day: 'Tue', sales: 0 },
+    { day: 'Wed', sales: 0 },
+    { day: 'Thu', sales: 0 },
+    { day: 'Fri', sales: 0 },
+    { day: 'Sat', sales: 0 },
+    { day: 'Sun', sales: 0 },
   ];
 
-  const maxSales = Math.max(...data.map(d => d.sales));
+  const maxSales = Math.max(...data.map(d => d.sales), 1); // Avoid division by zero
 
   return (
     <div className="bg-white/50 dark:bg-gray-900/50 rounded-xl p-6 border border-gray-200 dark:border-gray-700/30 shadow-xl h-[364px] flex flex-col transition-colors duration-300">

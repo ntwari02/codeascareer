@@ -38,7 +38,8 @@
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only index.ts",
     "build": "tsc",
-    "start": "nodemon index.ts"
+    "start": "nodemon index.ts",
+    "seed:disputes": "ts-node src/scripts/seedDisputes.ts"
   },
   "keywords": [],
   "author": "",

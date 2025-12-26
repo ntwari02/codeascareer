@@ -21,6 +21,7 @@ import {
   previewCollectionProducts,
   previewCollectionRules,
 } from '../controllers/sellerCollectionController';
+import { getDashboardStats } from '../controllers/sellerDashboardController';
 
 const router = Router();
 
@@ -42,6 +43,7 @@ const upload = multer({ storage, limits: { fileSize: 5 * 1024 * 1024 } }); // 5M
 // All seller routes require authenticated sellers
 router.use(authenticate, authorize('seller'));
 
+router.get('/dashboard/stats', getDashboardStats);
 router.get('/orders', getSellerOrders);
 router.get('/orders/:orderId', getSellerOrderById);
 router.patch('/orders/:orderId/status', updateSellerOrderStatus);
