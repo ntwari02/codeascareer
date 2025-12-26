@@ -86,6 +86,51 @@ export async function login(req: Request, res: Response) {
       return res.status(400).json({ message: 'Invalid email or password' });
     }
 
+    // Record login history
+    const clientIp = req.ip || req.socket.remoteAddress || (req.headers['x-forwarded-for'] as string)?.split(',')[0] || 'Unknown';
+    const userAgent = req.headers['user-agent'] || 'Unknown';
+    
+    // Simple device detection from user agent
+    let device = 'Unknown';
+    if (userAgent.includes('Mobile') || userAgent.includes('Android') || userAgent.includes('iPhone')) {
+      device = 'Mobile Device';
+    } else if (userAgent.includes('Windows')) {
+      device = 'Windows';
+    } else if (userAgent.includes('Mac')) {
+      device = 'Mac';
+    } else if (userAgent.includes('Linux')) {
+      device = 'Linux';
+    }
+
+    // Simple browser detection
+    let browser = 'Unknown';
+    if (userAgent.includes('Chrome')) browser = 'Chrome';
+    else if (userAgent.includes('Firefox')) browser = 'Firefox';
+    else if (userAgent.includes('Safari')) browser = 'Safari';
+    else if (userAgent.includes('Edge')) browser = 'Edge';
+
+    const deviceInfo = `${browser} on ${device}`;
+
+    // Initialize login history if it doesn't exist
+    if (!user.security.loginHistory) {
+      user.security.loginHistory = [];
+    }
+
+    // Add new login entry (keep last 50 entries)
+    user.security.loginHistory.unshift({
+      date: new Date(),
+      ip: clientIp,
+      device: deviceInfo,
+      userAgent: userAgent,
+    });
+
+    // Keep only last 50 login entries
+    if (user.security.loginHistory.length > 50) {
+      user.security.loginHistory = user.security.loginHistory.slice(0, 50);
+    }
+
+    await user.save();
+
     const token = generateAuthToken(user);
 
     res

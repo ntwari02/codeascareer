@@ -30,20 +30,9 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   login: async (email: string, password: string) => {
     try {
-      const response = await fetch('http://localhost:5000/api/auth/login', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include',
-        body: JSON.stringify({ email, password }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        return { success: false, error: data.message || 'Login failed' };
-      }
+      // Import API service dynamically to avoid circular dependencies
+      const { authAPI } = await import('../lib/api');
+      const data = await authAPI.login(email, password);
 
       // Map backend user to Profile format (MongoDB uses _id)
       const userProfile: Profile = {
@@ -53,10 +42,10 @@ export const useAuthStore = create<AuthState>((set) => ({
         role: data.user.role,
         seller_status: data.user.sellerVerificationStatus,
         seller_verified: data.user.isSellerVerified,
-        phone: undefined,
-        avatar_url: undefined,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
+        phone: data.user.phone,
+        avatar_url: data.user.avatarUrl,
+        created_at: data.user.createdAt || new Date().toISOString(),
+        updated_at: data.user.updatedAt || new Date().toISOString(),
       };
 
       // Store token in localStorage for persistence
@@ -103,41 +92,36 @@ export const useAuthStore = create<AuthState>((set) => ({
           // Verify token is still valid by calling /me endpoint
           if (token) {
             try {
-              const response = await fetch('http://localhost:5000/api/auth/me', {
-                method: 'GET',
-                headers: {
-                  'Authorization': `Bearer ${token}`,
-                },
-                credentials: 'include',
-              });
-
-              if (response.ok) {
-                const data = await response.json();
-                // Map backend user to Profile format (MongoDB uses _id)
-                const userProfile: Profile = {
-                  id: data.user._id?.toString() || data.user.id?.toString() || '',
-                  email: data.user.email,
-                  full_name: data.user.fullName,
-                  role: data.user.role,
-                  seller_status: data.user.sellerVerificationStatus,
-                  seller_verified: data.user.isSellerVerified,
-                  phone: undefined,
-                  avatar_url: undefined,
-                  created_at: data.user.createdAt || new Date().toISOString(),
-                  updated_at: data.user.updatedAt || new Date().toISOString(),
-                };
-                // Update localStorage with fresh data
-                localStorage.setItem('user', JSON.stringify(userProfile));
-                set({ user: userProfile, loading: false, initialized: true });
-                return;
-              } else {
-                // Token invalid, clear storage
+              const { authAPI } = await import('../lib/api');
+              const data = await authAPI.getCurrentUser();
+              
+              // Map backend user to Profile format (MongoDB uses _id)
+              const userProfile: Profile = {
+                id: data.user._id?.toString() || data.user.id?.toString() || '',
+                email: data.user.email,
+                full_name: data.user.fullName,
+                role: data.user.role,
+                seller_status: data.user.sellerVerificationStatus,
+                seller_verified: data.user.isSellerVerified,
+                phone: data.user.phone,
+                avatar_url: data.user.avatarUrl,
+                created_at: data.user.createdAt || new Date().toISOString(),
+                updated_at: data.user.updatedAt || new Date().toISOString(),
+              };
+              // Update localStorage with fresh data
+              localStorage.setItem('user', JSON.stringify(userProfile));
+              set({ user: userProfile, loading: false, initialized: true });
+              return;
+            } catch (e: any) {
+              // Token invalid or network error, clear storage if it's an auth error
+              if (e.message?.includes('401') || e.message?.includes('Authentication')) {
                 localStorage.removeItem('user');
                 localStorage.removeItem('auth_token');
+                set({ user: null, loading: false, initialized: true });
+              } else {
+                // Network error, use stored user
+                set({ user, loading: false, initialized: true });
               }
-            } catch (e) {
-              // Network error, use stored user
-              set({ user, loading: false, initialized: true });
               return;
             }
           } else {

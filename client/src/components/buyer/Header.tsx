@@ -14,6 +14,31 @@ import { useAuthStore } from '../../stores/authStore';
 import { useCartStore } from '../../stores/cartStore';
 import { useWishlistStore } from '../../stores/wishlistStore';
 import { useTheme } from '../../contexts/ThemeContext';
+
+// Helper to resolve avatar URL (handles both full URLs and relative paths)
+// Adds cache-busting parameter to ensure fresh image loads
+const resolveAvatarUrl = (url: string | null | undefined, cacheBust?: boolean): string | null => {
+  if (!url) return null;
+  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) {
+    // For data URLs, return as-is
+    if (url.startsWith('data:')) return url;
+    // For HTTP URLs, add cache-busting if needed
+    if (cacheBust) {
+      const separator = url.includes('?') ? '&' : '?';
+      return `${url}${separator}t=${Date.now()}`;
+    }
+    return url;
+  }
+  // If it's a relative path, prepend the API host
+  const API_HOST = import.meta.env.VITE_API_URL?.replace('/api', '') || 'http://localhost:5000';
+  const fullUrl = `${API_HOST}${url}`;
+  // Add cache-busting parameter to force fresh load
+  if (cacheBust) {
+    const separator = fullUrl.includes('?') ? '&' : '?';
+    return `${fullUrl}${separator}t=${Date.now()}`;
+  }
+  return fullUrl;
+};
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '../ui/dialog';
 import { useToast } from '../ui/use-toast';
 import { ChatWidget } from './ChatWidget';
@@ -165,6 +190,8 @@ const mockNotifications: Notification[] = [
 
 export function Header() {
   const { user } = useAuthStore();
+  // Force re-render when user.avatar_url changes
+  const avatarUrl = user?.avatar_url;
   const { items: cartItems, getSubtotal, getTotal } = useCartStore();
   const { items: wishlistItems } = useWishlistStore();
   const { theme, toggleTheme, currency } = useTheme();
@@ -190,6 +217,7 @@ export function Header() {
   const [cartPreviewPosition, setCartPreviewPosition] = useState<{ top: number; right: number } | null>(null);
   const [imageFileName, setImageFileName] = useState<string | null>(null);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [avatarKey, setAvatarKey] = useState(0); // Force re-render counter for avatar updates
 
   const { toast } = useToast();
 
@@ -199,6 +227,21 @@ export function Header() {
   const notificationsRef = useRef<HTMLDivElement>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
 
+  // Listen for avatar updates and user state changes
+  useEffect(() => {
+    const handleAvatarUpdate = () => {
+      setAvatarKey(prev => prev + 1); // Force image re-render
+    };
+    window.addEventListener('avatarUpdated', handleAvatarUpdate);
+    return () => window.removeEventListener('avatarUpdated', handleAvatarUpdate);
+  }, []);
+
+  // Also react to user.avatar_url changes from Zustand
+  useEffect(() => {
+    if (avatarUrl) {
+      setAvatarKey(prev => prev + 1); // Force re-render when avatar URL changes
+    }
+  }, [avatarUrl]);
 
   // Fetch notifications
   useEffect(() => {
@@ -1421,17 +1464,17 @@ export function Header() {
                   <button
                     onClick={() => {
                       setShowUserMenu(!showUserMenu);
-                      setShowLanguageMenu(false);
-                      setShowCurrencyMenu(false);
                     }}
                     className="flex items-center gap-1 sm:gap-2 px-1.5 sm:px-2 lg:px-3 py-1.5 sm:py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
                     aria-label="User menu"
                   >
                     {user.avatar_url ? (
                       <img
-                        src={user.avatar_url}
+                        key={`${user.avatar_url}-${user.updated_at || Date.now()}-${avatarKey}`} // Force re-render when avatar changes
+                        src={resolveAvatarUrl(user.avatar_url, true) || ''} // Cache-bust to ensure fresh image
                         alt={user.full_name || user.email}
                         className="w-7 h-7 sm:w-8 sm:h-8 rounded-full object-cover relative"
+                        loading="eager" // Load immediately, don't lazy load
                       />
                     ) : (
                       <div className="w-7 h-7 sm:w-8 sm:h-8 bg-gradient-to-br from-orange-400 to-teal-500 rounded-full flex items-center justify-center text-white relative">

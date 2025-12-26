@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Header } from '../components/buyer/Header';
 import { Footer } from '../components/buyer/Footer';
@@ -9,6 +9,8 @@ import { useAuthStore } from '../stores/authStore';
 import { useCartStore } from '../stores/cartStore';
 import { useWishlistStore } from '../stores/wishlistStore';
 import { useTheme } from '../contexts/ThemeContext';
+import { profileAPI } from '../lib/api';
+import { useToastStore } from '../stores/toastStore';
 import {
   User,
   Mail,
@@ -70,15 +72,35 @@ interface PaymentMethod {
 
 export function Profile() {
   const navigate = useNavigate();
-  const { user } = useAuthStore();
+  const { user, setUser } = useAuthStore();
   const { items: cartItems } = useCartStore();
   const { items: wishlistItems } = useWishlistStore();
   const { theme, toggleTheme, currency, language, setCurrency, setLanguage } = useTheme();
+  const { showToast } = useToastStore();
+  const [loading, setLoading] = useState(true);
 
   const [showEditModal, setShowEditModal] = useState(false);
   const [activeTab, setActiveTab] = useState<'overview' | 'security' | 'addresses' | 'payments' | 'notifications' | 'privacy'>('overview');
   const [showLanguageMenu, setShowLanguageMenu] = useState(false);
   const [showCurrencyMenu, setShowCurrencyMenu] = useState(false);
+  
+  // Close dropdowns when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      if (showLanguageMenu && !target.closest('[data-language-menu]')) {
+        setShowLanguageMenu(false);
+      }
+      if (showCurrencyMenu && !target.closest('[data-currency-menu]')) {
+        setShowCurrencyMenu(false);
+      }
+    };
+    
+    if (showLanguageMenu || showCurrencyMenu) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [showLanguageMenu, showCurrencyMenu]);
 
   const languages = [
     { code: 'en', name: 'English US', flag: '🇺🇸' },
@@ -171,55 +193,295 @@ export function Profile() {
   });
 
   const [avatarPreview, setAvatarPreview] = useState<string | null>(user?.avatar_url || null);
+  const [avatarFile, setAvatarFile] = useState<File | null>(null); // Store the actual file for upload
   const [isSaving, setIsSaving] = useState(false);
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+  const hasLoadedProfile = useRef(false);
+  const scrollPositionRef = useRef(0);
 
-  useEffect(() => {
-    if (!user) {
-      navigate('/login');
+  // Helper to resolve avatar URL (handles both full URLs and relative paths)
+  const resolveAvatarUrl = (url: string | null | undefined): string | null => {
+    if (!url) return null;
+    if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) {
+      return url;
     }
+    // If it's a relative path, prepend the API host
+    const API_HOST = import.meta.env.VITE_API_URL?.replace('/api', '') || 'http://localhost:5000';
+    return `${API_HOST}${url}`;
+  };
+
+  // Save scroll position before any state changes
+  useEffect(() => {
+    const handleScroll = () => {
+      scrollPositionRef.current = window.scrollY;
+    };
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  // Restore scroll position after render
+  useEffect(() => {
+    if (scrollPositionRef.current > 0 && !loading) {
+      window.scrollTo(0, scrollPositionRef.current);
+    }
+  }, [loading]);
+
+  // Load profile data from backend
+  useEffect(() => {
+    const loadProfile = async () => {
+      if (!user) {
+        navigate('/login');
+        return;
+      }
+
+      // Only load profile once on mount, not on every preference change
+      if (hasLoadedProfile.current) {
+        return;
+      }
+
+      try {
+        setLoading(true);
+        const response = await profileAPI.getProfile();
+        const profileData = response.user;
+
+        // Update form data
+        setFormData({
+          full_name: profileData.fullName || user.full_name || '',
+          email: profileData.email || user.email || '',
+          phone: profileData.phone || '',
+          bio: profileData.bio || '',
+          location: profileData.location || '',
+          website: profileData.website || '',
+          dateOfBirth: profileData.dateOfBirth ? new Date(profileData.dateOfBirth).toISOString().split('T')[0] : '',
+        });
+
+        const avatarUrl = profileData.avatarUrl || user.avatar_url || null;
+        setAvatarPreview(avatarUrl ? resolveAvatarUrl(avatarUrl) : null);
+
+        // Load addresses
+        if (profileData.addresses && Array.isArray(profileData.addresses)) {
+          setAddresses(profileData.addresses.map((addr: any, idx: number) => ({
+            id: idx.toString(),
+            label: addr.label || 'Address',
+            fullName: user.full_name || '',
+            phone: user.phone || '',
+            address: addr.street || '',
+            city: addr.city || '',
+            country: addr.country || '',
+            postalCode: addr.zipCode || '',
+            isDefault: addr.isDefault || false,
+          })));
+        }
+
+        // Load payment methods
+        if (profileData.paymentMethods && Array.isArray(profileData.paymentMethods)) {
+          setPaymentMethods(profileData.paymentMethods.map((pm: any, idx: number) => ({
+            id: idx.toString(),
+            type: pm.type === 'card' ? 'card' : pm.type === 'mobile_money' ? 'mobile' : 'card',
+            label: pm.provider && pm.last4 ? `${pm.provider} •••• ${pm.last4}` : pm.type,
+            last4: pm.last4,
+            expiryMonth: pm.expiryMonth,
+            expiryYear: pm.expiryYear,
+            isDefault: pm.isDefault || false,
+          })));
+        }
+
+        // Load notification settings
+        if (profileData.notifications) {
+          setNotifications({
+            email: {
+              orders: profileData.notifications.email?.orderUpdates ?? true,
+              promotions: profileData.notifications.email?.promotions ?? true,
+              newsletters: profileData.notifications.email?.newsletter ?? false,
+              security: profileData.notifications.email?.securityAlerts ?? true,
+            },
+            push: {
+              orders: profileData.notifications.push?.orderUpdates ?? true,
+              promotions: profileData.notifications.push?.promotions ?? false,
+              messages: profileData.notifications.push?.messages ?? true,
+            },
+            sms: {
+              orders: profileData.notifications.sms?.orderUpdates ?? false,
+              security: profileData.notifications.sms?.securityAlerts ?? true,
+            },
+          });
+        }
+
+        // Load privacy settings
+        if (profileData.privacy) {
+          setPrivacy({
+            profileVisibility: profileData.privacy.profileVisibility || 'public',
+            showEmail: profileData.privacy.showEmail || false,
+            showPhone: profileData.privacy.showPhone || false,
+            allowMessages: profileData.privacy.allowMessages ?? true,
+            showActivity: profileData.privacy.showActivity ?? true,
+          });
+        }
+
+        // Load preferences
+        if (profileData.preferences) {
+          if (profileData.preferences.theme) {
+            // Update theme if different
+            if (profileData.preferences.theme !== theme && profileData.preferences.theme !== 'auto') {
+              // Note: This would need to be handled by the theme context
+            }
+          }
+          if (profileData.preferences.language) {
+            setLanguage(profileData.preferences.language as any);
+          }
+          if (profileData.preferences.currency) {
+            setCurrency(profileData.preferences.currency as any);
+          }
+        }
+
+        // Load security settings
+        if (profileData.security) {
+          setTwoFactorEnabled(profileData.security.twoFactorEnabled || false);
+        }
+
+      } catch (error: any) {
+        console.error('Failed to load profile:', error);
+        showToast('Failed to load profile data', 'error');
+      } finally {
+        setLoading(false);
+        hasLoadedProfile.current = true;
+      }
+    };
+
+    loadProfile();
+    // Only depend on user and navigate - remove setLanguage, setCurrency, theme, showToast
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, navigate]);
-
-  useEffect(() => {
-    if (user) {
-      setFormData({
-        full_name: user.full_name || '',
-        email: user.email || '',
-        phone: user.phone || '',
-        bio: '',
-        location: '',
-        website: '',
-        dateOfBirth: '',
-      });
-      setAvatarPreview(user.avatar_url || null);
-    }
-  }, [user]);
 
   if (!user) {
     return null;
   }
 
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 dark:bg-[#0b0c10] flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-600 mx-auto"></div>
+          <p className="mt-4 text-gray-600 dark:text-gray-400">Loading profile...</p>
+        </div>
+      </div>
+    );
+  }
+
   const handleSaveProfile = async () => {
     setIsSaving(true);
-    // In a real app, this would update the profile in the database
-    // For demo, we'll just update localStorage
-    if (user.id.startsWith('demo-')) {
-      const updatedUser = {
-        ...user,
-        full_name: formData.full_name,
-        phone: formData.phone,
-        avatar_url: avatarPreview || undefined,
-        updated_at: new Date().toISOString(),
+    try {
+      let uploadedAvatarUrl: string | null = null;
+
+      // If there's a new file to upload, upload it first
+      if (avatarFile) {
+        try {
+          const uploadResponse = await profileAPI.uploadAvatar(avatarFile);
+          uploadedAvatarUrl = uploadResponse.avatarUrl;
+          setAvatarFile(null); // Clear the file after successful upload
+          // Update preview with the uploaded URL
+          setAvatarPreview(resolveAvatarUrl(uploadedAvatarUrl));
+          
+          // Immediately update user state with new avatar URL
+          if (user) {
+            const updatedUser = {
+              ...user,
+              avatar_url: uploadedAvatarUrl,
+              updated_at: new Date().toISOString(),
+            };
+            setUser(updatedUser);
+            localStorage.setItem('user', JSON.stringify(updatedUser));
+            
+            // Trigger avatar update event immediately
+            window.dispatchEvent(new CustomEvent('avatarUpdated', { 
+              detail: { avatarUrl: uploadedAvatarUrl } 
+            }));
+          }
+        } catch (uploadError: any) {
+          console.error('Failed to upload avatar:', uploadError);
+          showToast(uploadError.message || 'Failed to upload avatar', 'error');
+          setIsSaving(false);
+          return; // Stop here if avatar upload fails
+        }
+      }
+
+      // Prepare update data (don't include avatarUrl here - it's already updated by upload endpoint)
+      const updateData: any = {
+        fullName: formData.full_name,
+        phone: formData.phone || undefined,
+        bio: formData.bio || undefined,
+        location: formData.location || undefined,
+        website: formData.website || undefined,
       };
-      localStorage.setItem('demo_user', JSON.stringify(updatedUser));
-      useAuthStore.getState().setUser(updatedUser);
+
+      if (formData.dateOfBirth) {
+        updateData.dateOfBirth = new Date(formData.dateOfBirth).toISOString();
+      }
+
+      // Update profile with other fields
+      const response = await profileAPI.updateProfile(updateData);
+      
+      // Update local user state
+      if (user) {
+        // Use uploaded avatar URL if available, otherwise use the response or existing preview
+        const finalAvatarUrl = uploadedAvatarUrl || response.user.avatarUrl || (avatarPreview && !avatarPreview.startsWith('data:') ? avatarPreview : null);
+        
+        // Store the relative path in user state (not the resolved URL)
+        // The Header component will resolve it when displaying
+        const updatedUser = {
+          ...user,
+          full_name: response.user.fullName || formData.full_name,
+          phone: response.user.phone || formData.phone,
+          avatar_url: finalAvatarUrl, // Store the relative path from backend
+          updated_at: new Date().toISOString(), // Update timestamp to force re-render
+        };
+        
+        // Update Zustand store - this will trigger re-renders in all components using useAuthStore
+        setUser(updatedUser);
+        localStorage.setItem('user', JSON.stringify(updatedUser));
+        
+        // Update avatar preview with resolved URL for display
+        if (finalAvatarUrl) {
+          setAvatarPreview(resolveAvatarUrl(finalAvatarUrl));
+        }
+        
+        // Trigger avatar update event immediately (only if we didn't already trigger it during upload)
+        if (!uploadedAvatarUrl) {
+          window.dispatchEvent(new CustomEvent('avatarUpdated', { 
+            detail: { avatarUrl: finalAvatarUrl } 
+          }));
+        }
+      }
+
+      showToast('Profile updated successfully', 'success');
+      setShowEditModal(false);
+    } catch (error: any) {
+      console.error('Failed to update profile:', error);
+      showToast(error.message || 'Failed to update profile', 'error');
+    } finally {
+      setIsSaving(false);
     }
-    setIsSaving(false);
-    setShowEditModal(false);
   };
 
   const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      // Validate file type
+      if (!file.type.startsWith('image/')) {
+        showToast('Please select an image file', 'error');
+        return;
+      }
+      
+      // Validate file size (5MB limit)
+      if (file.size > 5 * 1024 * 1024) {
+        showToast('Image size must be less than 5MB', 'error');
+        return;
+      }
+
+      // Store the file for later upload
+      setAvatarFile(file);
+      
+      // Create preview
       const reader = new FileReader();
       reader.onloadend = () => {
         setAvatarPreview(reader.result as string);
@@ -228,30 +490,104 @@ export function Profile() {
     }
   };
 
-  const handleAddAddress = () => {
-    const newAddress: Address = {
-      id: Date.now().toString(),
-      label: 'New Address',
-      fullName: formData.full_name,
-      phone: formData.phone,
-      address: '',
-      city: '',
-      country: 'Rwanda',
-      postalCode: '',
-      isDefault: addresses.length === 0,
-    };
-    setAddresses([...addresses, newAddress]);
+  const handleAddAddress = async () => {
+    // For now, we'll show a simple prompt. In a real app, this would be a modal
+    const label = prompt('Address label (e.g., Home, Work):') || 'Address';
+    const street = prompt('Street address:') || '';
+    const city = prompt('City:') || '';
+    const zipCode = prompt('Zip/Postal code:') || '';
+    const country = prompt('Country:') || 'Rwanda';
+
+    if (!street || !city || !zipCode) {
+      showToast('Please fill in all required fields', 'error');
+      return;
+    }
+
+    try {
+      const response = await profileAPI.addAddress({
+        label,
+        street,
+        city,
+        zipCode,
+        country,
+        isDefault: addresses.length === 0,
+      });
+      setAddresses(response.addresses.map((addr: any, idx: number) => ({
+        id: idx.toString(),
+        label: addr.label,
+        fullName: user?.full_name || '',
+        phone: user?.phone || '',
+        address: addr.street,
+        city: addr.city,
+        country: addr.country,
+        postalCode: addr.zipCode,
+        isDefault: addr.isDefault,
+      })));
+      showToast('Address added successfully', 'success');
+    } catch (error: any) {
+      console.error('Failed to add address:', error);
+      showToast(error.message || 'Failed to add address', 'error');
+    }
   };
 
-  const handleDeleteAddress = (id: string) => {
-    setAddresses(addresses.filter(addr => addr.id !== id));
+  const handleDeleteAddress = async (id: string) => {
+    const index = parseInt(id, 10);
+    if (isNaN(index)) return;
+
+    if (!confirm('Are you sure you want to delete this address?')) return;
+
+    try {
+      const response = await profileAPI.deleteAddress(index);
+      setAddresses(response.addresses.map((addr: any, idx: number) => ({
+        id: idx.toString(),
+        label: addr.label,
+        fullName: user?.full_name || '',
+        phone: user?.phone || '',
+        address: addr.street,
+        city: addr.city,
+        country: addr.country,
+        postalCode: addr.zipCode,
+        isDefault: addr.isDefault,
+      })));
+      showToast('Address deleted successfully', 'success');
+    } catch (error: any) {
+      console.error('Failed to delete address:', error);
+      showToast(error.message || 'Failed to delete address', 'error');
+    }
   };
 
-  const handleSetDefaultAddress = (id: string) => {
-    setAddresses(addresses.map(addr => ({
-      ...addr,
-      isDefault: addr.id === id,
-    })));
+  const handleSetDefaultAddress = async (id: string) => {
+    const index = parseInt(id, 10);
+    if (isNaN(index)) return;
+
+    const address = addresses[index];
+    if (!address) return;
+
+    try {
+      const response = await profileAPI.updateAddress(index, {
+        label: address.label,
+        street: address.address,
+        city: address.city,
+        zipCode: address.postalCode,
+        country: address.country,
+        isDefault: true,
+      });
+      setAddresses(response.addresses.map((addr: any, idx: number) => ({
+        id: idx.toString(),
+        label: addr.label,
+        fullName: user?.full_name || '',
+        phone: user?.phone || '',
+        address: addr.street,
+        city: addr.city,
+        country: addr.country,
+        postalCode: addr.zipCode,
+        isDefault: addr.isDefault,
+      })));
+      showToast('Default address updated', 'success');
+    } catch (error: any) {
+      console.error('Failed to update address:', error);
+      showToast(error.message || 'Failed to update address', 'error');
+    }
   };
 
   const handleAddPaymentMethod = () => {
@@ -265,18 +601,138 @@ export function Profile() {
 
   const handleChangePassword = async () => {
     if (newPassword !== confirmPassword) {
-      alert('New passwords do not match');
+      showToast('New passwords do not match', 'error');
       return;
     }
-    if (newPassword.length < 8) {
-      alert('Password must be at least 8 characters');
+    if (newPassword.length < 6) {
+      showToast('Password must be at least 6 characters', 'error');
       return;
     }
-    // In a real app, this would update the password
-    alert('Password changed successfully');
-    setCurrentPassword('');
-    setNewPassword('');
-    setConfirmPassword('');
+    if (!currentPassword) {
+      showToast('Please enter your current password', 'error');
+      return;
+    }
+
+    setIsChangingPassword(true);
+    try {
+      await profileAPI.changePassword({
+        currentPassword,
+        newPassword,
+      });
+      showToast('Password changed successfully', 'success');
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+    } catch (error: any) {
+      console.error('Failed to change password:', error);
+      showToast(error.message || 'Failed to change password', 'error');
+    } finally {
+      setIsChangingPassword(false);
+    }
+  };
+
+  // Password strength indicator
+  const getPasswordStrength = (password: string): { strength: 'weak' | 'medium' | 'strong'; color: string; width: string } => {
+    if (!password) return { strength: 'weak', color: 'bg-gray-300', width: '0%' };
+    if (password.length < 6) return { strength: 'weak', color: 'bg-red-500', width: '33%' };
+    if (password.length < 10 || !/(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/.test(password)) {
+      return { strength: 'medium', color: 'bg-yellow-500', width: '66%' };
+    }
+    return { strength: 'strong', color: 'bg-green-500', width: '100%' };
+  };
+
+  const passwordStrength = getPasswordStrength(newPassword);
+
+  // Handle notification settings update
+  const handleNotificationChange = async (type: 'email' | 'push' | 'sms', key: string, value: boolean) => {
+    const updated = {
+      ...notifications,
+      [type]: { ...notifications[type], [key]: value },
+    };
+    setNotifications(updated);
+
+    try {
+      await profileAPI.updateNotificationSettings({
+        [type]: { [key]: value },
+      });
+    } catch (error: any) {
+      console.error('Failed to update notification settings:', error);
+      showToast(error.message || 'Failed to update notification settings', 'error');
+      // Revert on error
+      setNotifications(notifications);
+    }
+  };
+
+  // Handle privacy settings update
+  const handlePrivacyChange = async (key: string, value: any) => {
+    const updated = { ...privacy, [key]: value };
+    setPrivacy(updated);
+
+    try {
+      await profileAPI.updatePrivacySettings({ [key]: value });
+      showToast('Privacy settings updated', 'success');
+    } catch (error: any) {
+      console.error('Failed to update privacy settings:', error);
+      showToast(error.message || 'Failed to update privacy settings', 'error');
+      // Revert on error
+      setPrivacy(privacy);
+    }
+  };
+
+  // Handle preferences update
+  const handlePreferenceChange = async (key: 'theme' | 'language' | 'currency', value: any) => {
+    // Save current scroll position
+    const currentScroll = window.scrollY;
+    
+    try {
+      // Update local state first for immediate UI feedback
+      if (key === 'language') {
+        setLanguage(value);
+      } else if (key === 'currency') {
+        setCurrency(value);
+      }
+      
+      // Update backend (fire and forget - don't wait to restore scroll)
+      profileAPI.updatePreferences({ [key]: value }).catch((error: any) => {
+        console.error('Failed to update preferences:', error);
+        showToast(error.message || 'Failed to update preferences', 'error');
+        // Revert on error
+        if (key === 'language') {
+          setLanguage(language);
+        } else if (key === 'currency') {
+          setCurrency(currency);
+        }
+      });
+      
+      showToast('Preferences updated', 'success');
+      
+      // Restore scroll position immediately after state update
+      requestAnimationFrame(() => {
+        window.scrollTo(0, currentScroll);
+      });
+    } catch (error: any) {
+      console.error('Failed to update preferences:', error);
+      showToast(error.message || 'Failed to update preferences', 'error');
+      // Restore scroll on error too
+      requestAnimationFrame(() => {
+        window.scrollTo(0, currentScroll);
+      });
+    }
+  };
+
+  // Handle security settings update
+  const handleSecurityChange = async (enabled: boolean, method?: 'email' | 'sms' | 'app' | null) => {
+    try {
+      await profileAPI.updateSecuritySettings({
+        twoFactorEnabled: enabled,
+        twoFactorMethod: enabled ? (method || 'email') : null,
+      });
+      setTwoFactorEnabled(enabled);
+      showToast(enabled ? 'Two-factor authentication enabled' : 'Two-factor authentication disabled', 'success');
+    } catch (error: any) {
+      console.error('Failed to update security settings:', error);
+      showToast(error.message || 'Failed to update security settings', 'error');
+    }
   };
 
   // Mock statistics
@@ -319,7 +775,7 @@ export function Profile() {
                 <div className="relative">
                   <div className="w-24 h-24 sm:w-32 sm:h-32 rounded-2xl border-4 border-white dark:border-gray-800 bg-gray-100 dark:bg-gray-800 overflow-hidden shadow-2xl">
                     {avatarPreview ? (
-                      <img src={avatarPreview} alt={user.full_name || 'User'} className="w-full h-full object-cover" />
+                      <img src={resolveAvatarUrl(avatarPreview) || ''} alt={user.full_name || 'User'} className="w-full h-full object-cover" />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center text-white text-3xl sm:text-4xl font-bold">
                         {(user.full_name || user.email).charAt(0).toUpperCase()}
@@ -610,6 +1066,26 @@ export function Profile() {
                           {showNewPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                         </button>
                       </div>
+                      {newPassword && (
+                        <div className="mt-2">
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-xs text-gray-600 dark:text-gray-400">Password strength</span>
+                            <span className={`text-xs font-medium ${
+                              passwordStrength.strength === 'strong' ? 'text-green-600 dark:text-green-400' :
+                              passwordStrength.strength === 'medium' ? 'text-yellow-600 dark:text-yellow-400' :
+                              'text-red-600 dark:text-red-400'
+                            }`}>
+                              {passwordStrength.strength.charAt(0).toUpperCase() + passwordStrength.strength.slice(1)}
+                            </span>
+                          </div>
+                          <div className="h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                            <div 
+                              className={`h-full transition-all duration-300 ${passwordStrength.color}`}
+                              style={{ width: passwordStrength.width }}
+                            />
+                          </div>
+                        </div>
+                      )}
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
@@ -632,10 +1108,24 @@ export function Profile() {
                         </button>
                       </div>
                     </div>
-                    <Button onClick={handleChangePassword} className="gap-2">
-                      <Key className="h-4 w-4" />
-                      Update Password
-                    </Button>
+                    <button
+                      type="button"
+                      onClick={handleChangePassword}
+                      disabled={isChangingPassword || !currentPassword || !newPassword || !confirmPassword}
+                      className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-orange-500 via-orange-600 to-orange-500 hover:from-orange-600 hover:via-orange-700 hover:to-orange-600 text-white font-semibold text-sm rounded-lg shadow-lg hover:shadow-xl transform hover:scale-[1.02] active:scale-[0.98] transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-lg disabled:hover:scale-100 disabled:hover:bg-gradient-to-r disabled:hover:from-orange-500 disabled:hover:via-orange-600 disabled:hover:to-orange-500 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800"
+                    >
+                      {isChangingPassword ? (
+                        <>
+                          <div className="h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          <span>Updating Password...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Key className="h-4 w-4" />
+                          <span>Update Password</span>
+                        </>
+                      )}
+                    </button>
                   </div>
                 </div>
 
@@ -647,7 +1137,7 @@ export function Profile() {
                       <p className="text-sm text-gray-600 dark:text-gray-400">Add an extra layer of security to your account</p>
                     </div>
                     <button
-                      onClick={() => setTwoFactorEnabled(!twoFactorEnabled)}
+                      onClick={() => handleSecurityChange(!twoFactorEnabled)}
                       className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                         twoFactorEnabled ? 'bg-orange-600' : 'bg-gray-300 dark:bg-gray-600'
                       }`}
@@ -681,9 +1171,14 @@ export function Profile() {
                 {/* Language Settings */}
                 <div className="border-b border-gray-200 dark:border-gray-700 pb-6">
                   <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-4">Language</h3>
-                  <div className="relative">
+                  <div className="relative" data-language-menu>
                     <button
-                      onClick={() => setShowLanguageMenu(!showLanguageMenu)}
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setShowLanguageMenu(!showLanguageMenu);
+                      }}
                       className="w-full flex items-center justify-between px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors"
                     >
                       <div className="flex items-center gap-3">
@@ -700,12 +1195,18 @@ export function Profile() {
                       <ChevronDown className={`h-5 w-5 text-gray-400 transition-transform ${showLanguageMenu ? 'rotate-180' : ''}`} />
                     </button>
                     {showLanguageMenu && (
-                      <div className="absolute left-0 right-0 mt-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl z-10 max-h-64 overflow-y-auto">
+                      <div 
+                        className="absolute left-0 right-0 mt-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl z-10 max-h-64 overflow-y-auto"
+                        onClick={(e) => e.stopPropagation()}
+                      >
                         {languages.map((lang) => (
                           <button
                             key={lang.code}
-                            onClick={() => {
-                              setLanguage(lang.code as any);
+                            type="button"
+                            onClick={async (e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              await handlePreferenceChange('language', lang.code);
                               setShowLanguageMenu(false);
                             }}
                             className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors first:rounded-t-lg last:rounded-b-lg ${
@@ -729,9 +1230,14 @@ export function Profile() {
                 {/* Currency Settings */}
                 <div className="border-b border-gray-200 dark:border-gray-700 pb-6">
                   <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-4">Currency</h3>
-                  <div className="relative">
+                  <div className="relative" data-currency-menu>
                     <button
-                      onClick={() => setShowCurrencyMenu(!showCurrencyMenu)}
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setShowCurrencyMenu(!showCurrencyMenu);
+                      }}
                       className="w-full flex items-center justify-between px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors"
                     >
                       <div className="flex items-center gap-3">
@@ -745,12 +1251,18 @@ export function Profile() {
                       <ChevronDown className={`h-5 w-5 text-gray-400 transition-transform ${showCurrencyMenu ? 'rotate-180' : ''}`} />
                     </button>
                     {showCurrencyMenu && (
-                      <div className="absolute left-0 right-0 mt-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl z-10 max-h-64 overflow-y-auto">
+                      <div 
+                        className="absolute left-0 right-0 mt-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl z-10 max-h-64 overflow-y-auto"
+                        onClick={(e) => e.stopPropagation()}
+                      >
                         {currencies.map((curr) => (
                           <button
                             key={curr.code}
-                            onClick={() => {
-                              setCurrency(curr.code as any);
+                            type="button"
+                            onClick={async (e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              await handlePreferenceChange('currency', curr.code);
                               setShowCurrencyMenu(false);
                             }}
                             className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors first:rounded-t-lg last:rounded-b-lg ${
@@ -775,7 +1287,16 @@ export function Profile() {
                 <div>
                   <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-4">Appearance</h3>
                   <button
-                    onClick={toggleTheme}
+                    type="button"
+                    onClick={async (e) => {
+                      e.preventDefault();
+                      const currentScroll = window.scrollY;
+                      toggleTheme(); // ThemeContext will save to DB automatically
+                      // Restore scroll after theme change
+                      requestAnimationFrame(() => {
+                        window.scrollTo(0, currentScroll);
+                      });
+                    }}
                     className="w-full flex items-center justify-between px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors"
                   >
                     <div className="flex items-center gap-3">
@@ -921,10 +1442,7 @@ export function Profile() {
                       <div key={key} className="flex items-center justify-between">
                         <span className="text-sm text-gray-700 dark:text-gray-300 capitalize">{key.replace(/([A-Z])/g, ' $1').trim()}</span>
                         <button
-                          onClick={() => setNotifications({
-                            ...notifications,
-                            email: { ...notifications.email, [key]: !value }
-                          })}
+                          onClick={() => handleNotificationChange('email', key, !value)}
                           className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                             value ? 'bg-orange-600' : 'bg-gray-300 dark:bg-gray-600'
                           }`}
@@ -951,10 +1469,7 @@ export function Profile() {
                       <div key={key} className="flex items-center justify-between">
                         <span className="text-sm text-gray-700 dark:text-gray-300 capitalize">{key.replace(/([A-Z])/g, ' $1').trim()}</span>
                         <button
-                          onClick={() => setNotifications({
-                            ...notifications,
-                            push: { ...notifications.push, [key]: !value }
-                          })}
+                          onClick={() => handleNotificationChange('push', key, !value)}
                           className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                             value ? 'bg-orange-600' : 'bg-gray-300 dark:bg-gray-600'
                           }`}
@@ -984,7 +1499,7 @@ export function Profile() {
                     </label>
                     <select
                       value={privacy.profileVisibility}
-                      onChange={(e) => setPrivacy({ ...privacy, profileVisibility: e.target.value })}
+                      onChange={(e) => handlePrivacyChange('profileVisibility', e.target.value)}
                       className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
                     >
                       <option value="public">Public</option>
@@ -1000,7 +1515,7 @@ export function Profile() {
                         <p className="text-xs text-gray-500 dark:text-gray-400">Allow others to see your email</p>
                       </div>
                       <button
-                        onClick={() => setPrivacy({ ...privacy, showEmail: !privacy.showEmail })}
+                        onClick={() => handlePrivacyChange('showEmail', !privacy.showEmail)}
                         className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                           privacy.showEmail ? 'bg-orange-600' : 'bg-gray-300 dark:bg-gray-600'
                         }`}
@@ -1019,7 +1534,7 @@ export function Profile() {
                         <p className="text-xs text-gray-500 dark:text-gray-400">Allow others to see your phone</p>
                       </div>
                       <button
-                        onClick={() => setPrivacy({ ...privacy, showPhone: !privacy.showPhone })}
+                        onClick={() => handlePrivacyChange('showPhone', !privacy.showPhone)}
                         className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                           privacy.showPhone ? 'bg-orange-600' : 'bg-gray-300 dark:bg-gray-600'
                         }`}
@@ -1038,7 +1553,7 @@ export function Profile() {
                         <p className="text-xs text-gray-500 dark:text-gray-400">Let others send you messages</p>
                       </div>
                       <button
-                        onClick={() => setPrivacy({ ...privacy, allowMessages: !privacy.allowMessages })}
+                        onClick={() => handlePrivacyChange('allowMessages', !privacy.allowMessages)}
                         className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                           privacy.allowMessages ? 'bg-orange-600' : 'bg-gray-300 dark:bg-gray-600'
                         }`}
@@ -1057,7 +1572,7 @@ export function Profile() {
                         <p className="text-xs text-gray-500 dark:text-gray-400">Display your recent activity</p>
                       </div>
                       <button
-                        onClick={() => setPrivacy({ ...privacy, showActivity: !privacy.showActivity })}
+                        onClick={() => handlePrivacyChange('showActivity', !privacy.showActivity)}
                         className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                           privacy.showActivity ? 'bg-orange-600' : 'bg-gray-300 dark:bg-gray-600'
                         }`}
@@ -1090,7 +1605,7 @@ export function Profile() {
             <div className="flex flex-col items-center gap-3">
               <div className="w-24 h-24 rounded-2xl border-4 border-gray-200 dark:border-gray-700 bg-gray-100 dark:bg-gray-800 overflow-hidden">
                 {avatarPreview ? (
-                  <img src={avatarPreview} alt={user.full_name || 'User'} className="w-full h-full object-cover" />
+                  <img src={resolveAvatarUrl(avatarPreview) || ''} alt={user.full_name || 'User'} className="w-full h-full object-cover" />
                 ) : (
                   <div className="w-full h-full flex items-center justify-center text-gray-500 text-3xl font-bold">
                     {(user.full_name || user.email).charAt(0).toUpperCase()}
@@ -1224,4 +1739,5 @@ export function Profile() {
     </div>
   );
 }
+
 

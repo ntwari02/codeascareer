@@ -8,6 +8,31 @@ import { ChatWidget } from '@/components/buyer/ChatWidget';
 import { useAuthStore } from '@/stores/authStore';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 
+// Helper to resolve avatar URL (handles both full URLs and relative paths)
+// Adds cache-busting parameter to ensure fresh image loads
+const resolveAvatarUrl = (url: string | null | undefined, cacheBust?: boolean): string | null => {
+  if (!url) return null;
+  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) {
+    // For data URLs, return as-is
+    if (url.startsWith('data:')) return url;
+    // For HTTP URLs, add cache-busting if needed
+    if (cacheBust) {
+      const separator = url.includes('?') ? '&' : '?';
+      return `${url}${separator}t=${Date.now()}`;
+    }
+    return url;
+  }
+  // If it's a relative path, prepend the API host
+  const API_HOST = import.meta.env.VITE_API_URL?.replace('/api', '') || 'http://localhost:5000';
+  const fullUrl = `${API_HOST}${url}`;
+  // Add cache-busting parameter to force fresh load
+  if (cacheBust) {
+    const separator = fullUrl.includes('?') ? '&' : '?';
+    return `${fullUrl}${separator}t=${Date.now()}`;
+  }
+  return fullUrl;
+};
+
 interface HeaderProps {
   setSidebarOpen: (open: boolean) => void;
   notificationsOpen: boolean;
@@ -31,11 +56,31 @@ const Header: React.FC<HeaderProps> = ({
   const navigate = useNavigate();
   const location = useLocation();
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [avatarKey, setAvatarKey] = useState(0); // Force re-render counter
   const userMenuRef = useRef<HTMLDivElement>(null);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  
+  // Force re-render when user.avatar_url changes
+  const avatarUrl = user?.avatar_url;
 
   const isSeller = location.pathname.startsWith('/seller');
   const isAdmin = location.pathname.startsWith('/admin');
+
+  // Listen for avatar updates and user state changes
+  useEffect(() => {
+    const handleAvatarUpdate = () => {
+      setAvatarKey(prev => prev + 1); // Force image re-render
+    };
+    window.addEventListener('avatarUpdated', handleAvatarUpdate);
+    return () => window.removeEventListener('avatarUpdated', handleAvatarUpdate);
+  }, []);
+
+  // Also react to user.avatar_url changes from Zustand
+  useEffect(() => {
+    if (avatarUrl) {
+      setAvatarKey(prev => prev + 1); // Force re-render when avatar URL changes
+    }
+  }, [avatarUrl]);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -159,9 +204,11 @@ const Header: React.FC<HeaderProps> = ({
               <div className={`w-10 h-10 ${accent.avatarBg} rounded-full flex items-center justify-center overflow-hidden cursor-pointer hover:opacity-90 hover:ring-2 hover:ring-offset-2 hover:ring-gray-300 dark:hover:ring-gray-600 transition-all`}>
                 {user?.avatar_url ? (
                   <img
-                    src={user.avatar_url}
+                    key={`${user.avatar_url}-${user.updated_at || Date.now()}-${avatarKey}`} // Force re-render when avatar changes
+                    src={resolveAvatarUrl(user.avatar_url, true) || ''} // Cache-bust to ensure fresh image
                     alt={user.full_name || user.email || userName}
                     className="w-full h-full object-cover"
+                    loading="eager" // Load immediately, don't lazy load
                   />
                 ) : (
                   <User className="w-6 h-6 text-white" />

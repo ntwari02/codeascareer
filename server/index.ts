@@ -10,6 +10,14 @@ import path from 'path';
 import authRoutes from './src/routes/authRoutes';
 import sellerRoutes from './src/routes/sellerRoutes';
 import inventoryRoutes from './src/routes/inventoryRoutes';
+import profileRoutes from './src/routes/profileRoutes';
+import sellerSettingsRoutes from './src/routes/sellerSettingsRoutes';
+import supportTicketRoutes from './src/routes/supportTicketRoutes';
+import knowledgeBaseRoutes from './src/routes/knowledgeBaseRoutes';
+import disputeRoutes from './src/routes/disputeRoutes';
+import accountHealthRoutes from './src/routes/accountHealthRoutes';
+import systemNotificationRoutes from './src/routes/systemNotificationRoutes';
+import subscriptionRoutes from './src/routes/subscriptionRoutes';
 
 dotenv.config();
 
@@ -45,11 +53,28 @@ app.get('/api/health', (_req: Request, res: Response) => {
 
 // Auth routes
 app.use('/api/auth', authRoutes);
+// Profile routes
+app.use('/api/profile', profileRoutes);
 // Seller inventory routes
 app.use('/api/seller/inventory', inventoryRoutes);
+// Seller settings routes
+app.use('/api/seller/settings', sellerSettingsRoutes);
+// Seller support ticket routes
+app.use('/api/seller/support', supportTicketRoutes);
+// Seller knowledge base routes
+app.use('/api/seller/knowledge-base', knowledgeBaseRoutes);
+// Seller dispute routes
+app.use('/api/seller/disputes', disputeRoutes);
+// Seller account health routes
+app.use('/api/seller/account-health', accountHealthRoutes);
+// Seller system notification routes
+app.use('/api/seller/notifications', systemNotificationRoutes);
 
 // Seller routes
 app.use('/api/seller', sellerRoutes);
+
+// Subscription routes
+app.use('/api/seller/subscription', subscriptionRoutes);
 
 // 404 handler
 app.use((req: Request, res: Response) => {
@@ -72,8 +97,14 @@ const connectDB = async () => {
     }
 
     const options: mongoose.ConnectOptions = {
-      serverSelectionTimeoutMS: 10000,
+      serverSelectionTimeoutMS: 30000, // Increased from 10s to 30s for better DNS resolution
       socketTimeoutMS: 45000,
+      connectTimeoutMS: 30000, // Connection timeout
+      retryWrites: true,
+      retryReads: true,
+      maxPoolSize: 10, // Maintain up to 10 socket connections
+      minPoolSize: 2, // Maintain at least 2 socket connections
+      maxIdleTimeMS: 30000, // Close connections after 30 seconds of inactivity
     };
 
     // For development: allow invalid certificates to resolve TLS handshake issues
@@ -82,7 +113,27 @@ const connectDB = async () => {
       options.tlsAllowInvalidCertificates = true;
     }
 
-    await mongoose.connect(MONGO_URI, options);
+    // Add retry logic for connection
+    let retries = 3;
+    let lastError: any;
+    
+    while (retries > 0) {
+      try {
+        await mongoose.connect(MONGO_URI, options);
+        break; // Success, exit retry loop
+      } catch (err: any) {
+        lastError = err;
+        retries--;
+        if (retries > 0) {
+          console.log(`⚠️  MongoDB connection attempt failed. Retrying in 3 seconds... (${3 - retries} retries left)`);
+          await new Promise(resolve => setTimeout(resolve, 3000)); // Wait 3 seconds before retry
+        }
+      }
+    }
+    
+    if (retries === 0) {
+      throw lastError; // Throw the last error if all retries failed
+    }
     
     console.log('✅ Connected to MongoDB');
     app.listen(PORT, () => {
