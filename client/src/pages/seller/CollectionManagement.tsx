@@ -5,15 +5,7 @@ import {
   ChevronDown, X, Check, ExternalLink, BarChart3, TrendingUp, Edit,
   Grid3x3, List, Image as ImageIcon, GripVertical, Home, Layout, Monitor
 } from 'lucide-react';
-import { supabase } from '@/lib/supabase';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
-import {
-  getCollectionProducts,
-  addProductToCollection,
-  removeProductFromCollection,
-  bulkAddProductsToCollection,
-  previewSmartCollection,
-} from '@/lib/collections';
 import type { Collection, CollectionCondition, Product } from '@/types';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
@@ -119,6 +111,8 @@ export default function CollectionManagement() {
         },
         is_active: c.isActive,
         is_featured: c.isFeatured,
+        is_draft: c.isDraft ?? true, // Default to draft if not set
+        conditions: c.conditions || [],
         created_at: c.createdAt,
         updated_at: c.updatedAt,
         product_count: c.productCount ?? 0,
@@ -261,48 +255,93 @@ export default function CollectionManagement() {
       // Generate unique slug
       let newSlug = `${collection.slug || collection.name.toLowerCase().replace(/\s+/g, '-')}-copy`;
       let counter = 1;
+      
+      // Check for existing slug using backend API
       while (true) {
-        const { data: existing } = await supabase
-          .from('collections')
-          .select('slug')
-          .eq('seller_id', collection.seller_id)
-          .eq('slug', newSlug)
-          .single();
-        if (!existing) break;
+        const token = localStorage.getItem('auth_token');
+        const res = await fetch(`http://localhost:5000/api/seller/collections?slug=${newSlug}`, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          credentials: 'include',
+        });
+        
+        if (res.ok) {
+          const data = await res.json();
+          const existing = data.collections?.find((c: Collection) => c.slug === newSlug);
+          if (!existing) break;
+        } else {
+          break; // If check fails, proceed anyway
+        }
+        
         newSlug = `${collection.slug || collection.name.toLowerCase().replace(/\s+/g, '-')}-copy-${counter}`;
         counter++;
       }
 
-      const newCollection = {
-        ...collection,
+      // Create duplicate collection via backend API
+      const token = localStorage.getItem('auth_token');
+      const payload: any = {
         name: `${collection.name} (Copy)`,
+        description: collection.description,
+        type: collection.type,
         slug: newSlug,
+        image_url: collection.image_url,
+        cover_image_url: collection.cover_image_url,
+        sort_order: collection.sort_order,
         is_active: false,
         is_featured: false,
         is_draft: true,
+        is_trending: (collection as any).is_trending || false,
+        is_seasonal: (collection as any).is_seasonal || false,
+        is_sale: (collection as any).is_sale || false,
+        visibility: collection.visibility,
+        seo_title: collection.seo_title,
+        seo_description: collection.seo_description,
+        conditions: collection.type === 'smart' ? collection.conditions : [],
+        product_ids: collection.type === 'manual' ? ((collection as any).product_ids || []) : [],
+        placement: (collection as any).placement,
+        placement_priority: (collection as any).placement_priority || 0,
       };
-      delete (newCollection as any).id;
-      delete (newCollection as any).created_at;
-      delete (newCollection as any).updated_at;
-      delete (newCollection as any).product_count;
-      delete (newCollection as any).products;
-      
-      const { data: createdCollection, error } = await createCollection(newCollection);
-      if (error) throw error;
-      
+
+      const res = await fetch('http://localhost:5000/api/seller/collections', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        credentials: 'include',
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => null);
+        throw new Error(errorData?.message || 'Failed to duplicate collection');
+      }
+
+      const data = await res.json();
+      const createdCollection = data.collection;
+
       // If it's a manual collection, copy products
-      if (collection.type === 'manual' && createdCollection) {
+      if (collection.type === 'manual' && createdCollection && (collection as any).product_ids?.length > 0) {
         try {
-          const products = await getCollectionProducts(collection.id);
-          if (products && products.length > 0) {
-            const productIds = products.map((pc: any) => {
-              // Handle both direct product_id and nested product.product_id
-              if (pc.product_id) return pc.product_id;
-              if (pc.product && pc.product.id) return pc.product.id;
-              return pc.id;
-            }).filter((id: string) => id); // Remove any undefined/null values
-            if (productIds.length > 0) {
-              await bulkAddProductsToCollection(createdCollection.id, productIds);
+          const productIds = (collection as any).product_ids;
+          
+          // Add products to the new collection one by one
+          for (const productId of productIds) {
+            const addRes = await fetch(`http://localhost:5000/api/seller/collections/${createdCollection._id || createdCollection.id}/products`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                ...(token ? { Authorization: `Bearer ${token}` } : {}),
+              },
+              credentials: 'include',
+              body: JSON.stringify({ product_id: productId }),
+            });
+            
+            if (!addRes.ok) {
+              console.warn(`Failed to add product ${productId} to duplicate collection`);
             }
           }
         } catch (error) {
@@ -391,7 +430,7 @@ export default function CollectionManagement() {
         }
         case 'publish': {
           const token = localStorage.getItem('auth_token');
-          await Promise.all(
+          const results = await Promise.allSettled(
             selectedCollections.map((id) =>
               fetch(`http://localhost:5000/api/seller/collections/${id}`, {
                 method: 'PATCH',
@@ -400,14 +439,33 @@ export default function CollectionManagement() {
                   ...(token ? { Authorization: `Bearer ${token}` } : {}),
                 },
                 credentials: 'include',
-                body: JSON.stringify({ is_active: true }),
+                body: JSON.stringify({ is_draft: false }),
               })
             )
           );
-          toast({
-            title: 'Success',
-            description: `${selectedCollections.length} collection(s) published`,
-          });
+          
+          const errors = results.filter((r) => r.status === 'rejected' || (r.status === 'fulfilled' && !r.value.ok));
+          if (errors.length > 0) {
+            const errorData = await Promise.all(
+              errors.map(async (e) => {
+                if (e.status === 'fulfilled') {
+                  const data = await e.value.json().catch(() => null);
+                  return data?.message || 'Unknown error';
+                }
+                return 'Network error';
+              })
+            );
+            toast({
+              title: 'Error',
+              description: `Some collections could not be published: ${errorData.join(', ')}`,
+              variant: 'destructive',
+            });
+          } else {
+            toast({
+              title: 'Success',
+              description: `${selectedCollections.length} collection(s) published`,
+            });
+          }
           loadCollections();
           break;
         }
@@ -422,7 +480,7 @@ export default function CollectionManagement() {
                   ...(token ? { Authorization: `Bearer ${token}` } : {}),
                 },
                 credentials: 'include',
-                body: JSON.stringify({ is_active: false }),
+                body: JSON.stringify({ is_draft: true }),
               })
             )
           );
@@ -819,7 +877,7 @@ export default function CollectionManagement() {
                       ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
                       : 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'
                   }`}>
-                    {collection.type}
+                    {collection.type === 'smart' ? 'Automated' : 'Manual'}
                   </span>
                 </div>
                 {collection.description && (
@@ -830,9 +888,13 @@ export default function CollectionManagement() {
                 <div className="flex items-center justify-between text-sm text-gray-500 dark:text-gray-400 mb-4">
                   <span>{collection.product_count || 0} products</span>
                   <div className="flex gap-1">
-                    {(collection as any).is_draft && (
+                    {(collection as any).is_draft ? (
                       <span className="px-2 py-1 rounded bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200 text-xs">
                         Draft
+                      </span>
+                    ) : (
+                      <span className="px-2 py-1 rounded bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200 text-xs">
+                        Published
                       </span>
                     )}
                     {collection.is_featured && (
@@ -893,7 +955,7 @@ export default function CollectionManagement() {
                       </div>
                     </div>
                     <div>
-                      <div className="text-gray-500 dark:text-gray-400">Orders (mock)</div>
+                      <div className="text-gray-500 dark:text-gray-400">Orders</div>
                       <div className="font-semibold text-gray-900 dark:text-white">
                         {analytics.orders.toLocaleString()}
                       </div>
@@ -1158,7 +1220,7 @@ function CollectionFormModal({
     sort_order: collection?.sort_order || 'manual',
     is_active: collection?.is_active ?? true,
     is_featured: collection?.is_featured ?? false,
-    is_draft: (collection as any)?.is_draft ?? false,
+    is_draft: collection ? ((collection as any)?.is_draft ?? false) : true, // Default to draft for new collections
     is_trending: (collection as any)?.is_trending ?? false,
     is_seasonal: (collection as any)?.is_seasonal ?? false,
     is_sale: (collection as any)?.is_sale ?? false,
@@ -1166,6 +1228,7 @@ function CollectionFormModal({
     seo_title: collection?.seo_title || '',
     seo_description: collection?.seo_description || '',
     conditions: collection?.conditions || ([] as CollectionCondition[]),
+    product_ids: (collection as any)?.product_ids || [],
     published_at: collection?.published_at || new Date().toISOString().split('T')[0],
     scheduled_publish_at: collection?.scheduled_publish_at?.split('T')[0] || '',
     placement: (collection as any)?.placement || {
@@ -1186,68 +1249,244 @@ function CollectionFormModal({
   });
   const [previewProducts, setPreviewProducts] = useState<Product[]>([]);
   const [previewLoading, setPreviewLoading] = useState(false);
-  const [showTemplates, setShowTemplates] = useState(!collection);
+  
+  // Product selection for manual collections
+  const [availableProducts, setAvailableProducts] = useState<any[]>([]);
+  const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
+  const [productSearchTerm, setProductSearchTerm] = useState('');
+  const [loadingProducts, setLoadingProducts] = useState(false);
+  const [uploadingImages, setUploadingImages] = useState(false);
+  const [coverImageFile, setCoverImageFile] = useState<File | null>(null);
+  const [thumbnailImageFile, setThumbnailImageFile] = useState<File | null>(null);
 
-  const collectionTemplates = [
-    {
-      name: 'New Arrivals',
-      description: 'Showcase recently added products',
-      type: 'smart' as const,
-      conditions: [{ type: 'tag', operator: 'contains', value: 'new' }],
-      is_featured: true,
-      is_trending: true,
-    },
-    {
-      name: 'Best Sellers',
-      description: 'Top-performing products',
-      type: 'smart' as const,
-      sort_order: 'best_selling',
-      is_featured: true,
-    },
-    {
-      name: 'Sale Items',
-      description: 'Discounted products',
-      type: 'smart' as const,
-      conditions: [{ type: 'price', operator: 'less_than', value: '50' }],
-      is_sale: true,
-    },
-    {
-      name: 'Seasonal Collection',
-      description: 'Products for current season',
-      type: 'manual' as const,
-      is_seasonal: true,
-    },
-    {
-      name: 'Bundle Collection',
-      description: 'Product bundles and packages',
-      type: 'manual' as const,
-    },
-    {
-      name: 'Premium Collection',
-      description: 'High-end products',
-      type: 'smart' as const,
-      conditions: [{ type: 'price', operator: 'greater_than', value: '100' }],
-    },
-  ];
+  // Initialize selected product IDs from formData
+  useEffect(() => {
+    if (formData.product_ids && formData.product_ids.length > 0) {
+      setSelectedProductIds(formData.product_ids);
+    }
+  }, []);
 
-  const applyTemplate = (template: typeof collectionTemplates[0]) => {
-    setFormData({
-      ...formData,
-      name: template.name,
-      description: template.description,
-      type: template.type,
-      sort_order: template.sort_order || 'manual',
-      is_featured: template.is_featured || false,
-      is_trending: template.is_trending || false,
-      is_seasonal: template.is_seasonal || false,
-      is_sale: template.is_sale || false,
-      conditions: template.conditions || [],
-    });
-    setShowTemplates(false);
+  // Load products for manual collection selection
+  useEffect(() => {
+    if (formData.type === 'manual') {
+      loadAvailableProducts();
+      if (collection && !formData.product_ids?.length) {
+        loadCollectionProductIds();
+      }
+    }
+  }, [formData.type, collection]);
+
+  const loadAvailableProducts = async () => {
+    setLoadingProducts(true);
+    try {
+      const token = localStorage.getItem('auth_token');
+      const res = await fetch('http://localhost:5000/api/seller/inventory/products', {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        credentials: 'include',
+      });
+
+      if (!res.ok) {
+        throw new Error('Failed to load products');
+      }
+
+      const data = await res.json();
+      const mappedProducts = (data.products || []).map((p: any) => ({
+        id: p._id || p.id,
+        name: p.name,
+        price: p.price,
+        stock: p.stock,
+        sku: p.sku,
+        status: p.status,
+        images: p.images || [],
+        description: p.description,
+      }));
+
+      setAvailableProducts(mappedProducts);
+    } catch (error: any) {
+      console.error('Error loading products:', error);
+      setAvailableProducts([]);
+    } finally {
+      setLoadingProducts(false);
+    }
+  };
+
+  const loadCollectionProductIds = async () => {
+    if (!collection) return;
+    try {
+      const token = localStorage.getItem('auth_token');
+      const res = await fetch(`http://localhost:5000/api/seller/collections/${collection.id}/products`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        credentials: 'include',
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        const productIds = (data.products || []).map((p: any) => p._id || p.id);
+        setSelectedProductIds(productIds);
+        setFormData(prev => ({ ...prev, product_ids: productIds }));
+      }
+    } catch (error: any) {
+      console.error('Error loading collection products:', error);
+    }
+  };
+
+  const handleAddProductToForm = (productId: string) => {
+    if (!selectedProductIds.includes(productId)) {
+      const newIds = [...selectedProductIds, productId];
+      setSelectedProductIds(newIds);
+      setFormData(prev => ({ ...prev, product_ids: newIds }));
+    }
+  };
+
+  const handleRemoveProductFromForm = (productId: string) => {
+    const newIds = selectedProductIds.filter(id => id !== productId);
+    setSelectedProductIds(newIds);
+    setFormData(prev => ({ ...prev, product_ids: newIds }));
+  };
+
+  const filteredAvailableProducts = availableProducts.filter(p => {
+    const matchesSearch = !productSearchTerm || 
+      p.name.toLowerCase().includes(productSearchTerm.toLowerCase()) ||
+      p.sku?.toLowerCase().includes(productSearchTerm.toLowerCase());
+    return matchesSearch && !selectedProductIds.includes(p.id);
+  });
+
+  const selectedProducts = availableProducts.filter(p => selectedProductIds.includes(p.id));
+
+  const coverImageInputRef = React.useRef<HTMLInputElement>(null);
+  const thumbnailImageInputRef = React.useRef<HTMLInputElement>(null);
+
+  const handleImageUpload = async (file: File, type: 'cover' | 'thumbnail') => {
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      toast({
+        title: 'Error',
+        description: 'Please select an image file',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    // Validate file size (5MB limit)
+    if (file.size > 5 * 1024 * 1024) {
+      toast({
+        title: 'Error',
+        description: 'Image size must be less than 5MB',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setUploadingImages(true);
+    try {
+      const token = localStorage.getItem('auth_token');
+      const formData = new FormData();
+      
+      if (type === 'cover') {
+        formData.append('cover_image', file);
+        setCoverImageFile(file);
+      } else {
+        formData.append('thumbnail_image', file);
+        setThumbnailImageFile(file);
+      }
+
+      console.log('Uploading image:', { type, fileName: file.name, fileSize: file.size });
+
+      const res = await fetch('http://localhost:5000/api/seller/collections/upload-images', {
+        method: 'POST',
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          // Don't set Content-Type header - let browser set it with boundary for FormData
+        },
+        credentials: 'include',
+        body: formData,
+      });
+
+      console.log('Upload response status:', res.status);
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ message: 'Failed to upload image' }));
+        console.error('Upload error response:', errorData);
+        throw new Error(errorData.message || 'Failed to upload image');
+      }
+
+      const data = await res.json();
+      console.log('Upload success response:', data);
+      
+      if (type === 'cover' && data.cover_image_url) {
+        setFormData(prev => ({ ...prev, cover_image_url: `http://localhost:5000${data.cover_image_url}` }));
+      } else if (type === 'thumbnail' && data.thumbnail_image_url) {
+        setFormData(prev => ({ ...prev, image_url: `http://localhost:5000${data.thumbnail_image_url}` }));
+      }
+
+      // Reset file input so same file can be selected again if needed
+      if (type === 'cover' && coverImageInputRef.current) {
+        coverImageInputRef.current.value = '';
+      }
+      if (type === 'thumbnail' && thumbnailImageInputRef.current) {
+        thumbnailImageInputRef.current.value = '';
+      }
+
+      toast({
+        title: 'Success',
+        description: 'Image uploaded successfully',
+      });
+    } catch (error: any) {
+      console.error('Image upload error:', error);
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to upload image',
+        variant: 'destructive',
+      });
+    } finally {
+      setUploadingImages(false);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // Validation for automated collections
+    if (formData.type === 'smart') {
+      if (formData.conditions.length === 0) {
+        toast({
+          title: 'Condition Required',
+          description: 'Add at least one condition before saving. Automated collections need conditions to automatically include products.',
+          variant: 'destructive',
+        });
+        return;
+      }
+      
+      // Validate all conditions are valid
+      const invalidConditions = formData.conditions.filter(c => !isConditionValid(c));
+      if (invalidConditions.length > 0) {
+        toast({
+          title: 'Invalid Conditions',
+          description: 'Please complete all conditions before saving.',
+          variant: 'destructive',
+        });
+        return;
+      }
+    }
+    
+    // Validation for manual collections
+    if (formData.type === 'manual' && formData.product_ids.length === 0 && !formData.is_draft) {
+      toast({
+        title: 'Products Required',
+        description: 'Add at least one product to the collection before publishing.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    
     setLoading(true);
     try {
       const token = localStorage.getItem('auth_token');
@@ -1270,6 +1509,7 @@ function CollectionFormModal({
         seo_title: formData.seo_title,
         seo_description: formData.seo_description,
         conditions: formData.type === 'smart' ? formData.conditions : [],
+        product_ids: formData.type === 'manual' ? formData.product_ids : [],
         placement: formData.placement,
         placement_priority: formData.placement_priority,
       };
@@ -1317,36 +1557,205 @@ function CollectionFormModal({
     }
   };
 
+  // Helper function to format condition for display
+  const formatConditionForDisplay = (condition: CollectionCondition): string => {
+    if (condition.type === 'tag') {
+      if (condition.operator === 'contains') {
+        return `Product tag contains "${condition.value}"`;
+      } else {
+        return `Product tag is "${condition.value}"`;
+      }
+    }
+    if (condition.type === 'title') {
+      return `Product title contains "${condition.value}"`;
+    }
+    if (condition.type === 'price') {
+      if (condition.operator === 'less_than') {
+        return `Price is less than $${condition.value}`;
+      } else if (condition.operator === 'greater_than') {
+        return `Price is greater than $${condition.value}`;
+      } else if (condition.operator === 'between') {
+        return `Price is between $${condition.min} and $${condition.max}`;
+      }
+    }
+    if (condition.type === 'stock') {
+      if (condition.operator === 'in_stock') {
+        return `Stock is in stock`;
+      } else {
+        return `Stock is out of stock`;
+      }
+    }
+    return `${condition.type}: ${condition.operator} ${condition.value || `${condition.min}-${condition.max}`}`;
+  };
+
+  // Helper function to validate condition
+  const isConditionValid = (condition: CollectionCondition): boolean => {
+    if (condition.type === 'stock') {
+      return true; // Stock conditions don't need values
+    }
+    if (condition.operator === 'between') {
+      return !!(condition.min && condition.max);
+    }
+    return !!condition.value;
+  };
+
+  // Helper function to preview with specific conditions
+  const handlePreviewWithConditions = async (conditions: CollectionCondition[]) => {
+    if (conditions.length === 0) {
+      setPreviewProducts([]);
+      return;
+    }
+    setPreviewLoading(true);
+    try {
+      const token = localStorage.getItem('auth_token');
+      const res = await fetch('http://localhost:5000/api/seller/collections/preview', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        credentials: 'include',
+        body: JSON.stringify({ conditions }),
+      });
+
+      if (!res.ok) {
+        throw new Error('Failed to preview collection');
+      }
+
+      const data = await res.json();
+      const mappedProducts = (data.products || []).map((p: any) => ({
+        id: p._id || p.id,
+        title: p.name,
+        price: p.price,
+        stock_quantity: p.stock,
+        sku: p.sku,
+        status: p.status === 'in_stock' ? 'active' : 'inactive',
+        images: p.images?.map((img: string, idx: number) => ({
+          id: `img-${p._id || p.id}-${idx}`,
+          product_id: p._id || p.id,
+          url: img,
+          position: idx,
+          is_primary: idx === 0,
+          created_at: new Date().toISOString(),
+        })) || [],
+        description: p.description,
+        created_at: p.createdAt,
+        updated_at: p.updatedAt,
+      }));
+
+      setPreviewProducts(mappedProducts);
+    } catch (error: any) {
+      console.error('Preview error:', error);
+      setPreviewProducts([]);
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
   const handleAddCondition = () => {
-    if (newCondition.value || newCondition.min) {
+    if (isConditionValid(newCondition)) {
+      const updatedConditions = [...formData.conditions, { ...newCondition }];
       setFormData({
         ...formData,
-        conditions: [...formData.conditions, newCondition],
+        conditions: updatedConditions,
       });
-      setNewCondition({ type: 'tag', operator: 'contains', value: '' });
+      setNewCondition({
+        type: 'tag',
+        operator: 'contains',
+        value: '',
+      });
+      setShowConditionBuilder(false);
+      // Auto-update preview after adding condition
+      setTimeout(() => {
+        handlePreviewWithConditions(updatedConditions);
+      }, 100);
     }
   };
 
   const handleRemoveCondition = (index: number) => {
+    const updatedConditions = formData.conditions.filter((_, i) => i !== index);
     setFormData({
       ...formData,
-      conditions: formData.conditions.filter((_, i) => i !== index),
+      conditions: updatedConditions,
     });
+    // Auto-update preview when condition is removed
+    if (updatedConditions.length > 0) {
+      setTimeout(() => {
+        handlePreviewWithConditions(updatedConditions);
+      }, 100);
+    } else {
+      setPreviewProducts([]);
+    }
   };
 
   const handlePreview = async () => {
-    if (formData.conditions.length === 0) return;
+    if (formData.conditions.length === 0) {
+      toast({
+        title: 'Info',
+        description: 'Please add at least one condition to preview products',
+        variant: 'default',
+      });
+      return;
+    }
     setPreviewLoading(true);
     try {
-      const { data, error } = await previewSmartCollection(formData.conditions, sellerId!);
-      if (error) throw error;
-      setPreviewProducts(data || []);
+      const token = localStorage.getItem('auth_token');
+      
+      // Use preview endpoint (works for both new and existing collections)
+      const res = await fetch('http://localhost:5000/api/seller/collections/preview', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        credentials: 'include',
+        body: JSON.stringify({ conditions: formData.conditions }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.message || 'Failed to preview collection');
+      }
+
+      const data = await res.json();
+      
+      // Map backend products to frontend format
+      const mappedProducts = (data.products || []).map((p: any) => ({
+        id: p._id || p.id,
+        title: p.name,
+        price: p.price,
+        stock_quantity: p.stock,
+        sku: p.sku,
+        status: p.status === 'in_stock' ? 'active' : 'inactive',
+        images: p.images?.map((img: string, idx: number) => ({
+          id: `img-${p._id || p.id}-${idx}`,
+          product_id: p._id || p.id,
+          url: img,
+          position: idx,
+          is_primary: idx === 0,
+          created_at: new Date().toISOString(),
+        })) || [],
+        description: p.description,
+        created_at: p.createdAt,
+        updated_at: p.updatedAt,
+      }));
+
+      setPreviewProducts(mappedProducts);
+      
+      if (mappedProducts.length === 0) {
+        toast({
+          title: 'No products found',
+          description: 'No products match the current conditions. Try adjusting your rules.',
+          variant: 'default',
+        });
+      }
     } catch (error: any) {
       toast({
         title: 'Error',
         description: error.message || 'Failed to preview collection',
         variant: 'destructive',
       });
+      setPreviewProducts([]);
     } finally {
       setPreviewLoading(false);
     }
@@ -1384,77 +1793,6 @@ function CollectionFormModal({
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 space-y-6">
-          {/* Collection Templates */}
-          {!collection && showTemplates && (
-            <div className="mb-6 p-4 bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-900/20 dark:to-purple-900/20 rounded-lg border border-blue-200 dark:border-blue-500/30">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="font-semibold text-gray-900 dark:text-white">Quick Start Templates</h3>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setShowTemplates(false)}
-                >
-                  <X className="w-4 h-4" />
-                </Button>
-              </div>
-              <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                Choose a template to get started quickly, or create a custom collection
-              </p>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {collectionTemplates.map((template, index) => (
-                  <button
-                    key={index}
-                    type="button"
-                    onClick={() => applyTemplate(template)}
-                    className="text-left p-3 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 hover:border-blue-500 dark:hover:border-blue-500 hover:shadow-md transition-all"
-                  >
-                    <div className="font-medium text-gray-900 dark:text-white mb-1">
-                      {template.name}
-                    </div>
-                    <div className="text-xs text-gray-500 dark:text-gray-400">
-                      {template.description}
-                    </div>
-                    <div className="mt-2 flex items-center gap-2">
-                      <span className="text-xs px-2 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded">
-                        {template.type}
-                      </span>
-                      {template.is_featured && (
-                        <span className="text-xs px-2 py-0.5 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded">
-                          Featured
-                        </span>
-                      )}
-                    </div>
-                  </button>
-                ))}
-              </div>
-              <div className="mt-4 pt-4 border-t border-blue-200 dark:border-blue-500/30">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setShowTemplates(false)}
-                  className="w-full"
-                >
-                  Create Custom Collection Instead
-                </Button>
-              </div>
-            </div>
-          )}
-
-          {!collection && !showTemplates && (
-            <div className="mb-4">
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => setShowTemplates(true)}
-                className="text-blue-600 dark:text-blue-400"
-              >
-                ← Back to Templates
-              </Button>
-            </div>
-          )}
-
           {/* Basic Info */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
@@ -1500,190 +1838,521 @@ function CollectionFormModal({
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
               Collection Type *
             </label>
-            <div className="flex gap-4">
-              <label className="flex items-center">
+            <div className="space-y-3">
+              <label className="flex items-start gap-3 p-4 border border-gray-200 dark:border-gray-700 rounded-lg cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
                 <input
                   type="radio"
                   value="manual"
                   checked={formData.type === 'manual'}
-                  onChange={(e) => setFormData({ ...formData, type: e.target.value as 'manual' | 'smart' })}
-                  className="mr-2"
+                  onChange={(e) => {
+                    const newType = e.target.value as 'manual' | 'smart';
+                    setFormData({
+                      ...formData,
+                      type: newType,
+                      conditions: newType === 'smart' ? formData.conditions : [],
+                      product_ids: newType === 'manual' ? formData.product_ids : [],
+                    });
+                    if (newType === 'manual') {
+                      loadAvailableProducts();
+                    } else {
+                      setSelectedProductIds([]);
+                    }
+                  }}
+                  className="mt-1"
                 />
-                Manual (Select products manually)
+                <div className="flex-1">
+                  <div className="font-medium text-gray-900 dark:text-white">Manual Collection</div>
+                  <div className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                    Select products manually. You control which products are included.
+                  </div>
+                </div>
               </label>
-              <label className="flex items-center">
+              <label className="flex items-start gap-3 p-4 border border-gray-200 dark:border-gray-700 rounded-lg cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
                 <input
                   type="radio"
                   value="smart"
                   checked={formData.type === 'smart'}
-                  onChange={(e) => setFormData({ ...formData, type: e.target.value as 'manual' | 'smart' })}
-                  className="mr-2"
+                  onChange={(e) => {
+                    const newType = e.target.value as 'manual' | 'smart';
+                    setFormData({
+                      ...formData,
+                      type: newType,
+                      conditions: newType === 'smart' ? formData.conditions : [],
+                      product_ids: newType === 'manual' ? formData.product_ids : [],
+                    });
+                    if (newType === 'manual') {
+                      loadAvailableProducts();
+                    } else {
+                      setSelectedProductIds([]);
+                    }
+                  }}
+                  className="mt-1"
                 />
-                Smart (Auto-update based on rules)
+                <div className="flex-1">
+                  <div className="font-medium text-gray-900 dark:text-white">Automated Collection</div>
+                  <div className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                    Products are added automatically based on your conditions. The collection stays up to date without manual maintenance.
+                  </div>
+                </div>
               </label>
             </div>
           </div>
 
-          {/* Smart Collection Conditions */}
+          {/* Automated Collection Conditions */}
           {formData.type === 'smart' && (
-            <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4">
-              <div className="flex justify-between items-center mb-2">
+            <div className="border border-blue-200 dark:border-blue-800 rounded-lg p-6 bg-blue-50 dark:bg-blue-900/10">
+              {/* Header with clear messaging */}
+              <div className="mb-4">
+                <div className="flex items-start gap-3 mb-3">
+                  <div className="w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center flex-shrink-0 mt-0.5">
+                    <Package className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                  </div>
+                  <div className="flex-1">
+                    <h3 className="font-semibold text-gray-900 dark:text-white text-lg mb-2">
+                      Automated Collection Setup
+                    </h3>
+                    <p className="text-sm text-gray-700 dark:text-gray-300 mb-2">
+                      Products are added automatically based on your conditions. You don't need to manually select products.
+                    </p>
+                    <div className="bg-white dark:bg-gray-800 rounded-lg p-3 border border-blue-200 dark:border-blue-700">
+                      <p className="text-xs text-gray-600 dark:text-gray-400 flex items-center gap-2">
+                        <span className="w-1.5 h-1.5 rounded-full bg-green-500"></span>
+                        <span>This collection updates itself when your products change</span>
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Product Preview Count */}
+              {formData.conditions.length > 0 && (
+                <div className="mb-4 p-3 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-gray-900 dark:text-white">
+                        {previewProducts.length > 0 
+                          ? `${previewProducts.length} products currently match these conditions`
+                          : 'No products match these conditions yet'}
+                      </p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                        This count updates automatically as you add or change conditions
+                      </p>
+                    </div>
+                    {previewProducts.length > 0 && (
+                      <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">
+                        {previewProducts.length}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Conditions List */}
+              {formData.conditions.length > 0 && (
+                <div className="mb-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <h4 className="font-medium text-gray-900 dark:text-white">
+                      Your Conditions
+                    </h4>
+                    <p className="text-xs text-gray-600 dark:text-gray-400">
+                      Products must match <span className="font-semibold">all</span> conditions
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    {formData.conditions.map((condition, index) => (
+                      <div
+                        key={index}
+                        className="flex items-center justify-between bg-white dark:bg-gray-800 p-3 rounded-lg border border-gray-200 dark:border-gray-700"
+                      >
+                        <div className="flex items-center gap-2 flex-1">
+                          <span className="text-sm font-medium text-gray-500 dark:text-gray-400">
+                            {index + 1}.
+                          </span>
+                          <span className="text-sm text-gray-900 dark:text-white">
+                            {formatConditionForDisplay(condition)}
+                          </span>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleRemoveCondition(index)}
+                          className="text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20"
+                        >
+                          Remove
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Add Condition Button */}
+              <div className="flex items-center justify-between">
                 <div>
-                  <h3 className="font-semibold text-gray-900 dark:text-white">Smart Collection Rules</h3>
-                  <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
-                    Products are auto-included when they match <span className="font-semibold">all</span> of the rules below
-                    (e.g. price under $50 and tag contains &quot;B2B&quot;).
-                  </p>
+                  {formData.conditions.length === 0 && (
+                    <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">
+                      Add at least one condition to define which products should be included
+                    </p>
+                  )}
                 </div>
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
                   onClick={() => setShowConditionBuilder(!showConditionBuilder)}
+                  className="border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/30"
                 >
-                  {showConditionBuilder ? 'Hide' : 'Add Condition'}
+                  {showConditionBuilder ? 'Cancel' : formData.conditions.length === 0 ? 'Add Your First Condition' : 'Add Another Condition'}
                 </Button>
               </div>
 
-              {formData.conditions.length > 0 && (
-                <div className="space-y-2 mb-4">
-                  {formData.conditions.map((condition, index) => (
-                    <div
-                      key={index}
-                      className="flex items-center justify-between bg-gray-50 dark:bg-gray-700 p-3 rounded"
-                    >
-                      <span className="text-sm">
-                        {condition.type}: {condition.operator} {condition.value || `${condition.min}-${condition.max}`}
-                      </span>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleRemoveCondition(index)}
-                      >
-                        Remove
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              )}
-
+              {/* Condition Builder */}
               {showConditionBuilder && (
-                <div className="space-y-4 p-4 bg-gray-50 dark:bg-gray-700 rounded">
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="mt-4 p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+                  <h4 className="font-medium text-gray-900 dark:text-white mb-4">
+                    Create a New Condition
+                  </h4>
+                  <div className="space-y-4">
+                    {/* What to check */}
                     <div>
-                      <label className="block text-sm font-medium mb-2">Type</label>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                        What should we check?
+                      </label>
                       <select
                         value={newCondition.type}
-                        onChange={(e) =>
-                          setNewCondition({ ...newCondition, type: e.target.value as any })
-                        }
-                        className="w-full px-4 py-2 border rounded-lg dark:bg-gray-600 dark:text-white"
+                        onChange={(e) => {
+                          setNewCondition({ 
+                            ...newCondition, 
+                            type: e.target.value as any,
+                            operator: e.target.value === 'stock' ? 'in_stock' : newCondition.operator,
+                            value: e.target.value === 'stock' ? '' : newCondition.value
+                          });
+                        }}
+                        className="w-full px-4 py-2 border rounded-lg dark:bg-gray-700 dark:text-white"
                       >
-                        <option value="tag">Tag</option>
-                        <option value="price">Price</option>
-                        <option value="category">Category</option>
-                        <option value="stock">Stock</option>
+                        <option value="tag">Product tag</option>
+                        <option value="title">Product title</option>
+                        <option value="price">Product price</option>
+                        <option value="stock">Stock availability</option>
                       </select>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                        {newCondition.type === 'tag' && 'Check if the product has a specific tag'}
+                        {newCondition.type === 'title' && 'Check if the product title contains certain words'}
+                        {newCondition.type === 'price' && 'Check the product price'}
+                        {newCondition.type === 'stock' && 'Check if the product is in stock or out of stock'}
+                      </p>
                     </div>
+
+                    {/* How to compare */}
+                    {newCondition.type !== 'stock' && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                          How should we compare?
+                        </label>
+                        <select
+                          value={newCondition.operator}
+                          onChange={(e) =>
+                            setNewCondition({ ...newCondition, operator: e.target.value as any })
+                          }
+                          className="w-full px-4 py-2 border rounded-lg dark:bg-gray-700 dark:text-white"
+                        >
+                          {newCondition.type === 'tag' && (
+                            <>
+                              <option value="contains">Contains</option>
+                              <option value="equals">Is exactly</option>
+                            </>
+                          )}
+                          {newCondition.type === 'title' && (
+                            <>
+                              <option value="contains">Contains</option>
+                            </>
+                          )}
+                          {newCondition.type === 'price' && (
+                            <>
+                              <option value="less_than">Is less than</option>
+                              <option value="greater_than">Is greater than</option>
+                              <option value="between">Is between</option>
+                            </>
+                          )}
+                        </select>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                          {newCondition.type === 'tag' && newCondition.operator === 'contains' && 'Product tag includes this text'}
+                          {newCondition.type === 'tag' && newCondition.operator === 'equals' && 'Product tag matches exactly'}
+                          {newCondition.type === 'title' && 'Product title includes this text'}
+                          {newCondition.type === 'price' && newCondition.operator === 'less_than' && 'Product price is below this amount'}
+                          {newCondition.type === 'price' && newCondition.operator === 'greater_than' && 'Product price is above this amount'}
+                          {newCondition.type === 'price' && newCondition.operator === 'between' && 'Product price is within this range'}
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Value input */}
                     <div>
-                      <label className="block text-sm font-medium mb-2">Operator</label>
-                      <select
-                        value={newCondition.operator}
-                        onChange={(e) =>
-                          setNewCondition({ ...newCondition, operator: e.target.value as any })
-                        }
-                        className="w-full px-4 py-2 border rounded-lg dark:bg-gray-600 dark:text-white"
-                      >
-                        {newCondition.type === 'tag' && (
-                          <>
-                            <option value="contains">Contains</option>
-                            <option value="equals">Equals</option>
-                          </>
-                        )}
-                        {newCondition.type === 'price' && (
-                          <>
-                            <option value="greater_than">Greater Than</option>
-                            <option value="less_than">Less Than</option>
-                            <option value="between">Between</option>
-                          </>
-                        )}
-                        {newCondition.type === 'category' && (
-                          <>
-                            <option value="equals">Is</option>
-                            <option value="not_equals">Is not</option>
-                          </>
-                        )}
-                        {newCondition.type === 'stock' && (
-                          <>
-                            <option value="in_stock">In Stock</option>
-                            <option value="out_of_stock">Out of Stock</option>
-                          </>
-                        )}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium mb-2">Value</label>
-                      {newCondition.operator === 'between' ? (
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                        {newCondition.type === 'stock' 
+                          ? 'Stock status'
+                          : newCondition.operator === 'between'
+                          ? 'Price range'
+                          : 'Value'}
+                      </label>
+                      {newCondition.type === 'stock' ? (
+                        <select
+                          value={newCondition.operator}
+                          onChange={(e) =>
+                            setNewCondition({ ...newCondition, operator: e.target.value as any })
+                          }
+                          className="w-full px-4 py-2 border rounded-lg dark:bg-gray-700 dark:text-white"
+                        >
+                          <option value="in_stock">In stock</option>
+                          <option value="out_of_stock">Out of stock</option>
+                        </select>
+                      ) : newCondition.operator === 'between' ? (
                         <div className="flex gap-2">
-                          <input
-                            type="number"
-                            placeholder="Min"
-                            value={newCondition.min || ''}
-                            onChange={(e) =>
-                              setNewCondition({ ...newCondition, min: e.target.value })
-                            }
-                            className="w-full px-4 py-2 border rounded-lg dark:bg-gray-600 dark:text-white"
-                          />
-                          <input
-                            type="number"
-                            placeholder="Max"
-                            value={newCondition.max || ''}
-                            onChange={(e) =>
-                              setNewCondition({ ...newCondition, max: e.target.value })
-                            }
-                            className="w-full px-4 py-2 border rounded-lg dark:bg-gray-600 dark:text-white"
-                          />
+                          <div className="flex-1">
+                            <input
+                              type="number"
+                              placeholder="Minimum price"
+                              value={newCondition.min || ''}
+                              onChange={(e) =>
+                                setNewCondition({ ...newCondition, min: e.target.value })
+                              }
+                              className="w-full px-4 py-2 border rounded-lg dark:bg-gray-700 dark:text-white"
+                            />
+                          </div>
+                          <div className="flex items-center text-gray-500 dark:text-gray-400">and</div>
+                          <div className="flex-1">
+                            <input
+                              type="number"
+                              placeholder="Maximum price"
+                              value={newCondition.max || ''}
+                              onChange={(e) =>
+                                setNewCondition({ ...newCondition, max: e.target.value })
+                              }
+                              className="w-full px-4 py-2 border rounded-lg dark:bg-gray-700 dark:text-white"
+                            />
+                          </div>
                         </div>
                       ) : (
                         <input
                           type={newCondition.type === 'price' ? 'number' : 'text'}
+                          placeholder={
+                            newCondition.type === 'tag' ? 'e.g., Summer, Sale' :
+                            newCondition.type === 'title' ? 'e.g., shirt, jacket' :
+                            'e.g., 50'
+                          }
                           value={newCondition.value || ''}
                           onChange={(e) =>
                             setNewCondition({ ...newCondition, value: e.target.value })
                           }
-                          className="w-full px-4 py-2 border rounded-lg dark:bg-gray-600 dark:text-white"
+                          className="w-full px-4 py-2 border rounded-lg dark:bg-gray-700 dark:text-white"
                         />
                       )}
                     </div>
-                  </div>
-                  <div className="flex gap-2">
-                    <Button type="button" onClick={handleAddCondition}>
-                      Add Condition
-                    </Button>
-                    {formData.conditions.length > 0 && (
-                      <Button type="button" variant="outline" onClick={handlePreview}>
-                        {previewLoading ? 'Loading...' : 'Preview Products'}
+
+                    <div className="flex gap-2 pt-2">
+                      <Button 
+                        type="button" 
+                        onClick={handleAddCondition}
+                        disabled={!isConditionValid(newCondition)}
+                        className="flex-1"
+                      >
+                        Add This Condition
                       </Button>
-                    )}
+                      <Button 
+                        type="button" 
+                        variant="outline" 
+                        onClick={() => setShowConditionBuilder(false)}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
                   </div>
                 </div>
               )}
 
+              {/* Preview Products Button - Auto-updates when conditions change */}
+              {formData.conditions.length > 0 && (
+                <div className="mt-4 flex items-center justify-between p-3 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+                  <div>
+                    <p className="text-sm font-medium text-gray-900 dark:text-white">
+                      See which products match your conditions
+                    </p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                      Click to preview matching products
+                    </p>
+                  </div>
+                  <Button 
+                    type="button" 
+                    variant="outline" 
+                    onClick={handlePreview}
+                    disabled={previewLoading}
+                    className="border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/30"
+                  >
+                    {previewLoading ? 'Loading...' : 'Preview Products'}
+                  </Button>
+                </div>
+              )}
+
               {previewProducts.length > 0 && (
-                <div className="mt-4">
-                  <p className="text-sm font-medium mb-2">
-                    Preview: {previewProducts.length} products match
-                  </p>
-                  <div className="max-h-40 overflow-y-auto overflow-x-hidden scroll-smooth [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:dark:bg-gray-600 hover:[&::-webkit-scrollbar-thumb]:bg-gray-400 dark:hover:[&::-webkit-scrollbar-thumb]:bg-gray-500">
-                    {previewProducts.map((product) => (
-                      <div key={product.id} className="text-sm p-2 bg-white dark:bg-gray-600 rounded">
-                        {product.title}
-                      </div>
-                    ))}
+                <div className="mt-4 p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+                  <div className="flex items-center justify-between mb-3">
+                    <p className="text-sm font-medium text-gray-900 dark:text-white">
+                      {previewProducts.length} products currently match your conditions
+                    </p>
+                    <span className="text-xs text-green-600 dark:text-green-400 font-medium">
+                      ✓ Matching
+                    </span>
+                  </div>
+                  <div className="max-h-48 overflow-y-auto overflow-x-hidden scroll-smooth [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:dark:bg-gray-600 hover:[&::-webkit-scrollbar-thumb]:bg-gray-400 dark:hover:[&::-webkit-scrollbar-thumb]:bg-gray-500">
+                    <div className="space-y-1">
+                      {previewProducts.map((product) => (
+                        <div key={product.id} className="text-sm p-2 bg-gray-50 dark:bg-gray-700 rounded flex items-center justify-between">
+                          <span className="text-gray-900 dark:text-white">{product.title}</span>
+                          <span className="text-xs text-gray-500 dark:text-gray-400">${product.price?.toFixed(2) || '0.00'}</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 </div>
               )}
+
+              {/* Reassuring Message */}
+              <div className="mt-4 p-4 bg-green-50 dark:bg-green-900/10 rounded-lg border border-green-200 dark:border-green-800">
+                <div className="flex items-start gap-3">
+                  <div className="w-5 h-5 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center flex-shrink-0 mt-0.5">
+                    <Check className="w-3 h-3 text-green-600 dark:text-green-400" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-gray-900 dark:text-white mb-1">
+                      Your collection will stay up to date automatically
+                    </p>
+                    <p className="text-xs text-gray-600 dark:text-gray-400">
+                      New products that match your conditions will be added automatically. Products that no longer match will be removed automatically. You can change conditions at any time.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Manual Collection Product Selection */}
+          {formData.type === 'manual' && (
+            <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+              <div className="mb-4">
+                <h3 className="font-semibold text-gray-900 dark:text-white mb-2">
+                  Select Products
+                </h3>
+                <p className="text-xs text-gray-600 dark:text-gray-400 mb-4">
+                  Search and select products to include in this manual collection. Products are added/removed only through your actions.
+                </p>
+                
+                {/* Product Search */}
+                <div className="mb-4">
+                  <input
+                    type="text"
+                    placeholder="Search products by name or SKU..."
+                    value={productSearchTerm}
+                    onChange={(e) => setProductSearchTerm(e.target.value)}
+                    className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
+                  />
+                </div>
+
+                {/* Available Products List */}
+                {loadingProducts ? (
+                  <div className="text-center py-4 text-gray-500">Loading products...</div>
+                ) : (
+                  <div className="max-h-60 overflow-y-auto mb-4 space-y-2 border border-gray-200 dark:border-gray-700 rounded-lg p-2">
+                    {filteredAvailableProducts.length === 0 ? (
+                      <div className="text-center py-4 text-gray-500 text-sm">
+                        {productSearchTerm ? 'No products found' : 'No available products'}
+                      </div>
+                    ) : (
+                      filteredAvailableProducts.map((product) => (
+                        <div
+                          key={product.id}
+                          className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700 rounded hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors"
+                        >
+                          <div className="flex items-center gap-3 flex-1">
+                            {product.images && product.images.length > 0 && (
+                              <img
+                                src={product.images[0]}
+                                alt={product.name}
+                                className="w-10 h-10 object-cover rounded border border-gray-200 dark:border-gray-600"
+                                onError={(e) => {
+                                  e.currentTarget.src = '/placeholder.png';
+                                }}
+                              />
+                            )}
+                            <div className="flex-1 min-w-0">
+                              <div className="font-medium text-gray-900 dark:text-white truncate">
+                                {product.name}
+                              </div>
+                              <div className="text-xs text-gray-500 dark:text-gray-400">
+                                ${product.price.toFixed(2)} • SKU: {product.sku} • Stock: {product.stock}
+                              </div>
+                            </div>
+                          </div>
+                          <Button
+                            type="button"
+                            size="sm"
+                            onClick={() => handleAddProductToForm(product.id)}
+                          >
+                            Add
+                          </Button>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
+
+                {/* Selected Products List */}
+                {selectedProducts.length > 0 && (
+                  <div className="mt-4">
+                    <h4 className="font-medium text-gray-900 dark:text-white mb-2">
+                      Selected Products ({selectedProducts.length})
+                    </h4>
+                    <div className="space-y-2 max-h-60 overflow-y-auto border border-gray-200 dark:border-gray-700 rounded-lg p-2">
+                      {selectedProducts.map((product) => (
+                        <div
+                          key={product.id}
+                          className="flex items-center justify-between p-3 bg-blue-50 dark:bg-blue-900/20 rounded hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors"
+                        >
+                          <div className="flex items-center gap-3 flex-1">
+                            {product.images && product.images.length > 0 && (
+                              <img
+                                src={product.images[0]}
+                                alt={product.name}
+                                className="w-10 h-10 object-cover rounded border border-gray-200 dark:border-gray-600"
+                                onError={(e) => {
+                                  e.currentTarget.src = '/placeholder.png';
+                                }}
+                              />
+                            )}
+                            <div className="flex-1 min-w-0">
+                              <div className="font-medium text-gray-900 dark:text-white truncate">
+                                {product.name}
+                              </div>
+                              <div className="text-xs text-gray-500 dark:text-gray-400">
+                                ${product.price.toFixed(2)} • SKU: {product.sku}
+                              </div>
+                            </div>
+                          </div>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleRemoveProductFromForm(product.id)}
+                            className="text-red-600 hover:text-red-700"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -1878,26 +2547,70 @@ function CollectionFormModal({
                 </div>
               )}
               
-              {/* Upload Button */}
-              <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-6 text-center">
-                <Upload className="w-8 h-8 mx-auto text-gray-400 dark:text-gray-500 mb-2" />
-                <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">
+              {/* Upload Buttons */}
+              <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-6">
+                <p className="text-sm text-gray-600 dark:text-gray-400 mb-4 text-center">
                   Upload image files or paste image URLs above
                 </p>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    const url = prompt('Enter image URL:');
-                    if (url) {
-                      setFormData({ ...formData, image_url: url, cover_image_url: url });
-                    }
-                  }}
-                >
-                  <ImageIcon className="w-4 h-4 mr-2" />
-                  Choose Image URL
-                </Button>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Upload Cover Image
+                    </label>
+                    <input
+                      ref={coverImageInputRef}
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          handleImageUpload(file, 'cover');
+                        }
+                      }}
+                      className="hidden"
+                      id="cover-image-upload"
+                      disabled={uploadingImages}
+                    />
+                    <label
+                      htmlFor="cover-image-upload"
+                      className="flex items-center justify-center gap-2 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <Upload className="w-4 h-4" />
+                      <span className="text-sm">Choose Cover Image</span>
+                    </label>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Upload Thumbnail Image
+                    </label>
+                    <input
+                      ref={thumbnailImageInputRef}
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          handleImageUpload(file, 'thumbnail');
+                        }
+                      }}
+                      className="hidden"
+                      id="thumbnail-image-upload"
+                      disabled={uploadingImages}
+                    />
+                    <label
+                      htmlFor="thumbnail-image-upload"
+                      className="flex items-center justify-center gap-2 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <Upload className="w-4 h-4" />
+                      <span className="text-sm">Choose Thumbnail</span>
+                    </label>
+                  </div>
+                </div>
+                {uploadingImages && (
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-4 text-center">
+                    Uploading image...
+                  </p>
+                )}
               </div>
             </div>
           </div>
@@ -2165,7 +2878,6 @@ function CollectionProductsModal({
   }, []);
 
   useEffect(() => {
-    // Load products immediately with mock data for demonstration
     if (collection) {
       loadCollectionProducts();
       loadAllProducts();
@@ -2173,332 +2885,150 @@ function CollectionProductsModal({
   }, [collection]);
 
   const loadUser = async () => {
-    const { data: { user: authUser } } = await supabase.auth.getUser();
-    if (authUser) {
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', authUser.id)
-        .single();
-      setUser(profile || { id: authUser.id, email: authUser.email });
-    } else {
-      // Set mock user for demonstration
-      setUser({ id: collection.seller_id, email: 'seller@example.com' });
+    // Get user from auth store or API
+    try {
+      const token = localStorage.getItem('auth_token');
+      const res = await fetch('http://localhost:5000/api/auth/me', {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        credentials: 'include',
+      });
+      
+      if (res.ok) {
+        const data = await res.json();
+        setUser(data.user || { id: collection.seller_id });
+      } else {
+        setUser({ id: collection.seller_id });
+      }
+    } catch (error) {
+      console.error('Error loading user:', error);
+      setUser({ id: collection.seller_id });
     }
   };
-
-  // Mock products for demonstration
-  const MOCK_COLLECTION_PRODUCTS: Product[] = [
-    {
-      id: 'prod-1',
-      seller_id: collection.seller_id,
-      title: 'Premium Wireless Headphones',
-      description: 'High-quality wireless headphones with noise cancellation',
-      price: 199.99,
-      compare_at_price: 249.99,
-      stock_quantity: 15,
-      sku: 'WH-001',
-      status: 'active',
-      is_shippable: true,
-      weight: 0.5,
-      category_id: 'cat-1',
-      images: [{
-        id: `img-${collection.id}-1`,
-        product_id: 'prod-1',
-        url: 'https://images.pexels.com/photos/1649771/pexels-photo-1649771.jpeg?auto=compress&cs=tinysrgb&w=800',
-        position: 0,
-        is_primary: true,
-        created_at: new Date().toISOString(),
-      }],
-      low_stock_threshold: 10,
-      views_count: 0,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    },
-    {
-      id: 'prod-2',
-      seller_id: collection.seller_id,
-      title: 'Smart Watch Pro',
-      description: 'Feature-rich smartwatch with health tracking',
-      price: 299.99,
-      compare_at_price: 349.99,
-      stock_quantity: 8,
-      sku: 'SW-002',
-      status: 'active',
-      is_shippable: true,
-      weight: 0.3,
-      category_id: 'cat-1',
-      images: [{
-        id: `img-${collection.id}-2`,
-        product_id: 'prod-2',
-        url: 'https://images.pexels.com/photos/437037/pexels-photo-437037.jpeg?auto=compress&cs=tinysrgb&w=800',
-        position: 0,
-        is_primary: true,
-        created_at: new Date().toISOString(),
-      }],
-      low_stock_threshold: 10,
-      views_count: 0,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    },
-    {
-      id: 'prod-3',
-      seller_id: collection.seller_id,
-      title: 'Laptop Stand Ergonomic',
-      description: 'Adjustable laptop stand for better posture',
-      price: 49.99,
-      compare_at_price: 69.99,
-      stock_quantity: 25,
-      sku: 'LS-003',
-      status: 'active',
-      is_shippable: true,
-      weight: 1.2,
-      category_id: 'cat-2',
-      images: [{
-        id: `img-${collection.id}-3`,
-        product_id: 'prod-3',
-        url: 'https://images.pexels.com/photos/1181298/pexels-photo-1181298.jpeg?auto=compress&cs=tinysrgb&w=800',
-        position: 0,
-        is_primary: true,
-        created_at: new Date().toISOString(),
-      }],
-      low_stock_threshold: 10,
-      views_count: 0,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    },
-    {
-      id: 'prod-4',
-      seller_id: collection.seller_id,
-      title: 'Mechanical Keyboard RGB',
-      description: 'Gaming mechanical keyboard with RGB lighting',
-      price: 129.99,
-      compare_at_price: 159.99,
-      stock_quantity: 12,
-      sku: 'KB-004',
-      status: 'active',
-      is_shippable: true,
-      weight: 1.0,
-      category_id: 'cat-1',
-      images: [{
-        id: `img-${collection.id}-4`,
-        product_id: 'prod-4',
-        url: 'https://images.pexels.com/photos/163117/keyboard-white-computer-keyboard-desktop-163117.jpeg?auto=compress&cs=tinysrgb&w=800',
-        position: 0,
-        is_primary: true,
-        created_at: new Date().toISOString(),
-      }],
-      low_stock_threshold: 10,
-      views_count: 0,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    },
-    {
-      id: 'prod-5',
-      seller_id: collection.seller_id,
-      title: 'Wireless Mouse Ergonomic',
-      description: 'Comfortable wireless mouse for long work sessions',
-      price: 39.99,
-      compare_at_price: 49.99,
-      stock_quantity: 30,
-      sku: 'MS-005',
-      status: 'active',
-      is_shippable: true,
-      weight: 0.2,
-      category_id: 'cat-1',
-      images: [{
-        id: `img-${collection.id}-5`,
-        product_id: 'prod-5',
-        url: 'https://images.pexels.com/photos/2115257/pexels-photo-2115257.jpeg?auto=compress&cs=tinysrgb&w=800',
-        position: 0,
-        is_primary: true,
-        created_at: new Date().toISOString(),
-      }],
-      low_stock_threshold: 10,
-      views_count: 0,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    },
-    {
-      id: 'prod-6',
-      seller_id: collection.seller_id,
-      title: 'USB-C Hub Multiport',
-      description: '7-in-1 USB-C hub with HDMI, USB 3.0, and SD card reader',
-      price: 59.99,
-      compare_at_price: 79.99,
-      stock_quantity: 18,
-      sku: 'HB-006',
-      status: 'active',
-      is_shippable: true,
-      weight: 0.15,
-      category_id: 'cat-2',
-      images: [{
-        id: `img-${collection.id}-4`,
-        product_id: 'prod-4',
-        url: 'https://images.pexels.com/photos/163117/keyboard-white-computer-keyboard-desktop-163117.jpeg?auto=compress&cs=tinysrgb&w=800',
-        position: 0,
-        is_primary: true,
-        created_at: new Date().toISOString(),
-      }],
-      low_stock_threshold: 10,
-      views_count: 0,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    },
-  ];
-
-  const MOCK_AVAILABLE_PRODUCTS: Product[] = [
-    {
-      id: 'prod-7',
-      seller_id: collection.seller_id,
-      title: 'Monitor Stand with Storage',
-      description: 'Dual monitor stand with built-in storage compartments',
-      price: 89.99,
-      compare_at_price: 119.99,
-      stock_quantity: 10,
-      sku: 'MS-007',
-      status: 'active',
-      is_shippable: true,
-      weight: 3.5,
-      category_id: 'cat-2',
-      images: [{
-        id: `img-${collection.id}-3`,
-        product_id: 'prod-3',
-        url: 'https://images.pexels.com/photos/1181298/pexels-photo-1181298.jpeg?auto=compress&cs=tinysrgb&w=800',
-        position: 0,
-        is_primary: true,
-        created_at: new Date().toISOString(),
-      }],
-      low_stock_threshold: 10,
-      views_count: 0,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    },
-    {
-      id: 'prod-8',
-      seller_id: collection.seller_id,
-      title: 'Webcam HD 1080p',
-      description: 'High-definition webcam with auto-focus and microphone',
-      price: 79.99,
-      compare_at_price: 99.99,
-      stock_quantity: 20,
-      sku: 'WC-008',
-      status: 'active',
-      is_shippable: true,
-      weight: 0.3,
-      category_id: 'cat-1',
-      images: [{
-        id: `img-${collection.id}-4`,
-        product_id: 'prod-4',
-        url: 'https://images.pexels.com/photos/163117/keyboard-white-computer-keyboard-desktop-163117.jpeg?auto=compress&cs=tinysrgb&w=800',
-        position: 0,
-        is_primary: true,
-        created_at: new Date().toISOString(),
-      }],
-      low_stock_threshold: 10,
-      views_count: 0,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    },
-    {
-      id: 'prod-9',
-      seller_id: collection.seller_id,
-      title: 'Desk Organizer Set',
-      description: 'Bamboo desk organizer with multiple compartments',
-      price: 34.99,
-      compare_at_price: 44.99,
-      stock_quantity: 35,
-      sku: 'DO-009',
-      status: 'active',
-      is_shippable: true,
-      weight: 0.8,
-      category_id: 'cat-2',
-      images: [{
-        id: `img-${collection.id}-3`,
-        product_id: 'prod-3',
-        url: 'https://images.pexels.com/photos/1181298/pexels-photo-1181298.jpeg?auto=compress&cs=tinysrgb&w=800',
-        position: 0,
-        is_primary: true,
-        created_at: new Date().toISOString(),
-      }],
-      low_stock_threshold: 10,
-      views_count: 0,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    },
-    {
-      id: 'prod-10',
-      seller_id: collection.seller_id,
-      title: 'Cable Management Kit',
-      description: 'Complete cable management solution with clips and sleeves',
-      price: 24.99,
-      compare_at_price: 34.99,
-      stock_quantity: 40,
-      sku: 'CM-010',
-      status: 'active',
-      is_shippable: true,
-      weight: 0.4,
-      category_id: 'cat-2',
-      images: [{
-        id: `img-${collection.id}-4`,
-        product_id: 'prod-4',
-        url: 'https://images.pexels.com/photos/163117/keyboard-white-computer-keyboard-desktop-163117.jpeg?auto=compress&cs=tinysrgb&w=800',
-        position: 0,
-        is_primary: true,
-        created_at: new Date().toISOString(),
-      }],
-      low_stock_threshold: 10,
-      views_count: 0,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    },
-  ];
 
   const loadCollectionProducts = async () => {
     setLoading(true);
     try {
-      const products = await getCollectionProducts(collection.id, collection.sort_order);
-      
-      // If no products found, use mock data for demonstration
-      if (products.length === 0) {
-        setProducts(MOCK_COLLECTION_PRODUCTS);
-      } else {
-        setProducts(products);
+      const token = localStorage.getItem('auth_token');
+      const res = await fetch(`http://localhost:5000/api/seller/collections/${collection.id}/products`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        credentials: 'include',
+      });
+
+      if (!res.ok) {
+        throw new Error('Failed to load collection products');
       }
+
+      const data = await res.json();
+      // Map backend product format to frontend format
+      const mappedProducts = (data.products || []).map((p: any) => ({
+        id: p._id || p.id,
+        title: p.name,
+        price: p.price,
+        stock_quantity: p.stock,
+        sku: p.sku,
+        status: p.status === 'in_stock' ? 'active' : 'inactive',
+        images: p.images?.map((img: string, idx: number) => ({
+          id: `img-${p._id || p.id}-${idx}`,
+          product_id: p._id || p.id,
+          url: img,
+          position: idx,
+          is_primary: idx === 0,
+          created_at: new Date().toISOString(),
+        })) || [],
+        description: p.description,
+        created_at: p.createdAt,
+        updated_at: p.updatedAt,
+      }));
+
+      setProducts(mappedProducts);
     } catch (error: any) {
-      // On error, use mock data
-      setProducts(MOCK_COLLECTION_PRODUCTS);
+      console.error('Error loading collection products:', error);
+      setProducts([]);
     } finally {
       setLoading(false);
     }
   };
 
   const loadAllProducts = async () => {
-    if (!user?.id) return;
     try {
-      const { data, error } = await supabase
-        .from('products')
-        .select('*')
-        .eq('seller_id', user.id)
-        .eq('status', 'active');
-      if (error) throw error;
-      
-      // If no products found, use mock data for demonstration
-      if (!data || data.length === 0) {
-        setAllProducts(MOCK_AVAILABLE_PRODUCTS);
-      } else {
-        setAllProducts(data);
+      const token = localStorage.getItem('auth_token');
+      const res = await fetch('http://localhost:5000/api/seller/inventory/products', {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        credentials: 'include',
+      });
+
+      if (!res.ok) {
+        throw new Error('Failed to load products');
       }
+
+      const data = await res.json();
+      // Map backend product format to frontend format
+      const mappedProducts = (data.products || []).map((p: any) => ({
+        id: p._id || p.id,
+        title: p.name,
+        price: p.price,
+        stock_quantity: p.stock,
+        sku: p.sku,
+        status: p.status === 'in_stock' ? 'active' : 'inactive',
+        images: p.images?.map((img: string, idx: number) => ({
+          id: `img-${p._id || p.id}-${idx}`,
+          product_id: p._id || p.id,
+          url: img,
+          position: idx,
+          is_primary: idx === 0,
+          created_at: new Date().toISOString(),
+        })) || [],
+        description: p.description,
+        created_at: p.createdAt,
+        updated_at: p.updatedAt,
+      }));
+
+      setAllProducts(mappedProducts);
     } catch (error: any) {
-      // On error, use mock data
-      setAllProducts(MOCK_AVAILABLE_PRODUCTS);
+      console.error('Error loading products:', error);
+      setAllProducts([]);
     }
   };
 
   const handleAddProduct = async (productId: string) => {
+    if (collection.type !== 'manual') {
+      toast({
+        title: 'Error',
+        description: 'Cannot add products to automated collections. Modify rules instead.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     try {
-      const { error } = await addProductToCollection(productId, collection.id);
-      if (error) throw error;
+      const token = localStorage.getItem('auth_token');
+      const res = await fetch(`http://localhost:5000/api/seller/collections/${collection.id}/products`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        credentials: 'include',
+        body: JSON.stringify({ product_id: productId }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.message || 'Failed to add product');
+      }
+
       toast({
         title: 'Success',
         description: 'Product added to collection',
@@ -2515,9 +3045,31 @@ function CollectionProductsModal({
   };
 
   const handleRemoveProduct = async (productId: string) => {
+    if (collection.type !== 'manual') {
+      toast({
+        title: 'Error',
+        description: 'Cannot remove products from automated collections. Modify rules instead.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     try {
-      const { error } = await removeProductFromCollection(productId, collection.id);
-      if (error) throw error;
+      const token = localStorage.getItem('auth_token');
+      const res = await fetch(`http://localhost:5000/api/seller/collections/${collection.id}/products/${productId}`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        credentials: 'include',
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.message || 'Failed to remove product');
+      }
+
       toast({
         title: 'Success',
         description: 'Product removed from collection',
@@ -2550,7 +3102,7 @@ function CollectionProductsModal({
 
   const handleDrop = async (e: React.DragEvent, targetProductId: string) => {
     e.preventDefault();
-    if (!draggedProduct || draggedProduct === targetProductId) {
+    if (!draggedProduct || draggedProduct === targetProductId || collection.type !== 'manual') {
       setDraggedProduct(null);
       setDragOverProduct(null);
       return;
@@ -2572,11 +3124,37 @@ function CollectionProductsModal({
     
     setProducts(newProducts);
     
-    // In a real app, you would save the new order to the backend
-    toast({
-      title: 'Success',
-      description: 'Product order updated',
-    });
+    // Save the new order to the backend
+    try {
+      const token = localStorage.getItem('auth_token');
+      const productIds = newProducts.map(p => p.id);
+      const res = await fetch(`http://localhost:5000/api/seller/collections/${collection.id}/products/reorder`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        credentials: 'include',
+        body: JSON.stringify({ product_ids: productIds }),
+      });
+
+      if (!res.ok) {
+        throw new Error('Failed to save product order');
+      }
+
+      toast({
+        title: 'Success',
+        description: 'Product order updated',
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to save product order',
+        variant: 'destructive',
+      });
+      // Revert on error
+      loadCollectionProducts();
+    }
     
     setDraggedProduct(null);
     setDragOverProduct(null);
@@ -2908,322 +3486,6 @@ function CollectionPreviewModal({
   const [currentPage, setCurrentPage] = useState(1);
   const [productsPerPage] = useState(12);
 
-  // Mock products for preview - same as manage products modal
-  const MOCK_PREVIEW_PRODUCTS: Product[] = [
-    {
-      id: 'prod-1',
-      seller_id: collection.seller_id,
-      title: 'Premium Wireless Headphones',
-      description: 'High-quality wireless headphones with noise cancellation',
-      price: 199.99,
-      compare_at_price: 249.99,
-      stock_quantity: 15,
-      sku: 'WH-001',
-      status: 'active',
-      is_shippable: true,
-      weight: 0.5,
-      category_id: 'cat-1',
-      images: [{
-        id: `img-${collection.id}-1`,
-        product_id: 'prod-1',
-        url: 'https://images.pexels.com/photos/1649771/pexels-photo-1649771.jpeg?auto=compress&cs=tinysrgb&w=800',
-        position: 0,
-        is_primary: true,
-        created_at: new Date().toISOString(),
-      }],
-      low_stock_threshold: 10,
-      views_count: 0,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    },
-    {
-      id: 'prod-2',
-      seller_id: collection.seller_id,
-      title: 'Smart Watch Pro',
-      description: 'Feature-rich smartwatch with health tracking',
-      price: 299.99,
-      compare_at_price: 349.99,
-      stock_quantity: 8,
-      sku: 'SW-002',
-      status: 'active',
-      is_shippable: true,
-      weight: 0.3,
-      category_id: 'cat-1',
-      images: [{
-        id: `img-${collection.id}-2`,
-        product_id: 'prod-2',
-        url: 'https://images.pexels.com/photos/437037/pexels-photo-437037.jpeg?auto=compress&cs=tinysrgb&w=800',
-        position: 0,
-        is_primary: true,
-        created_at: new Date().toISOString(),
-      }],
-      low_stock_threshold: 10,
-      views_count: 0,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    },
-    {
-      id: 'prod-3',
-      seller_id: collection.seller_id,
-      title: 'Laptop Stand Ergonomic',
-      description: 'Adjustable laptop stand for better posture',
-      price: 49.99,
-      compare_at_price: 69.99,
-      stock_quantity: 25,
-      sku: 'LS-003',
-      status: 'active',
-      is_shippable: true,
-      weight: 1.2,
-      category_id: 'cat-2',
-      images: [{
-        id: `img-${collection.id}-3`,
-        product_id: 'prod-3',
-        url: 'https://images.pexels.com/photos/1181298/pexels-photo-1181298.jpeg?auto=compress&cs=tinysrgb&w=800',
-        position: 0,
-        is_primary: true,
-        created_at: new Date().toISOString(),
-      }],
-      low_stock_threshold: 10,
-      views_count: 0,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    },
-    {
-      id: 'prod-4',
-      seller_id: collection.seller_id,
-      title: 'Mechanical Keyboard RGB',
-      description: 'Gaming mechanical keyboard with RGB lighting',
-      price: 129.99,
-      compare_at_price: 159.99,
-      stock_quantity: 12,
-      sku: 'KB-004',
-      status: 'active',
-      is_shippable: true,
-      weight: 1.0,
-      category_id: 'cat-1',
-      images: [{
-        id: `img-${collection.id}-4`,
-        product_id: 'prod-4',
-        url: 'https://images.pexels.com/photos/163117/keyboard-white-computer-keyboard-desktop-163117.jpeg?auto=compress&cs=tinysrgb&w=800',
-        position: 0,
-        is_primary: true,
-        created_at: new Date().toISOString(),
-      }],
-      low_stock_threshold: 10,
-      views_count: 0,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    },
-    {
-      id: 'prod-5',
-      seller_id: collection.seller_id,
-      title: 'Wireless Mouse Ergonomic',
-      description: 'Comfortable wireless mouse for long work sessions',
-      price: 39.99,
-      compare_at_price: 49.99,
-      stock_quantity: 30,
-      sku: 'MS-005',
-      status: 'active',
-      is_shippable: true,
-      weight: 0.2,
-      category_id: 'cat-1',
-      images: [{
-        id: `img-${collection.id}-5`,
-        product_id: 'prod-5',
-        url: 'https://images.pexels.com/photos/2115257/pexels-photo-2115257.jpeg?auto=compress&cs=tinysrgb&w=800',
-        position: 0,
-        is_primary: true,
-        created_at: new Date().toISOString(),
-      }],
-      low_stock_threshold: 10,
-      views_count: 0,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    },
-    {
-      id: 'prod-6',
-      seller_id: collection.seller_id,
-      title: 'USB-C Hub Multiport',
-      description: '7-in-1 USB-C hub with HDMI, USB 3.0, and SD card reader',
-      price: 59.99,
-      compare_at_price: 79.99,
-      stock_quantity: 18,
-      sku: 'HB-006',
-      status: 'active',
-      is_shippable: true,
-      weight: 0.15,
-      category_id: 'cat-2',
-      images: [{
-        id: `img-${collection.id}-4`,
-        product_id: 'prod-4',
-        url: 'https://images.pexels.com/photos/163117/keyboard-white-computer-keyboard-desktop-163117.jpeg?auto=compress&cs=tinysrgb&w=800',
-        position: 0,
-        is_primary: true,
-        created_at: new Date().toISOString(),
-      }],
-      low_stock_threshold: 10,
-      views_count: 0,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    },
-    {
-      id: 'prod-7',
-      seller_id: collection.seller_id,
-      title: 'Monitor Stand with Storage',
-      description: 'Dual monitor stand with built-in storage compartments',
-      price: 89.99,
-      compare_at_price: 119.99,
-      stock_quantity: 10,
-      sku: 'MS-007',
-      status: 'active',
-      is_shippable: true,
-      weight: 3.5,
-      category_id: 'cat-2',
-      images: [{
-        id: `img-${collection.id}-3`,
-        product_id: 'prod-3',
-        url: 'https://images.pexels.com/photos/1181298/pexels-photo-1181298.jpeg?auto=compress&cs=tinysrgb&w=800',
-        position: 0,
-        is_primary: true,
-        created_at: new Date().toISOString(),
-      }],
-      low_stock_threshold: 10,
-      views_count: 0,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    },
-    {
-      id: 'prod-8',
-      seller_id: collection.seller_id,
-      title: 'Webcam HD 1080p',
-      description: 'High-definition webcam with auto-focus and microphone',
-      price: 79.99,
-      compare_at_price: 99.99,
-      stock_quantity: 20,
-      sku: 'WC-008',
-      status: 'active',
-      is_shippable: true,
-      weight: 0.3,
-      category_id: 'cat-1',
-      images: [{
-        id: `img-${collection.id}-4`,
-        product_id: 'prod-4',
-        url: 'https://images.pexels.com/photos/163117/keyboard-white-computer-keyboard-desktop-163117.jpeg?auto=compress&cs=tinysrgb&w=800',
-        position: 0,
-        is_primary: true,
-        created_at: new Date().toISOString(),
-      }],
-      low_stock_threshold: 10,
-      views_count: 0,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    },
-    {
-      id: 'prod-9',
-      seller_id: collection.seller_id,
-      title: 'Desk Organizer Set',
-      description: 'Bamboo desk organizer with multiple compartments',
-      price: 34.99,
-      compare_at_price: 44.99,
-      stock_quantity: 35,
-      sku: 'DO-009',
-      status: 'active',
-      is_shippable: true,
-      weight: 0.8,
-      category_id: 'cat-2',
-      images: [{
-        id: `img-${collection.id}-3`,
-        product_id: 'prod-3',
-        url: 'https://images.pexels.com/photos/1181298/pexels-photo-1181298.jpeg?auto=compress&cs=tinysrgb&w=800',
-        position: 0,
-        is_primary: true,
-        created_at: new Date().toISOString(),
-      }],
-      low_stock_threshold: 10,
-      views_count: 0,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    },
-    {
-      id: 'prod-10',
-      seller_id: collection.seller_id,
-      title: 'Cable Management Kit',
-      description: 'Complete cable management solution with clips and sleeves',
-      price: 24.99,
-      compare_at_price: 34.99,
-      stock_quantity: 40,
-      sku: 'CM-010',
-      status: 'active',
-      is_shippable: true,
-      weight: 0.4,
-      category_id: 'cat-2',
-      images: [{
-        id: `img-${collection.id}-4`,
-        product_id: 'prod-4',
-        url: 'https://images.pexels.com/photos/163117/keyboard-white-computer-keyboard-desktop-163117.jpeg?auto=compress&cs=tinysrgb&w=800',
-        position: 0,
-        is_primary: true,
-        created_at: new Date().toISOString(),
-      }],
-      low_stock_threshold: 10,
-      views_count: 0,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    },
-    {
-      id: 'prod-11',
-      seller_id: collection.seller_id,
-      title: 'External SSD 1TB',
-      description: 'Fast external SSD with USB-C connectivity',
-      price: 149.99,
-      compare_at_price: 179.99,
-      stock_quantity: 14,
-      sku: 'SSD-011',
-      status: 'active',
-      is_shippable: true,
-      weight: 0.1,
-      category_id: 'cat-1',
-      images: [{
-        id: `img-${collection.id}-4`,
-        product_id: 'prod-4',
-        url: 'https://images.pexels.com/photos/163117/keyboard-white-computer-keyboard-desktop-163117.jpeg?auto=compress&cs=tinysrgb&w=800',
-        position: 0,
-        is_primary: true,
-        created_at: new Date().toISOString(),
-      }],
-      low_stock_threshold: 10,
-      views_count: 0,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    },
-    {
-      id: 'prod-12',
-      seller_id: collection.seller_id,
-      title: 'LED Desk Lamp',
-      description: 'Adjustable LED desk lamp with USB charging port',
-      price: 44.99,
-      compare_at_price: 59.99,
-      stock_quantity: 22,
-      sku: 'LD-012',
-      status: 'active',
-      is_shippable: true,
-      weight: 0.6,
-      category_id: 'cat-2',
-      images: [{
-        id: `img-${collection.id}-3`,
-        product_id: 'prod-3',
-        url: 'https://images.pexels.com/photos/1181298/pexels-photo-1181298.jpeg?auto=compress&cs=tinysrgb&w=800',
-        position: 0,
-        is_primary: true,
-        created_at: new Date().toISOString(),
-      }],
-      low_stock_threshold: 10,
-      views_count: 0,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    },
-  ];
-
   useEffect(() => {
     loadProducts();
   }, [collection]);
@@ -3231,25 +3493,46 @@ function CollectionPreviewModal({
   const loadProducts = async () => {
     setLoading(true);
     try {
-      // Try to load real products
-      const collectionProducts = await getCollectionProducts(collection.id, collection.sort_order);
-      if (collectionProducts && collectionProducts.length > 0) {
-        // Map products correctly
-        const mappedProducts = collectionProducts.map((pc: any) => {
-          if (pc.product) {
-            return pc.product;
-          }
-          return pc;
-        });
-        setProducts(mappedProducts);
-      } else {
-        // Use mock products for preview - same as manage products modal
-        setProducts(MOCK_PREVIEW_PRODUCTS);
+      const token = localStorage.getItem('auth_token');
+      const res = await fetch(`http://localhost:5000/api/seller/collections/${collection.id}/products`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        credentials: 'include',
+      });
+
+      if (!res.ok) {
+        throw new Error('Failed to load collection products');
       }
-    } catch (error) {
+
+      const data = await res.json();
+      // Map backend product format to frontend format
+      const mappedProducts = (data.products || []).map((p: any) => ({
+        id: p._id || p.id,
+        title: p.name,
+        price: p.price,
+        stock_quantity: p.stock,
+        sku: p.sku,
+        status: p.status === 'in_stock' ? 'active' : 'inactive',
+        images: p.images?.map((img: string, idx: number) => ({
+          id: `img-${p._id || p.id}-${idx}`,
+          product_id: p._id || p.id,
+          url: img,
+          position: idx,
+          is_primary: idx === 0,
+          created_at: new Date().toISOString(),
+        })) || [],
+        description: p.description,
+        created_at: p.createdAt,
+        updated_at: p.updatedAt,
+      }));
+
+      setProducts(mappedProducts);
+    } catch (error: any) {
       console.error('Error loading products:', error);
-      // Use mock products on error
-      setProducts(MOCK_PREVIEW_PRODUCTS);
+      setProducts([]);
     } finally {
       setLoading(false);
     }

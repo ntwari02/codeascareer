@@ -24,6 +24,7 @@ export interface IProduct extends Document {
   seoTitle?: string;
   seoDescription?: string;
   seoKeywords?: string;
+  tags?: string[];
   sku: string;
   stock: number;
   price: number;
@@ -48,6 +49,7 @@ const productSchema = new Schema<IProduct>(
     seoTitle: { type: String, trim: true },
     seoDescription: { type: String, trim: true },
     seoKeywords: { type: String, trim: true },
+    tags: [{ type: String, trim: true }],
     sku: { type: String, required: true, trim: true },
     stock: { type: Number, required: true, default: 0 },
     price: { type: Number, required: true },

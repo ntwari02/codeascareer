@@ -192,7 +192,7 @@ export interface Notification {
 }
 
 export interface CollectionCondition {
-  type: 'tag' | 'price' | 'category' | 'vendor' | 'stock' | 'attribute';
+  type: 'tag' | 'title' | 'price' | 'category' | 'vendor' | 'stock' | 'attribute';
   field?: string;
   operator: 'equals' | 'contains' | 'greater_than' | 'less_than' | 'between' | 'in_stock' | 'out_of_stock';
   value?: string;
