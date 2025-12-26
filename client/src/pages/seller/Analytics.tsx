@@ -35,8 +35,8 @@ interface AnalyticsData {
     rfqToOrderRate: string;
   };
   salesChartData: Array<{ date: string; revenue: number; orders: number }>;
-  marketingInsights: Array<{ source: string; traffic: number; conversions: number }>;
-  conversionFunnel: Array<{ label: string; value: number; percentage: number }>;
+  marketingInsights: Array<{ source: string; traffic: number; conversions: string }>;
+  conversionFunnel: Array<{ label: string; value: number; percentage: string | number; dropOff?: string }>;
 }
 
 const Analytics: React.FC = () => {
@@ -437,20 +437,29 @@ const Analytics: React.FC = () => {
           <div>
             <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 transition-colors duration-300">Traffic Sources</h3>
             <div className="space-y-3">
-              {marketingInsights.map((insight, index) => (
-                <div key={index} className="space-y-1">
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-gray-900 dark:text-white transition-colors duration-300">{insight.source}</span>
-                    <span className="text-gray-600 dark:text-gray-400 transition-colors duration-300">{insight.traffic}%</span>
+              {marketingInsights.map((insight, index) => {
+                // Calculate total traffic for percentage calculation
+                const totalTraffic = marketingInsights.reduce((sum, item) => sum + item.traffic, 0);
+                const trafficPercentage = totalTraffic > 0 ? ((insight.traffic / totalTraffic) * 100).toFixed(0) : '0';
+                
+                return (
+                  <div key={index} className="space-y-1">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-gray-900 dark:text-white transition-colors duration-300">{insight.source}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-gray-600 dark:text-gray-400 transition-colors duration-300">{trafficPercentage}%</span>
+                        <span className="text-xs text-gray-500 dark:text-gray-500">({insight.conversions}% conv.)</span>
+                      </div>
+                    </div>
+                    <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                      <div 
+                        className="bg-gradient-to-r from-red-500 to-orange-500 h-2 rounded-full transition-all"
+                        style={{ width: `${trafficPercentage}%` }}
+                      ></div>
+                    </div>
                   </div>
-                  <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                    <div 
-                      className="bg-gradient-to-r from-red-500 to-orange-500 h-2 rounded-full transition-all"
-                      style={{ width: `${insight.traffic}%` }}
-                    ></div>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
           <div>

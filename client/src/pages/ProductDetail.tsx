@@ -533,37 +533,95 @@ export function ProductDetail() {
   }, [id]);
 
   const loadProduct = async () => {
+    if (!id) return;
+    
     setLoading(true);
     try {
-      // Simulate API delay
-      await new Promise(resolve => setTimeout(resolve, 300));
-      
-      // Find product in mock data
-      const foundProduct = MOCK_PRODUCTS.find(p => p.id === id && p.status === 'active');
-      
-      if (foundProduct) {
-        // Sort images by position
-        if (foundProduct.images) {
-          foundProduct.images.sort((a: any, b: any) => (a.position || 0) - (b.position || 0));
-        }
-        setProduct(foundProduct);
+      // Fetch product from API (this also tracks the view)
+      const response = await fetch(`http://localhost:5000/api/products/${id}`, {
+        method: 'GET',
+        credentials: 'include',
+      });
 
-        // Load related products (same category)
-        if (foundProduct.category_id) {
-          const related = MOCK_PRODUCTS
-            .filter(p => p.category_id === foundProduct.category_id && p.id !== id && p.status === 'active')
-            .slice(0, 8);
-          
-          related.forEach((p: any) => {
-            if (p.images) {
-              p.images.sort((a: any, b: any) => (a.position || 0) - (b.position || 0));
-            }
-          });
-          setRelatedProducts(related);
+      if (!response.ok) {
+        // If product not found in API, fallback to mock data for now
+        const foundProduct = MOCK_PRODUCTS.find(p => p.id === id && p.status === 'active');
+        if (foundProduct) {
+          setProduct(foundProduct);
+          // Track view separately if using mock data
+          try {
+            await fetch(`http://localhost:5000/api/products/${id}/view`, {
+              method: 'POST',
+              credentials: 'include',
+            });
+          } catch (viewError) {
+            // Silently fail view tracking if product doesn't exist in DB
+            console.log('View tracking skipped (product not in database)');
+          }
         }
+        setLoading(false);
+        return;
+      }
+
+      const data = await response.json();
+      const apiProduct = data.product;
+
+      // Transform API product to match frontend Product type
+      const transformedProduct: Product = {
+        id: apiProduct._id || apiProduct.id,
+        title: apiProduct.name,
+        description: apiProduct.description || '',
+        price: apiProduct.price,
+        compare_at_price: apiProduct.discount ? apiProduct.price + apiProduct.discount : undefined,
+        category_id: apiProduct.category || '',
+        status: apiProduct.status === 'in_stock' ? 'active' : 'inactive',
+        seller_id: apiProduct.sellerId?.toString() || '',
+        created_at: apiProduct.createdAt || new Date().toISOString(),
+        updated_at: apiProduct.updatedAt || new Date().toISOString(),
+        stock_quantity: apiProduct.stock || 0,
+        is_shippable: true,
+        low_stock_threshold: 10,
+        views_count: apiProduct.views || 0,
+        sku: apiProduct.sku || '',
+        images: apiProduct.images?.map((img: string, index: number) => ({
+          id: `img-${apiProduct._id}-${index}`,
+          product_id: apiProduct._id || apiProduct.id,
+          url: img,
+          position: index,
+          is_primary: index === 0,
+          created_at: new Date().toISOString(),
+        })) || [],
+        tags: apiProduct.tags || [],
+      };
+
+      // Sort images by position
+      if (transformedProduct.images) {
+        transformedProduct.images.sort((a: any, b: any) => (a.position || 0) - (b.position || 0));
+      }
+
+      setProduct(transformedProduct);
+
+      // Load related products (same category) - for now using mock data
+      // TODO: Implement API endpoint for related products
+      if (transformedProduct.category_id) {
+        const related = MOCK_PRODUCTS
+          .filter(p => p.category_id === transformedProduct.category_id && p.id !== id && p.status === 'active')
+          .slice(0, 8);
+        
+        related.forEach((p: any) => {
+          if (p.images) {
+            p.images.sort((a: any, b: any) => (a.position || 0) - (b.position || 0));
+          }
+        });
+        setRelatedProducts(related);
       }
     } catch (error) {
       console.error('Error loading product:', error);
+      // Fallback to mock data on error
+      const foundProduct = MOCK_PRODUCTS.find(p => p.id === id && p.status === 'active');
+      if (foundProduct) {
+        setProduct(foundProduct);
+      }
     } finally {
       setLoading(false);
     }

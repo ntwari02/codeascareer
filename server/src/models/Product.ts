@@ -35,6 +35,7 @@ export interface IProduct extends Document {
   images?: string[];
   variants?: ProductVariant[];
   tiers?: TieredPrice[];
+  views?: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -78,6 +79,7 @@ const productSchema = new Schema<IProduct>(
         price: { type: Number, required: true },
       },
     ],
+    views: { type: Number, default: 0, index: true },
   },
   { timestamps: true }
 );

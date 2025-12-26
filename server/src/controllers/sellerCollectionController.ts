@@ -1,7 +1,7 @@
 import { Response } from 'express';
 import mongoose from 'mongoose';
 import { AuthenticatedRequest } from '../middleware/auth';
-import { Collection } from '../models/Collection';
+import { Collection, ICollection } from '../models/Collection';
 import { Product } from '../models/Product';
 
 // Helper to generate a slug from a name
@@ -219,12 +219,15 @@ export async function createSellerCollection(req: AuthenticatedRequest, res: Res
       fields.productIds = [];
     }
 
-    const created = await Collection.create(
+    const createdResult = await Collection.create(
       {
         sellerId: sellerObjectId,
         ...fields,
       } as any
     );
+    
+    // Collection.create() can return an array, so get the first element
+    const created = Array.isArray(createdResult) ? createdResult[0] : createdResult;
 
     // Calculate product count
     const productCount = await calculateProductCount(created, sellerObjectId);
@@ -359,7 +362,7 @@ export async function getCollectionProducts(req: AuthenticatedRequest, res: Resp
 
     if (collection.type === 'manual') {
       // Manual: return stored product IDs
-      productIds = ((collection.productIds || []) as unknown) as mongoose.Types.ObjectId[];
+      productIds = (collection.productIds || []) as unknown as mongoose.Types.ObjectId[];
     } else if (collection.type === 'smart') {
       // Automated: resolve products dynamically
       productIds = await resolveAutomatedCollectionProducts(
@@ -426,7 +429,7 @@ export async function addProductToCollection(req: AuthenticatedRequest, res: Res
     }
 
     // Add product if not already in collection
-    const productIds = ((collection.productIds || []) as unknown) as mongoose.Types.ObjectId[];
+    const productIds = (collection.productIds || []) as unknown as mongoose.Types.ObjectId[];
     if (!productIds.some((id) => id.toString() === productObjectId.toString())) {
       productIds.push(productObjectId as any);
       collection.productIds = productIds as any;

@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { X } from 'lucide-react';
 import type { Product } from '../types';
 
@@ -8,6 +9,20 @@ interface ProductDetailModalProps {
 }
 
 export function ProductDetailModal({ product, isOpen, onClose }: ProductDetailModalProps) {
+  // Track view when modal opens
+  useEffect(() => {
+    if (isOpen && product?.id) {
+      // Track product view
+      fetch(`http://localhost:5000/api/products/${product.id}/view`, {
+        method: 'POST',
+        credentials: 'include',
+      }).catch((error) => {
+        // Silently fail if product doesn't exist in database
+        console.log('View tracking skipped:', error);
+      });
+    }
+  }, [isOpen, product?.id]);
+
   if (!isOpen || !product) return null;
 
   return (

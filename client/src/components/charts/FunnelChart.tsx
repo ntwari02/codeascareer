@@ -4,7 +4,8 @@ import { motion } from 'framer-motion';
 interface FunnelStage {
   label: string;
   value: number;
-  percentage: number;
+  percentage: number | string;
+  dropOff?: string;
   color?: string;
 }
 
@@ -60,7 +61,7 @@ export function FunnelChart({ data, title, height = 400 }: FunnelChartProps) {
                           {stage.value.toLocaleString()}
                         </span>
                         <span className="text-white/90 text-xs font-medium whitespace-nowrap ml-2">
-                          {stage.percentage}%
+                          {typeof stage.percentage === 'string' ? stage.percentage : stage.percentage.toFixed(1)}%
                         </span>
                       </div>
                     </motion.div>
@@ -73,7 +74,7 @@ export function FunnelChart({ data, title, height = 400 }: FunnelChartProps) {
                 </div>
                 {!isLast && (
                   <div className="mt-1 text-xs text-gray-500 dark:text-gray-400 ml-32">
-                    {((stage.value - data[index + 1].value) / stage.value * 100).toFixed(1)}% drop-off
+                    {stage.dropOff || ((stage.value - data[index + 1].value) / stage.value * 100).toFixed(1)}% drop-off
                   </div>
                 )}
               </div>
