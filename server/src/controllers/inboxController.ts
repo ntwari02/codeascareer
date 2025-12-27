@@ -215,7 +215,7 @@ export async function createThread(req: AuthenticatedRequest, res: Response) {
     if (!validation.success) {
       return res.status(400).json({
         message: 'Validation error',
-        errors: validation.error.errors,
+        errors: validation.error.issues,
       });
     }
 
@@ -257,7 +257,7 @@ export async function createThread(req: AuthenticatedRequest, res: Response) {
     }
 
     const thread = await MessageThread.create(threadData);
-    await thread.populate('buyerId', 'fullName email avatarUrl');
+    await (thread as any).populate('buyerId', 'fullName email avatarUrl');
 
     return res.status(201).json({ thread });
   } catch (error: any) {
@@ -285,7 +285,7 @@ export async function sendMessage(req: AuthenticatedRequest, res: Response) {
     if (!validation.success) {
       return res.status(400).json({
         message: 'Validation error',
-        errors: validation.error.errors,
+        errors: validation.error.issues,
       });
     }
 
@@ -395,7 +395,7 @@ export async function sendMessage(req: AuthenticatedRequest, res: Response) {
     }
 
     const message = await Message.create(messageData);
-    await message.populate('senderId', 'fullName email avatarUrl');
+    await (message as any).populate('senderId', 'fullName email avatarUrl');
 
     // Update thread - create preview from content or attachment info (WhatsApp style)
     let preview = messageContent && messageContent.trim() ? messageContent : '';
@@ -426,7 +426,8 @@ export async function sendMessage(req: AuthenticatedRequest, res: Response) {
     );
 
     // Populate message fully before emitting
-    const populatedMessage = await Message.findById(message._id)
+    const messageId = (message as any)._id;
+    const populatedMessage = await Message.findById(messageId)
       .populate('senderId', 'fullName email avatarUrl')
       .populate('replyTo', 'content senderId senderType')
       .lean();
@@ -436,8 +437,8 @@ export async function sendMessage(req: AuthenticatedRequest, res: Response) {
 
     // Update message status to 'delivered' after a short delay (simulating delivery)
     setTimeout(async () => {
-      await Message.updateOne({ _id: message._id }, { status: 'delivered' });
-      const updatedMessage = await Message.findById(message._id).lean();
+      await Message.updateOne({ _id: messageId }, { status: 'delivered' });
+      const updatedMessage = await Message.findById(messageId).lean();
       if (updatedMessage) {
         await websocketService.emitNewMessage(threadId, updatedMessage);
       }
@@ -515,7 +516,7 @@ export async function updateThread(req: AuthenticatedRequest, res: Response) {
     if (!validation.success) {
       return res.status(400).json({
         message: 'Validation error',
-        errors: validation.error.errors,
+        errors: validation.error.issues,
       });
     }
 
@@ -812,7 +813,7 @@ export async function editMessage(req: AuthenticatedRequest, res: Response) {
     if (!validation.success) {
       return res.status(400).json({
         message: 'Validation error',
-        errors: validation.error.errors,
+        errors: validation.error.issues,
       });
     }
 
@@ -933,7 +934,7 @@ export async function reactToMessage(req: AuthenticatedRequest, res: Response) {
     if (!validation.success) {
       return res.status(400).json({
         message: 'Validation error',
-        errors: validation.error.errors,
+        errors: validation.error.issues,
       });
     }
 
@@ -1015,7 +1016,7 @@ export async function forwardMessage(req: AuthenticatedRequest, res: Response) {
     if (!validation.success) {
       return res.status(400).json({
         message: 'Validation error',
-        errors: validation.error.errors,
+        errors: validation.error.issues,
       });
     }
 
@@ -1053,8 +1054,8 @@ export async function forwardMessage(req: AuthenticatedRequest, res: Response) {
     }
 
     // Create forwarded message
-    const forwardedMessage = await Message.create({
-      threadId: targetThreadId,
+    const forwardedMessageData: any = {
+      threadId: new mongoose.Types.ObjectId(targetThreadId),
       senderId: sellerId,
       senderType: 'seller',
       content: originalMessage.content,
@@ -1066,9 +1067,10 @@ export async function forwardMessage(req: AuthenticatedRequest, res: Response) {
       },
       status: 'sent',
       readBy: [sellerId],
-    });
+    };
+    const forwardedMessage = await Message.create(forwardedMessageData);
 
-    await forwardedMessage.populate('senderId', 'fullName email avatarUrl');
+    await (forwardedMessage as any).populate('senderId', 'fullName email avatarUrl');
 
     // Update target thread
     const preview = originalMessage.content.length > 200

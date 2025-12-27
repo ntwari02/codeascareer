@@ -33,8 +33,9 @@ class WebSocketService {
     });
 
     // Authentication middleware
-    this.io.use((socket: AuthenticatedSocket, next) => {
-      const token = socket.handshake.auth.token || socket.handshake.headers.authorization?.replace('Bearer ', '');
+    this.io.use((socket: AuthenticatedSocket, next: (err?: Error) => void) => {
+      const handshake = socket.handshake as any;
+      const token = handshake.auth?.token || handshake.headers?.authorization?.replace('Bearer ', '');
 
       if (!token) {
         return next(new Error('Authentication error: No token provided'));
@@ -78,7 +79,7 @@ class WebSocketService {
       });
 
       // Handle errors
-      socket.on('error', (error) => {
+      socket.on('error', (error: Error) => {
         console.error('Socket error:', error);
       });
     });
