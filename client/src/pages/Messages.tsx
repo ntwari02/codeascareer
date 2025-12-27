@@ -24,6 +24,17 @@ const getFileUrl = (path: string): string => {
   return `${serverBase}${path.startsWith('/') ? path : '/' + path}`;
 };
 
+// Helper to resolve avatar URL (handles both full URLs and relative paths)
+const resolveAvatarUrl = (url: string | null | undefined): string | null => {
+  if (!url) return null;
+  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) {
+    return url;
+  }
+  // If it's a relative path, prepend the API host
+  const API_HOST = import.meta.env.VITE_API_URL?.replace('/api', '') || 'http://localhost:5000';
+  return `${API_HOST}${url.startsWith('/') ? url : '/' + url}`;
+};
+
 import {
   MessageSquare,
   Search,
@@ -132,9 +143,11 @@ export function Messages() {
   }, []);
 
   // Load threads
-  const loadThreads = useCallback(async () => {
+  const loadThreads = useCallback(async (showLoading: boolean = true) => {
     try {
-      setLoading(true);
+      if (showLoading) {
+        setLoading(true);
+      }
       const typeFilter = filter === 'order' ? 'order' : filter === 'seller' ? 'message' : undefined;
       const response = await buyerInboxAPI.getThreads({
         search: searchQuery || undefined,
@@ -147,7 +160,9 @@ export function Messages() {
     } catch (error: any) {
       showToast(error.message || 'Failed to load conversations', 'error');
     } finally {
-      setLoading(false);
+      if (showLoading) {
+        setLoading(false);
+      }
     }
   }, [searchQuery, filter, showToast]);
 
@@ -555,13 +570,18 @@ export function Messages() {
           }
           return [...prev, message];
         });
+        // Scroll within messages container, not the whole page
         setTimeout(() => {
-          messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+          if (messagesContainerRef.current) {
+            messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
+          } else {
+            messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          }
         }, 100);
       }
       
-      // Always reload threads to update unread counts
-      loadThreads();
+      // Reload threads to update unread counts (without showing loading state)
+      loadThreads(false);
       
       // Show notification if message is from seller and not in active thread
       if (message.senderType === 'seller' && selectedThread !== threadId) {
@@ -572,7 +592,7 @@ export function Messages() {
         showNotification(
           sellerName,
           message.content.substring(0, 50) + (message.content.length > 50 ? '...' : ''),
-          typeof thread?.sellerId === 'object' ? thread.sellerId.avatarUrl : undefined
+          typeof thread?.sellerId === 'object' ? resolveAvatarUrl(thread.sellerId.avatarUrl) : undefined
         );
         showToast(`New message from ${sellerName}`, 'info');
       }
@@ -587,9 +607,13 @@ export function Messages() {
             return prev;
           }
           const newMessages = [...prev, lastMessage];
-          // Auto-scroll for voice notes and new messages
+          // Auto-scroll for voice notes and new messages (within container, not whole page)
           setTimeout(() => {
-            messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+            if (messagesContainerRef.current) {
+              messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
+            } else {
+              messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
           }, 100);
           return newMessages;
         });
@@ -638,12 +662,17 @@ export function Messages() {
     }
   }, [selectedThread, filteredThreads]);
 
-  // Scroll to bottom
+  // Scroll to bottom (only when thread changes or messages are loaded initially)
   useEffect(() => {
-    if (messagesContainerRef.current) {
-      messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
+    if (messagesContainerRef.current && messages.length > 0) {
+      // Use requestAnimationFrame to ensure DOM is updated
+      requestAnimationFrame(() => {
+        if (messagesContainerRef.current) {
+          messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
+        }
+      });
     }
-  }, [messages, selectedThread]);
+  }, [selectedThread]); // Only scroll when thread changes, not on every message update
 
   // Typing indicator
   const handleTyping = () => {
@@ -817,7 +846,7 @@ export function Messages() {
                             <div className="w-12 h-12 rounded-full bg-gradient-to-br from-orange-400 to-teal-500 overflow-hidden">
                               {seller?.avatarUrl ? (
                                 <img
-                                  src={seller.avatarUrl}
+                                  src={resolveAvatarUrl(seller.avatarUrl) || ''}
                                   alt={seller.fullName || 'Seller'}
                                   className="w-full h-full object-cover"
                                 />
@@ -887,7 +916,7 @@ export function Messages() {
                       <div className="w-10 h-10 rounded-full bg-gradient-to-br from-orange-400 to-teal-500 overflow-hidden">
                         {typeof activeThread.sellerId === 'object' && activeThread.sellerId.avatarUrl ? (
                           <img
-                            src={activeThread.sellerId.avatarUrl}
+                            src={resolveAvatarUrl(activeThread.sellerId.avatarUrl) || ''}
                             alt={activeThread.sellerId.fullName || 'Seller'}
                             className="w-full h-full object-cover"
                           />
@@ -954,7 +983,7 @@ export function Messages() {
                             <div className="w-8 h-8 rounded-full bg-gradient-to-br from-orange-400 to-teal-500 overflow-hidden flex-shrink-0">
                               {sender?.avatarUrl ? (
                                 <img
-                                  src={sender.avatarUrl}
+                                  src={resolveAvatarUrl(sender.avatarUrl) || ''}
                                   alt={sender.fullName || 'Seller'}
                                   className="w-full h-full object-cover"
                                 />

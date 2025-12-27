@@ -23,6 +23,7 @@ import {
 import { inboxAPI, Message, MessageThread, MessageAttachment } from '@/services/inboxApi';
 import { websocketService } from '@/services/websocketService';
 import { useToastStore } from '@/stores/toastStore';
+import { useAuthStore } from '@/stores/authStore';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { AudioWave } from '@/components/AudioWave';
 import { ImageLightbox } from '@/components/ImageLightbox';
@@ -40,8 +41,20 @@ const getFileUrl = (path: string): string => {
   return `${serverBase}${path.startsWith('/') ? path : '/' + path}`;
 };
 
+// Helper to resolve avatar URL (handles both full URLs and relative paths)
+const resolveAvatarUrl = (url: string | null | undefined): string | null => {
+  if (!url) return null;
+  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) {
+    return url;
+  }
+  // If it's a relative path, prepend the API host
+  const API_HOST = import.meta.env.VITE_API_URL?.replace('/api', '') || 'http://localhost:5000';
+  return `${API_HOST}${url.startsWith('/') ? url : '/' + url}`;
+};
+
 const InboxPage: React.FC = () => {
   const { showToast } = useToastStore();
+  const { user } = useAuthStore();
   
   // State
   const [threads, setThreads] = useState<MessageThread[]>([]);
@@ -617,7 +630,7 @@ const InboxPage: React.FC = () => {
         showNotification(
           buyerName,
           message.content.substring(0, 50) + (message.content.length > 50 ? '...' : ''),
-          typeof thread?.buyerId === 'object' ? thread.buyerId.avatarUrl : undefined
+          typeof thread?.buyerId === 'object' ? resolveAvatarUrl(thread.buyerId.avatarUrl) : undefined
         );
         showToast(`New message from ${buyerName}`, 'info');
       }
@@ -676,14 +689,30 @@ const InboxPage: React.FC = () => {
     <div className="space-y-4 sm:space-y-6 h-full flex flex-col">
       {/* Header - Responsive */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
-        <div className="min-w-0 flex-1">
-          <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900 dark:text-white flex items-center gap-2 transition-colors duration-300">
-            <MessageCircle className="w-5 h-5 sm:w-6 sm:h-6 md:w-7 md:h-7 text-red-400 flex-shrink-0" />
-            <span className="truncate">Inbox & RFQ Communications</span>
-          </h1>
-          <p className="text-gray-600 dark:text-gray-400 mt-1 text-xs sm:text-sm transition-colors duration-300">
-            Central place for buyer messages, RFQs, and negotiation threads.
-          </p>
+        <div className="min-w-0 flex-1 flex items-center gap-3 sm:gap-4">
+          {/* User Profile Avatar */}
+          <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-gradient-to-br from-red-400 to-orange-500 overflow-hidden flex-shrink-0 border-2 border-white dark:border-gray-800 shadow-md">
+            {user?.avatar_url ? (
+              <img
+                src={resolveAvatarUrl(user.avatar_url) || ''}
+                alt={user.full_name || user.email || 'User'}
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center text-white font-bold text-lg sm:text-xl">
+                {(user?.full_name || user?.email || 'U')[0].toUpperCase()}
+              </div>
+            )}
+          </div>
+          <div className="min-w-0 flex-1">
+            <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900 dark:text-white flex items-center gap-2 transition-colors duration-300">
+              <MessageCircle className="w-5 h-5 sm:w-6 sm:h-6 md:w-7 md:h-7 text-red-400 flex-shrink-0" />
+              <span className="truncate">Inbox & RFQ Communications</span>
+            </h1>
+            <p className="text-gray-600 dark:text-gray-400 mt-1 text-xs sm:text-sm transition-colors duration-300">
+              Central place for buyer messages, RFQs, and negotiation threads.
+            </p>
+          </div>
         </div>
         <button
           onClick={() => {
@@ -768,36 +797,55 @@ const InboxPage: React.FC = () => {
               ) : (
                 threads.map((thread) => {
                   const isActive = thread._id === activeThread?._id;
+                  const buyer = typeof thread.buyerId === 'object' ? thread.buyerId : null;
                 return (
                   <button
                       key={thread._id}
                       onClick={() => loadThreadMessages(thread._id)}
-                      className={`w-full text-left px-3 sm:px-4 py-2.5 sm:py-3 flex flex-col gap-1 border-b border-gray-100 dark:border-gray-800/70 hover:bg-gray-50 dark:hover:bg-gray-800/60 active:bg-gray-100 dark:active:bg-gray-800/80 transition-colors ${
+                      className={`w-full text-left px-3 sm:px-4 py-2.5 sm:py-3 flex items-start gap-2 sm:gap-3 border-b border-gray-100 dark:border-gray-800/70 hover:bg-gray-50 dark:hover:bg-gray-800/60 active:bg-gray-100 dark:active:bg-gray-800/80 transition-colors ${
                         isActive ? 'bg-red-50 dark:bg-red-900/10 border-l-4 border-l-red-500' : ''
                     }`}
                   >
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-sm font-semibold text-gray-900 dark:text-white line-clamp-1">
-                          {typeof thread.buyerId === 'object' ? thread.buyerId.fullName : 'Buyer'}
-                      </p>
-                        <span className="text-[11px] text-gray-500 dark:text-gray-400">
-                          {formatTime(thread.lastMessageAt)}
-                        </span>
+                    {/* Buyer Avatar */}
+                    <div className="relative flex-shrink-0">
+                      <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 overflow-hidden">
+                        {buyer?.avatarUrl ? (
+                          <img
+                            src={resolveAvatarUrl(buyer.avatarUrl) || ''}
+                            alt={buyer.fullName || 'Buyer'}
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center text-white font-bold text-sm sm:text-base">
+                            {(buyer?.fullName || 'B')[0].toUpperCase()}
+                          </div>
+                        )}
+                      </div>
+                      {thread.type === 'rfq' && (
+                        <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-purple-500 rounded-full border-2 border-white dark:border-gray-800 flex items-center justify-center">
+                          <Mail className="h-3 w-3 text-white" />
+                        </div>
+                      )}
                     </div>
-                    <p className="text-xs text-gray-700 dark:text-gray-300 line-clamp-1">{thread.subject}</p>
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-[11px] text-gray-500 dark:text-gray-400 line-clamp-1">
-                          {thread.lastMessagePreview}
-                      </p>
-                      <div className="flex items-center gap-1">
-                        {thread.type === 'rfq' && (
-                          <span className="px-2 py-0.5 rounded-full bg-purple-100 dark:bg-purple-900/30 text-[10px] text-purple-700 dark:text-purple-300">
-                            RFQ
+                    <div className="flex-1 min-w-0 flex flex-col gap-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-sm font-semibold text-gray-900 dark:text-white line-clamp-1">
+                            {buyer?.fullName || 'Buyer'}
+                        </p>
+                          <span className="text-[11px] text-gray-500 dark:text-gray-400 flex-shrink-0">
+                            {formatTime(thread.lastMessageAt)}
                           </span>
-                        )}
+                      </div>
+                      <p className="text-xs text-gray-700 dark:text-gray-300 line-clamp-1">{thread.subject}</p>
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-[11px] text-gray-500 dark:text-gray-400 line-clamp-1">
+                            {thread.lastMessagePreview}
+                        </p>
+                        <div className="flex items-center gap-1">
                           {thread.sellerUnreadCount > 0 && (
-                          <span className="w-2 h-2 rounded-full bg-red-500 dark:bg-red-400 flex-shrink-0" />
-                        )}
+                            <span className="w-2 h-2 rounded-full bg-red-500 dark:bg-red-400 flex-shrink-0" />
+                          )}
+                        </div>
                       </div>
                     </div>
                   </button>
@@ -829,7 +877,7 @@ const InboxPage: React.FC = () => {
                       <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-red-500/10 dark:bg-red-500/20 flex items-center justify-center">
                         {typeof activeThread.buyerId === 'object' && activeThread.buyerId.avatarUrl ? (
                           <img
-                            src={activeThread.buyerId.avatarUrl}
+                            src={resolveAvatarUrl(activeThread.buyerId.avatarUrl) || ''}
                             alt={activeThread.buyerId.fullName}
                             className="w-8 h-8 sm:w-9 sm:h-9 rounded-full"
                           />
@@ -882,7 +930,7 @@ const InboxPage: React.FC = () => {
                           <div className="w-7 h-7 rounded-full bg-gray-300 dark:bg-gray-700 flex items-center justify-center text-[11px] text-gray-800 dark:text-gray-100 flex-shrink-0">
                             {typeof message.senderId === 'object' && message.senderId.avatarUrl ? (
                               <img
-                                src={message.senderId.avatarUrl}
+                                src={resolveAvatarUrl(message.senderId.avatarUrl) || ''}
                                 alt={message.senderId.fullName}
                                 className="w-7 h-7 rounded-full"
                               />

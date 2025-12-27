@@ -47,6 +47,17 @@ const DISPUTE_API_BASE = 'http://localhost:5000/api/seller/disputes';
 const HEALTH_API_BASE = 'http://localhost:5000/api/seller/account-health';
 const NOTIFICATION_API_BASE = 'http://localhost:5000/api/seller/notifications';
 
+// Helper to resolve avatar URL (handles both full URLs and relative paths)
+const resolveAvatarUrl = (url: string | null | undefined): string | null => {
+  if (!url) return null;
+  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) {
+    return url;
+  }
+  // If it's a relative path, prepend the API host
+  const API_HOST = import.meta.env.VITE_API_URL?.replace('/api', '') || 'http://localhost:5000';
+  return `${API_HOST}${url.startsWith('/') ? url : '/' + url}`;
+};
+
 interface TicketMessage {
   _id?: string;
   senderId: string;
@@ -832,24 +843,40 @@ const SupportCenter: React.FC = () => {
       {/* Enhanced Header with Seller Info */}
       <div className="bg-gradient-to-r from-red-50/50 to-orange-50/50 dark:from-red-900/10 dark:to-orange-900/10 rounded-xl p-6 border border-red-100 dark:border-red-500/20">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div className="flex-1">
-            <h1 className="text-3xl font-bold text-gray-900 dark:text-white flex items-center gap-2 transition-colors duration-300">
-              <LifeBuoy className="w-8 h-8 text-red-400 dark:text-red-400" />
-              Seller Support Center
-            </h1>
-            <p className="text-gray-600 dark:text-gray-400 mt-1 text-sm transition-colors duration-300">
-              Get help managing your store, orders, payments, and account.
-            </p>
-            {user && (
-              <div className="mt-3 flex items-center gap-3 flex-wrap">
-                <div className="flex items-center gap-2">
-                  <User className="w-4 h-4 text-red-400" />
-                  <span className="text-sm text-gray-700 dark:text-gray-300">{user.full_name || user.email}</span>
+          <div className="flex-1 flex items-center gap-3 sm:gap-4">
+            {/* User Profile Avatar */}
+            <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-gradient-to-br from-red-400 to-orange-500 overflow-hidden flex-shrink-0 border-2 border-white dark:border-gray-800 shadow-md">
+              {user?.avatar_url ? (
+                <img
+                  src={resolveAvatarUrl(user.avatar_url) || ''}
+                  alt={user.full_name || user.email || 'User'}
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center text-white font-bold text-xl sm:text-2xl">
+                  {(user?.full_name || user?.email || 'U')[0].toUpperCase()}
                 </div>
-                <span className="text-xs text-gray-500 dark:text-gray-400">ID: {user.id?.slice(0, 8)}...</span>
-                {getAccountStatusBadge()}
-              </div>
-            )}
+              )}
+            </div>
+            <div className="flex-1">
+              <h1 className="text-3xl font-bold text-gray-900 dark:text-white flex items-center gap-2 transition-colors duration-300">
+                <LifeBuoy className="w-8 h-8 text-red-400 dark:text-red-400" />
+                Seller Support Center
+              </h1>
+              <p className="text-gray-600 dark:text-gray-400 mt-1 text-sm transition-colors duration-300">
+                Get help managing your store, orders, payments, and account.
+              </p>
+              {user && (
+                <div className="mt-3 flex items-center gap-3 flex-wrap">
+                  <div className="flex items-center gap-2">
+                    <User className="w-4 h-4 text-red-400" />
+                    <span className="text-sm text-gray-700 dark:text-gray-300">{user.full_name || user.email}</span>
+                  </div>
+                  <span className="text-xs text-gray-500 dark:text-gray-400">ID: {user.id?.slice(0, 8)}...</span>
+                  {getAccountStatusBadge()}
+                </div>
+              )}
+            </div>
           </div>
           <Button
             onClick={() => {
