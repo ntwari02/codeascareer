@@ -20,6 +20,7 @@ import systemNotificationRoutes from './src/routes/systemNotificationRoutes';
 import subscriptionRoutes from './src/routes/subscriptionRoutes';
 import analyticsRoutes from './src/routes/analyticsRoutes';
 import productRoutes from './src/routes/productRoutes';
+import buyerOrderRoutes from './src/routes/buyerOrderRoutes';
 
 dotenv.config();
 
@@ -81,6 +82,8 @@ app.use('/api/seller/subscription', subscriptionRoutes);
 app.use('/api/seller/analytics', analyticsRoutes);
 // Product routes (public - for buyers to view products)
 app.use('/api/products', productRoutes);
+// Buyer order routes
+app.use('/api/orders', buyerOrderRoutes);
 
 // 404 handler
 app.use((req: Request, res: Response) => {

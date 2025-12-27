@@ -5,6 +5,7 @@ import { Footer } from '../components/buyer/Footer';
 import { AnnouncementBar } from '../components/buyer/AnnouncementBar';
 import { Button } from '../components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '../components/ui/dialog';
+import ConfirmDialog from '../components/ui/ConfirmDialog';
 import { useAuthStore } from '../stores/authStore';
 import { useCartStore } from '../stores/cartStore';
 import { useWishlistStore } from '../stores/wishlistStore';
@@ -81,6 +82,8 @@ export function Profile() {
 
   const [showEditModal, setShowEditModal] = useState(false);
   const [activeTab, setActiveTab] = useState<'overview' | 'security' | 'addresses' | 'payments' | 'notifications' | 'privacy'>('overview');
+  const [showDeleteAddressConfirm, setShowDeleteAddressConfirm] = useState(false);
+  const [addressToDelete, setAddressToDelete] = useState<string | null>(null);
   const [showLanguageMenu, setShowLanguageMenu] = useState(false);
   const [showCurrencyMenu, setShowCurrencyMenu] = useState(false);
   
@@ -137,19 +140,7 @@ export function Profile() {
   const [twoFactorEnabled, setTwoFactorEnabled] = useState(false);
 
   // Addresses state
-  const [addresses, setAddresses] = useState<Address[]>([
-    {
-      id: '1',
-      label: 'Home',
-      fullName: user?.full_name || 'John Doe',
-      phone: user?.phone || '+250 788 123 456',
-      address: 'KG 123 St',
-      city: 'Kigali',
-      country: 'Rwanda',
-      postalCode: '00000',
-      isDefault: true,
-    }
-  ]);
+  const [addresses, setAddresses] = useState<Address[]>([]);
 
   // Payment methods state
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([
@@ -192,7 +183,7 @@ export function Profile() {
     showActivity: true,
   });
 
-  const [avatarPreview, setAvatarPreview] = useState<string | null>(user?.avatar_url || null);
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const [avatarFile, setAvatarFile] = useState<File | null>(null); // Store the actual file for upload
   const [isSaving, setIsSaving] = useState(false);
   const [isChangingPassword, setIsChangingPassword] = useState(false);
@@ -246,16 +237,16 @@ export function Profile() {
 
         // Update form data
         setFormData({
-          full_name: profileData.fullName || user.full_name || '',
-          email: profileData.email || user.email || '',
-          phone: profileData.phone || '',
+          full_name: profileData.fullName || (user?.full_name || ''),
+          email: profileData.email || (user?.email || ''),
+          phone: profileData.phone || (user?.phone || ''),
           bio: profileData.bio || '',
           location: profileData.location || '',
           website: profileData.website || '',
           dateOfBirth: profileData.dateOfBirth ? new Date(profileData.dateOfBirth).toISOString().split('T')[0] : '',
         });
 
-        const avatarUrl = profileData.avatarUrl || user.avatar_url || null;
+        const avatarUrl = profileData.avatarUrl || (user?.avatar_url || null);
         setAvatarPreview(avatarUrl ? resolveAvatarUrl(avatarUrl) : null);
 
         // Load addresses
@@ -263,8 +254,8 @@ export function Profile() {
           setAddresses(profileData.addresses.map((addr: any, idx: number) => ({
             id: idx.toString(),
             label: addr.label || 'Address',
-            fullName: user.full_name || '',
-            phone: user.phone || '',
+            fullName: user?.full_name || '',
+            phone: user?.phone || '',
             address: addr.street || '',
             city: addr.city || '',
             country: addr.country || '',
@@ -530,11 +521,20 @@ export function Profile() {
     }
   };
 
-  const handleDeleteAddress = async (id: string) => {
-    const index = parseInt(id, 10);
-    if (isNaN(index)) return;
+  const handleDeleteAddress = (id: string) => {
+    setAddressToDelete(id);
+    setShowDeleteAddressConfirm(true);
+  };
 
-    if (!confirm('Are you sure you want to delete this address?')) return;
+  const confirmDeleteAddress = async () => {
+    if (!addressToDelete) return;
+
+    const index = parseInt(addressToDelete, 10);
+    if (isNaN(index)) {
+      setShowDeleteAddressConfirm(false);
+      setAddressToDelete(null);
+      return;
+    }
 
     try {
       const response = await profileAPI.deleteAddress(index);
@@ -553,6 +553,9 @@ export function Profile() {
     } catch (error: any) {
       console.error('Failed to delete address:', error);
       showToast(error.message || 'Failed to delete address', 'error');
+    } finally {
+      setShowDeleteAddressConfirm(false);
+      setAddressToDelete(null);
     }
   };
 
@@ -1734,6 +1737,21 @@ export function Profile() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Delete Address Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={showDeleteAddressConfirm}
+        onClose={() => {
+          setShowDeleteAddressConfirm(false);
+          setAddressToDelete(null);
+        }}
+        onConfirm={confirmDeleteAddress}
+        title="Delete Address"
+        message="Are you sure you want to delete this address? This action cannot be undone."
+        confirmText="Delete"
+        cancelText="Cancel"
+        variant="danger"
+      />
 
       <Footer />
     </div>

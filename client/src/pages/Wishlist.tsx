@@ -66,7 +66,7 @@ export function Wishlist() {
           useWishlistStore.setState({ items: parsed, loading: false });
         } catch (e) {
           console.error('Failed to load wishlist from localStorage', e);
-          // Try to fetch from Supabase as fallback (but don't fail if it errors)
+          // Try to fetch from API as fallback (but don't fail if it errors)
           fetchWishlist(user.id).catch(() => {
             useWishlistStore.setState({ loading: false });
           });

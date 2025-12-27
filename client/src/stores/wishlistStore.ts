@@ -1,5 +1,4 @@
 import { create } from 'zustand';
-import { supabase } from '../lib/supabase';
 import { useToastStore } from './toastStore';
 import type { WishlistItem, Product } from '../types';
 
@@ -19,7 +18,7 @@ export const useWishlistStore = create<WishlistState>((set, get) => ({
   fetchWishlist: async (userId: string) => {
     set({ loading: true });
     
-    // Frontend-only: Load from localStorage instead of Supabase
+    // Load from localStorage
     try {
       const stored = localStorage.getItem(`wishlist_${userId}`);
       if (stored) {
@@ -31,28 +30,8 @@ export const useWishlistStore = create<WishlistState>((set, get) => ({
       console.error('Failed to load wishlist from localStorage', e);
     }
     
-    // Fallback: Try Supabase if available, but don't fail if it errors
-    try {
-      const { data, error } = await supabase
-        .from('wishlist_items')
-        .select(`
-          *,
-          product:products(*)
-        `)
-        .eq('user_id', userId);
-
-      if (!error && data) {
-        set({ items: data as WishlistItem[], loading: false });
-        // Save to localStorage for offline access
-        localStorage.setItem(`wishlist_${userId}`, JSON.stringify(data));
-      } else {
-        set({ loading: false });
-      }
-    } catch (error) {
-      // Supabase not available - just use localStorage
-      console.log('Supabase not available, using localStorage only');
-      set({ loading: false });
-    }
+    // If no localStorage data, set empty array
+    set({ items: [], loading: false });
   },
 
   addToWishlist: async (userId, product) => {
@@ -88,17 +67,7 @@ export const useWishlistStore = create<WishlistState>((set, get) => ({
     const toastStore = useToastStore.getState();
     toastStore.showToast(`${product.title} added to wishlist!`, 'success');
 
-    // Try to save to Supabase if available (non-blocking)
-    if (userId) {
-      try {
-        await supabase
-          .from('wishlist_items')
-          .insert({ user_id: userId, product_id: product.id });
-      } catch (error) {
-        // Supabase not available - that's okay, we have localStorage
-        console.log('Supabase not available, saved to localStorage only');
-      }
-    }
+    // Wishlist is saved to localStorage only
   },
 
   removeFromWishlist: async (itemId: string) => {
@@ -121,18 +90,7 @@ export const useWishlistStore = create<WishlistState>((set, get) => ({
     const toastStore = useToastStore.getState();
     toastStore.showToast(`${productTitle} removed from wishlist`, 'success');
 
-    // Try to remove from Supabase if available (non-blocking)
-    if (userId && userId !== 'guest' && !itemId.startsWith('guest-') && !itemId.startsWith('user-')) {
-      try {
-        await supabase
-          .from('wishlist_items')
-          .delete()
-          .eq('id', itemId);
-      } catch (error) {
-        // Supabase not available - that's okay, we have localStorage
-        console.log('Supabase not available, removed from localStorage only');
-      }
-    }
+    // Wishlist is managed via localStorage only
   },
 
   isInWishlist: (productId: string) => {
