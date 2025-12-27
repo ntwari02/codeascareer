@@ -1,0 +1,788 @@
+import { Response } from 'express';
+import { z } from 'zod';
+import { AuthenticatedRequest } from '../middleware/auth';
+import { MessageThread, Message, IMessageThread, IMessage } from '../models/MessageThread';
+import mongoose from 'mongoose';
+import { websocketService } from '../services/websocketService';
+
+// Helper to get buyer ID from request
+const getBuyerId = (req: AuthenticatedRequest): mongoose.Types.ObjectId | null => {
+  if (!req.user?.id) return null;
+  try {
+    return new mongoose.Types.ObjectId(req.user.id);
+  } catch {
+    return null;
+  }
+};
+
+// Validation schemas
+const createThreadSchema = z.object({
+  sellerId: z.string().min(1, 'Seller ID is required'),
+  subject: z.string().min(3, 'Subject must be at least 3 characters').max(200, 'Subject must be less than 200 characters'),
+  type: z.enum(['rfq', 'message', 'order']).optional(),
+  relatedOrderId: z.string().optional(),
+  relatedRfqId: z.string().optional(),
+});
+
+// WhatsApp-like: Allow empty content if attachments are present
+const sendMessageSchema = z.object({
+  content: z.string().max(5000, 'Message must be less than 5000 characters').optional().default(''),
+  attachments: z.array(z.any()).optional(),
+  replyTo: z.string().optional(),
+  forwardedFrom: z.object({
+    threadId: z.string(),
+    messageId: z.string(),
+  }).optional(),
+}).refine(
+  (data) => {
+    // Either content must have text OR attachments must be present (like WhatsApp)
+    const hasContent = data.content && String(data.content).trim().length > 0;
+    const hasAttachments = data.attachments && Array.isArray(data.attachments) && data.attachments.length > 0;
+    return hasContent || hasAttachments;
+  },
+  {
+    message: 'Message must have either content or attachments',
+    path: ['content'], // Point to content field for better error message
+  }
+);
+
+const editMessageSchema = z.object({
+  content: z.string().min(1, 'Message cannot be empty').max(5000, 'Message must be less than 5000 characters'),
+});
+
+const reactToMessageSchema = z.object({
+  emoji: z.string().min(1, 'Emoji is required').max(10, 'Emoji must be less than 10 characters'),
+});
+
+const forwardMessageSchema = z.object({
+  targetThreadId: z.string().min(1, 'Target thread ID is required'),
+});
+
+const updateThreadSchema = z.object({
+  status: z.enum(['active', 'archived', 'resolved', 'closed']).optional(),
+  subject: z.string().min(3).max(200).optional(),
+});
+
+/**
+ * Get all threads for the buyer
+ */
+export async function getThreads(req: AuthenticatedRequest, res: Response) {
+  try {
+    const buyerId = getBuyerId(req);
+    if (!buyerId) {
+      return res.status(401).json({ message: 'Authentication required' });
+    }
+
+    const {
+      status,
+      type,
+      search,
+      page = '1',
+      limit = '20',
+      sortBy = 'lastMessageAt',
+      sortOrder = 'desc',
+    } = req.query;
+
+    const query: any = { buyerId };
+
+    // Filters
+    if (status && typeof status === 'string') {
+      query.status = status;
+    }
+    if (type && typeof type === 'string') {
+      query.type = type;
+    }
+    if (search && typeof search === 'string') {
+      query.$or = [
+        { subject: { $regex: search, $options: 'i' } },
+        { lastMessagePreview: { $regex: search, $options: 'i' } },
+      ];
+    }
+
+    const pageNum = parseInt(page as string, 10);
+    const limitNum = parseInt(limit as string, 10);
+    const skip = (pageNum - 1) * limitNum;
+
+    const sort: any = {};
+    sort[sortBy as string] = sortOrder === 'asc' ? 1 : -1;
+
+    const [threads, total] = await Promise.all([
+      MessageThread.find(query)
+        .populate('sellerId', 'fullName email avatarUrl storeName')
+        .sort(sort)
+        .skip(skip)
+        .limit(limitNum)
+        .lean(),
+      MessageThread.countDocuments(query),
+    ]);
+
+    return res.json({
+      threads,
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total,
+        pages: Math.ceil(total / limitNum),
+      },
+    });
+  } catch (error: any) {
+    console.error('Get threads error:', error);
+    return res.status(500).json({ message: 'Failed to fetch threads', error: error.message });
+  }
+}
+
+/**
+ * Get a single thread with messages
+ */
+export async function getThread(req: AuthenticatedRequest, res: Response) {
+  try {
+    const buyerId = getBuyerId(req);
+    if (!buyerId) {
+      return res.status(401).json({ message: 'Authentication required' });
+    }
+
+    const { threadId } = req.params;
+    const { page = '1', limit = '50' } = req.query;
+
+    if (!mongoose.Types.ObjectId.isValid(threadId)) {
+      return res.status(400).json({ message: 'Invalid thread ID' });
+    }
+
+    const thread = await MessageThread.findOne({
+      _id: threadId,
+      buyerId,
+    })
+      .populate('sellerId', 'fullName email avatarUrl storeName')
+      .lean();
+
+    if (!thread) {
+      return res.status(404).json({ message: 'Thread not found' });
+    }
+
+    const pageNum = parseInt(page as string, 10);
+    const limitNum = parseInt(limit as string, 10);
+    const skip = (pageNum - 1) * limitNum;
+
+    const [messages, total] = await Promise.all([
+      Message.find({ threadId, isDeleted: false })
+        .populate('senderId', 'fullName email avatarUrl')
+        .populate('replyTo', 'content senderId senderType')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limitNum)
+        .lean(),
+      Message.countDocuments({ threadId, isDeleted: false }),
+    ]);
+
+    // Reverse to show oldest first
+    messages.reverse();
+
+    return res.json({
+      thread,
+      messages,
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total,
+        pages: Math.ceil(total / limitNum),
+      },
+    });
+  } catch (error: any) {
+    console.error('Get thread error:', error);
+    return res.status(500).json({ message: 'Failed to fetch thread', error: error.message });
+  }
+}
+
+/**
+ * Create a new thread (buyer initiates)
+ */
+export async function createThread(req: AuthenticatedRequest, res: Response) {
+  try {
+    const buyerId = getBuyerId(req);
+    if (!buyerId) {
+      return res.status(401).json({ message: 'Authentication required' });
+    }
+
+    const validated = createThreadSchema.parse(req.body);
+    const { sellerId, subject, type = 'message', relatedOrderId, relatedRfqId } = validated;
+
+    if (!mongoose.Types.ObjectId.isValid(sellerId)) {
+      return res.status(400).json({ message: 'Invalid seller ID' });
+    }
+
+    // Check if thread already exists
+    const existingThread = await MessageThread.findOne({
+      buyerId,
+      sellerId,
+      subject,
+      status: { $in: ['active', 'archived'] },
+    })
+      .populate('sellerId', 'fullName email avatarUrl storeName')
+      .lean();
+
+    if (existingThread) {
+      return res.json({ thread: existingThread });
+    }
+
+    const thread = await MessageThread.create({
+      sellerId,
+      buyerId,
+      subject,
+      type,
+      relatedOrderId: relatedOrderId ? new mongoose.Types.ObjectId(relatedOrderId) : undefined,
+      relatedRfqId: relatedRfqId ? new mongoose.Types.ObjectId(relatedRfqId) : undefined,
+      status: 'active',
+      lastMessageAt: new Date(),
+      lastMessagePreview: '',
+      sellerUnreadCount: 1,
+      buyerUnreadCount: 0,
+    });
+
+    const populatedThread = await MessageThread.findById(thread._id)
+      .populate('sellerId', 'fullName email avatarUrl storeName')
+      .lean();
+
+    // Emit WebSocket event
+    await websocketService.emitThreadUpdate(thread._id.toString(), populatedThread);
+
+    return res.status(201).json({ thread: populatedThread });
+  } catch (error: any) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ message: 'Validation error', errors: error.errors });
+    }
+    console.error('Create thread error:', error);
+    return res.status(500).json({ message: 'Failed to create thread', error: error.message });
+  }
+}
+
+/**
+ * Send a message in a thread
+ */
+export async function sendMessage(req: AuthenticatedRequest, res: Response) {
+  try {
+    const buyerId = getBuyerId(req);
+    if (!buyerId) {
+      return res.status(401).json({ message: 'Authentication required' });
+    }
+
+    const { threadId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(threadId)) {
+      return res.status(400).json({ message: 'Invalid thread ID' });
+    }
+
+    const thread = await MessageThread.findOne({
+      _id: threadId,
+      buyerId,
+    });
+
+    if (!thread) {
+      return res.status(404).json({ message: 'Thread not found' });
+    }
+
+    const validation = sendMessageSchema.safeParse(req.body);
+    if (!validation.success) {
+      return res.status(400).json({
+        message: 'Validation error',
+        errors: validation.error.errors,
+      });
+    }
+
+    const { content, attachments = [], replyTo, forwardedFrom } = validation.data;
+
+    // Process attachments - determine type
+    const processedAttachments = attachments.map((att: any) => {
+      const isAudio = att.mimetype?.startsWith('audio/') || att.type === 'voice';
+      const isImage = att.mimetype?.startsWith('image/') || att.type === 'image';
+      
+      return {
+        filename: att.filename || att.path?.split('/').pop() || '',
+        originalName: att.originalName || att.filename || '',
+        path: att.path || `/uploads/inbox/${att.filename}`,
+        size: att.size || 0,
+        mimetype: att.mimetype || 'application/octet-stream',
+        type: isAudio ? 'voice' : isImage ? 'image' : 'file',
+        duration: att.duration,
+        uploadedAt: new Date(),
+      };
+    });
+
+    // Create message - WhatsApp style: allow empty content if attachments exist
+    const messageContent = content ? String(content).trim() : '';
+    const messageData: any = {
+      threadId: thread._id,
+      senderId: buyerId,
+      senderType: 'buyer',
+      content: messageContent, // Can be empty string if attachments exist
+      attachments: processedAttachments,
+      readBy: [buyerId],
+      status: 'sent',
+    };
+
+    if (replyTo && mongoose.Types.ObjectId.isValid(replyTo)) {
+      messageData.replyTo = new mongoose.Types.ObjectId(replyTo);
+    }
+
+    if (forwardedFrom) {
+      messageData.forwardedFrom = {
+        threadId: new mongoose.Types.ObjectId(forwardedFrom.threadId),
+        messageId: new mongoose.Types.ObjectId(forwardedFrom.messageId),
+        originalSender: buyerId,
+      };
+    }
+
+    const message = await Message.create(messageData);
+
+    // Update thread - create preview from content or attachment info (WhatsApp style)
+    let preview = messageContent && messageContent.trim() ? messageContent : '';
+    if (!preview && processedAttachments.length > 0) {
+      const firstAtt = processedAttachments[0];
+      if (firstAtt.type === 'voice') {
+        preview = '🎤 Voice note';
+      } else if (firstAtt.type === 'image') {
+        preview = '📷 Image';
+      } else {
+        preview = `📎 ${firstAtt.originalName || 'File'}`;
+      }
+      if (processedAttachments.length > 1) {
+        preview += ` (+${processedAttachments.length - 1} more)`;
+      }
+    }
+    preview = preview.length > 200 ? preview.substring(0, 200) + '...' : preview;
+    
+    thread.lastMessageAt = new Date();
+    thread.lastMessagePreview = preview;
+    thread.sellerUnreadCount = (thread.sellerUnreadCount || 0) + 1;
+    thread.buyerUnreadCount = 0;
+    await thread.save();
+
+    // Populate message
+    const populatedMessage = await Message.findById(message._id)
+      .populate('senderId', 'fullName email avatarUrl')
+      .populate('replyTo', 'content senderId senderType')
+      .lean();
+
+    // Emit WebSocket event - both seller and buyer get it instantly
+    await websocketService.emitNewMessage(threadId, populatedMessage);
+    await websocketService.emitThreadUpdate(threadId, thread.toObject());
+
+    // Update message status to 'delivered' after a short delay (simulating delivery)
+    setTimeout(async () => {
+      await Message.updateOne({ _id: message._id }, { status: 'delivered' });
+      const updatedMessage = await Message.findById(message._id)
+        .populate('senderId', 'fullName email avatarUrl')
+        .populate('replyTo', 'content senderId senderType')
+        .lean();
+      if (updatedMessage) {
+        await websocketService.emitNewMessage(threadId, updatedMessage);
+      }
+    }, 500);
+
+    return res.status(201).json({ message: populatedMessage });
+  } catch (error: any) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ message: 'Validation error', errors: error.errors });
+    }
+    console.error('Send message error:', error);
+    return res.status(500).json({ message: 'Failed to send message', error: error.message });
+  }
+}
+
+/**
+ * Mark thread as read
+ */
+export async function markThreadAsRead(req: AuthenticatedRequest, res: Response) {
+  try {
+    const buyerId = getBuyerId(req);
+    if (!buyerId) {
+      return res.status(401).json({ message: 'Authentication required' });
+    }
+
+    const { threadId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(threadId)) {
+      return res.status(400).json({ message: 'Invalid thread ID' });
+    }
+
+    const thread = await MessageThread.findOne({
+      _id: threadId,
+      buyerId,
+    });
+
+    if (!thread) {
+      return res.status(404).json({ message: 'Thread not found' });
+    }
+
+    // Mark all messages as read
+    await Message.updateMany(
+      { threadId, senderType: 'seller', readBy: { $ne: buyerId } },
+      { $addToSet: { readBy: buyerId }, $set: { status: 'read', readAt: new Date() } }
+    );
+
+    // Update thread unread count
+    thread.buyerUnreadCount = 0;
+    await thread.save();
+
+    await websocketService.emitThreadUpdate(threadId, thread.toObject());
+
+    return res.json({ message: 'Thread marked as read' });
+  } catch (error: any) {
+    console.error('Mark thread as read error:', error);
+    return res.status(500).json({ message: 'Failed to mark thread as read', error: error.message });
+  }
+}
+
+/**
+ * Update thread
+ */
+export async function updateThread(req: AuthenticatedRequest, res: Response) {
+  try {
+    const buyerId = getBuyerId(req);
+    if (!buyerId) {
+      return res.status(401).json({ message: 'Authentication required' });
+    }
+
+    const { threadId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(threadId)) {
+      return res.status(400).json({ message: 'Invalid thread ID' });
+    }
+
+    const validated = updateThreadSchema.parse(req.body);
+    const thread = await MessageThread.findOneAndUpdate(
+      { _id: threadId, buyerId },
+      validated,
+      { new: true }
+    )
+      .populate('sellerId', 'fullName email avatarUrl storeName')
+      .lean();
+
+    if (!thread) {
+      return res.status(404).json({ message: 'Thread not found' });
+    }
+
+    await websocketService.emitThreadUpdate(threadId, thread);
+
+    return res.json({ thread });
+  } catch (error: any) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ message: 'Validation error', errors: error.errors });
+    }
+    console.error('Update thread error:', error);
+    return res.status(500).json({ message: 'Failed to update thread', error: error.message });
+  }
+}
+
+/**
+ * Delete thread (soft delete - archive)
+ */
+export async function deleteThread(req: AuthenticatedRequest, res: Response) {
+  try {
+    const buyerId = getBuyerId(req);
+    if (!buyerId) {
+      return res.status(401).json({ message: 'Authentication required' });
+    }
+
+    const { threadId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(threadId)) {
+      return res.status(400).json({ message: 'Invalid thread ID' });
+    }
+
+    const thread = await MessageThread.findOneAndUpdate(
+      { _id: threadId, buyerId },
+      { status: 'archived' },
+      { new: true }
+    );
+
+    if (!thread) {
+      return res.status(404).json({ message: 'Thread not found' });
+    }
+
+    await websocketService.emitThreadUpdate(threadId, thread.toObject());
+
+    return res.json({ message: 'Thread archived' });
+  } catch (error: any) {
+    console.error('Delete thread error:', error);
+    return res.status(500).json({ message: 'Failed to delete thread', error: error.message });
+  }
+}
+
+/**
+ * Edit a message
+ */
+export async function editMessage(req: AuthenticatedRequest, res: Response) {
+  try {
+    const buyerId = getBuyerId(req);
+    if (!buyerId) {
+      return res.status(401).json({ message: 'Authentication required' });
+    }
+
+    const { threadId, messageId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(threadId) || !mongoose.Types.ObjectId.isValid(messageId)) {
+      return res.status(400).json({ message: 'Invalid thread or message ID' });
+    }
+
+    const thread = await MessageThread.findOne({ _id: threadId, buyerId });
+    if (!thread) {
+      return res.status(404).json({ message: 'Thread not found' });
+    }
+
+    const validated = editMessageSchema.parse(req.body);
+    const message = await Message.findOneAndUpdate(
+      { _id: messageId, threadId, senderId: buyerId, senderType: 'buyer' },
+      {
+        content: validated.content,
+        isEdited: true,
+        editedAt: new Date(),
+      },
+      { new: true }
+    )
+      .populate('senderId', 'fullName email avatarUrl')
+      .populate('replyTo', 'content senderId senderType')
+      .lean();
+
+    if (!message) {
+      return res.status(404).json({ message: 'Message not found' });
+    }
+
+    await websocketService.getIO()?.to(`thread:${threadId}`).emit('message_updated', {
+      threadId,
+      messageId,
+      message,
+    });
+
+    return res.json({ message });
+  } catch (error: any) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ message: 'Validation error', errors: error.errors });
+    }
+    console.error('Edit message error:', error);
+    return res.status(500).json({ message: 'Failed to edit message', error: error.message });
+  }
+}
+
+/**
+ * Delete a message (soft delete)
+ */
+export async function deleteMessage(req: AuthenticatedRequest, res: Response) {
+  try {
+    const buyerId = getBuyerId(req);
+    if (!buyerId) {
+      return res.status(401).json({ message: 'Authentication required' });
+    }
+
+    const { threadId, messageId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(threadId) || !mongoose.Types.ObjectId.isValid(messageId)) {
+      return res.status(400).json({ message: 'Invalid thread or message ID' });
+    }
+
+    const thread = await MessageThread.findOne({ _id: threadId, buyerId });
+    if (!thread) {
+      return res.status(404).json({ message: 'Thread not found' });
+    }
+
+    const message = await Message.findOneAndUpdate(
+      { _id: messageId, threadId, senderId: buyerId, senderType: 'buyer' },
+      {
+        isDeleted: true,
+        deletedAt: new Date(),
+      },
+      { new: true }
+    ).lean();
+
+    if (!message) {
+      return res.status(404).json({ message: 'Message not found' });
+    }
+
+    await websocketService.getIO()?.to(`thread:${threadId}`).emit('message_deleted', {
+      threadId,
+      messageId,
+    });
+
+    return res.json({ message: 'Message deleted' });
+  } catch (error: any) {
+    console.error('Delete message error:', error);
+    return res.status(500).json({ message: 'Failed to delete message', error: error.message });
+  }
+}
+
+/**
+ * React to a message
+ */
+export async function reactToMessage(req: AuthenticatedRequest, res: Response) {
+  try {
+    const buyerId = getBuyerId(req);
+    if (!buyerId) {
+      return res.status(401).json({ message: 'Authentication required' });
+    }
+
+    const { threadId, messageId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(threadId) || !mongoose.Types.ObjectId.isValid(messageId)) {
+      return res.status(400).json({ message: 'Invalid thread or message ID' });
+    }
+
+    const thread = await MessageThread.findOne({ _id: threadId, buyerId });
+    if (!thread) {
+      return res.status(404).json({ message: 'Thread not found' });
+    }
+
+    const validated = reactToMessageSchema.parse(req.body);
+    const message = await Message.findById(messageId);
+
+    if (!message) {
+      return res.status(404).json({ message: 'Message not found' });
+    }
+
+    // Toggle reaction
+    const existingReactionIndex = message.reactions.findIndex(
+      (r) => r.userId.toString() === buyerId && r.emoji === validated.emoji
+    );
+
+    if (existingReactionIndex >= 0) {
+      // Remove reaction
+      message.reactions.splice(existingReactionIndex, 1);
+    } else {
+      // Add reaction
+      message.reactions.push({
+        emoji: validated.emoji,
+        userId: buyerId,
+        createdAt: new Date(),
+      });
+    }
+
+    await message.save();
+
+    const populatedMessage = await Message.findById(messageId)
+      .populate('senderId', 'fullName email avatarUrl')
+      .populate('replyTo', 'content senderId senderType')
+      .lean();
+
+    await websocketService.getIO()?.to(`thread:${threadId}`).emit('message_reacted', {
+      threadId,
+      messageId,
+      message: populatedMessage,
+    });
+
+    return res.json({ message: populatedMessage, reactions: populatedMessage?.reactions || [] });
+  } catch (error: any) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ message: 'Validation error', errors: error.errors });
+    }
+    console.error('React to message error:', error);
+    return res.status(500).json({ message: 'Failed to react to message', error: error.message });
+  }
+}
+
+/**
+ * Forward a message
+ */
+export async function forwardMessage(req: AuthenticatedRequest, res: Response) {
+  try {
+    const buyerId = getBuyerId(req);
+    if (!buyerId) {
+      return res.status(401).json({ message: 'Authentication required' });
+    }
+
+    const { threadId, messageId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(threadId) || !mongoose.Types.ObjectId.isValid(messageId)) {
+      return res.status(400).json({ message: 'Invalid thread or message ID' });
+    }
+
+    const validated = forwardMessageSchema.parse(req.body);
+    const sourceMessage = await Message.findById(messageId);
+
+    if (!sourceMessage) {
+      return res.status(404).json({ message: 'Source message not found' });
+    }
+
+    const targetThread = await MessageThread.findOne({
+      _id: validated.targetThreadId,
+      buyerId,
+    });
+
+    if (!targetThread) {
+      return res.status(404).json({ message: 'Target thread not found' });
+    }
+
+    const forwardedMessage = await Message.create({
+      threadId: targetThread._id,
+      senderId: buyerId,
+      senderType: 'buyer',
+      content: sourceMessage.content,
+      attachments: sourceMessage.attachments,
+      forwardedFrom: {
+        threadId: sourceMessage.threadId,
+        messageId: sourceMessage._id,
+        originalSender: sourceMessage.senderId,
+      },
+      status: 'sent',
+      readBy: [buyerId],
+    });
+
+    // Update target thread
+    targetThread.lastMessageAt = new Date();
+    targetThread.lastMessagePreview = sourceMessage.content.substring(0, 200);
+    targetThread.sellerUnreadCount = (targetThread.sellerUnreadCount || 0) + 1;
+    await targetThread.save();
+
+    const populatedMessage = await Message.findById(forwardedMessage._id)
+      .populate('senderId', 'fullName email avatarUrl')
+      .lean();
+
+    await websocketService.emitNewMessage(validated.targetThreadId, populatedMessage);
+    await websocketService.emitThreadUpdate(validated.targetThreadId, targetThread.toObject());
+
+    return res.json({ message: populatedMessage });
+  } catch (error: any) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ message: 'Validation error', errors: error.errors });
+    }
+    console.error('Forward message error:', error);
+    return res.status(500).json({ message: 'Failed to forward message', error: error.message });
+  }
+}
+
+/**
+ * Get available sellers (for creating new threads)
+ */
+export async function getAvailableSellers(req: AuthenticatedRequest, res: Response) {
+  try {
+    const User = mongoose.model('User');
+    const sellers = await User.find({ role: 'seller' })
+      .select('fullName email avatarUrl storeName')
+      .limit(100)
+      .lean();
+
+    return res.json({ sellers });
+  } catch (error: any) {
+    console.error('Get sellers error:', error);
+    return res.status(500).json({ message: 'Failed to fetch sellers', error: error.message });
+  }
+}
+
+/**
+ * Get inbox statistics
+ */
+export async function getInboxStats(req: AuthenticatedRequest, res: Response) {
+  try {
+    const buyerId = getBuyerId(req);
+    if (!buyerId) {
+      return res.status(401).json({ message: 'Authentication required' });
+    }
+
+    const [totalThreads, unreadThreads, activeThreads, archivedThreads] = await Promise.all([
+      MessageThread.countDocuments({ buyerId }),
+      MessageThread.countDocuments({ buyerId, buyerUnreadCount: { $gt: 0 } }),
+      MessageThread.countDocuments({ buyerId, status: 'active' }),
+      MessageThread.countDocuments({ buyerId, status: 'archived' }),
+    ]);
+
+    return res.json({
+      totalThreads,
+      unreadThreads,
+      activeThreads,
+      archivedThreads,
+    });
+  } catch (error: any) {
+    console.error('Get inbox stats error:', error);
+    return res.status(500).json({ message: 'Failed to fetch stats', error: error.message });
+  }
+}
+

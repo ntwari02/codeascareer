@@ -27,6 +27,7 @@ import {
   ThumbsDown,
   Expand,
   Minimize,
+  Menu,
 } from 'lucide-react';
 // import { useAuthStore } from '../stores/authStore';
 
@@ -380,6 +381,7 @@ export default function FAQ() {
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
   const [helpfulFeedback, setHelpfulFeedback] = useState<Map<string, 'helpful' | 'not-helpful' | null>>(new Map());
   const [showSystemStatus, setShowSystemStatus] = useState(true);
+  const [showMobileCategories, setShowMobileCategories] = useState(false);
   const [systemStatusMessage] = useState<string | null>(
     'Some users are experiencing delays with payments. Our team is working on it.'
   );
@@ -497,22 +499,22 @@ export default function FAQ() {
               Find answers to common questions about REAGLEX
             </p>
 
-            {/* Search Bar */}
+            {/* Search Bar - Responsive */}
             <div className="max-w-2xl mx-auto relative">
-              <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
+              <Search className="absolute left-3 sm:left-4 top-1/2 transform -translate-y-1/2 h-4 w-4 sm:h-5 sm:w-5 text-gray-400" />
               <input
                 type="text"
                 placeholder="Search for answers..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-12 pr-4 py-4 rounded-xl border-0 text-gray-900 text-lg focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-orange-600 shadow-lg"
+                className="w-full pl-10 sm:pl-12 pr-10 sm:pr-4 py-3 sm:py-4 rounded-xl border-0 text-gray-900 text-sm sm:text-lg focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-orange-600 shadow-lg"
               />
               {searchQuery && (
                 <button
                   onClick={() => setSearchQuery('')}
-                  className="absolute right-4 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  className="absolute right-3 sm:right-4 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
                 >
-                  <X className="h-5 w-5" />
+                  <X className="h-4 w-4 sm:h-5 sm:w-5" />
                 </button>
               )}
             </div>
@@ -520,15 +522,15 @@ export default function FAQ() {
         </div>
       </section>
 
-      {/* Popular Questions */}
+      {/* Popular Questions - Responsive */}
       {!searchQuery && !selectedCategory && (
-        <section className="py-8 bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800">
+        <section className="py-6 sm:py-8 bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800">
           <div className="w-full px-4 sm:px-6 lg:px-8">
             <div className="max-w-7xl mx-auto">
-              <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">
+              <h2 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-white mb-4 sm:mb-6">
                 Popular Questions
               </h2>
-              <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
                 {popularFAQsList.map((faq) => (
                   <button
                     key={faq.id}
@@ -537,9 +539,9 @@ export default function FAQ() {
                       setExpandedItems(new Set([faq.id]));
                       window.scrollTo({ top: 0, behavior: 'smooth' });
                     }}
-                    className="text-left p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 hover:border-orange-500 dark:hover:border-orange-500 hover:shadow-md transition-all"
+                    className="text-left p-3 sm:p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 hover:border-orange-500 dark:hover:border-orange-500 hover:shadow-md transition-all active:scale-[0.98]"
                   >
-                    <p className="font-medium text-gray-900 dark:text-white text-sm line-clamp-2">
+                    <p className="font-medium text-gray-900 dark:text-white text-xs sm:text-sm line-clamp-2">
                       {faq.question}
                     </p>
                   </button>
@@ -550,42 +552,63 @@ export default function FAQ() {
         </section>
       )}
 
-      {/* Main Content */}
-      <section className="py-12 sm:py-16 lg:py-20">
-        <div className="w-full px-4 sm:px-6 lg:px-8">
+      {/* Main Content - Responsive */}
+      <section className="py-6 sm:py-12 lg:py-16">
+        <div className="w-full px-3 sm:px-4 lg:px-6 xl:px-8">
           <div className="max-w-7xl mx-auto">
-            <div className="flex flex-col lg:flex-row gap-8">
-              {/* Categories Sidebar */}
-              <aside className="lg:w-64 flex-shrink-0">
-                <div className="sticky top-24">
+            {/* Mobile Category Toggle */}
+            <div className="lg:hidden mb-4 flex items-center justify-between">
+              <button
+                onClick={() => setShowMobileCategories(!showMobileCategories)}
+                className="flex items-center gap-2 px-4 py-2 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+              >
+                <Menu className="h-4 w-4" />
+                {selectedCategory 
+                  ? faqCategories.find(c => c.id === selectedCategory)?.label || 'Categories'
+                  : 'All Categories'}
+                <ChevronDown className={`h-4 w-4 transition-transform ${showMobileCategories ? 'rotate-180' : ''}`} />
+              </button>
+              {filteredFAQs.length > 0 && (
+                <div className="flex gap-2">
+                  <button
+                    onClick={expandAll}
+                    className="p-2 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"
+                    title="Expand All"
+                  >
+                    <Expand className="h-4 w-4" />
+                  </button>
+                  <button
+                    onClick={collapseAll}
+                    className="p-2 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"
+                    title="Collapse All"
+                  >
+                    <Minimize className="h-4 w-4" />
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <div className="flex flex-col lg:flex-row gap-4 sm:gap-6 lg:gap-8">
+              {/* Categories Sidebar - Responsive */}
+              <aside className={`lg:w-64 flex-shrink-0 ${showMobileCategories ? 'block' : 'hidden'} lg:block`}>
+                <div className="lg:sticky lg:top-24 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 lg:p-0 lg:border-0 lg:bg-transparent">
                   <div className="flex items-center justify-between mb-4">
-                    <h2 className="text-lg font-bold text-gray-900 dark:text-white">Categories</h2>
-                    {filteredFAQs.length > 0 && (
-                      <div className="flex gap-2">
-                        <button
-                          onClick={expandAll}
-                          className="p-1.5 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"
-                          title="Expand All"
-                        >
-                          <Expand className="h-4 w-4" />
-                        </button>
-                        <button
-                          onClick={collapseAll}
-                          className="p-1.5 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"
-                          title="Collapse All"
-                        >
-                          <Minimize className="h-4 w-4" />
-                        </button>
-                      </div>
-                    )}
+                    <h2 className="text-base sm:text-lg font-bold text-gray-900 dark:text-white">Categories</h2>
+                    <button
+                      onClick={() => setShowMobileCategories(false)}
+                      className="lg:hidden p-1 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
+                    >
+                      <X className="h-5 w-5" />
+                    </button>
                   </div>
-                  <div className="space-y-2">
+                  <div className="space-y-1.5 sm:space-y-2 max-h-[60vh] lg:max-h-none overflow-y-auto lg:overflow-visible">
                     <button
                       onClick={() => {
                         setSelectedCategory(null);
                         setSearchQuery('');
+                        setShowMobileCategories(false);
                       }}
-                      className={`w-full text-left px-4 py-2.5 rounded-lg transition-colors ${
+                      className={`w-full text-left px-3 sm:px-4 py-2 sm:py-2.5 rounded-lg transition-colors text-sm ${
                         !selectedCategory
                           ? 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 font-medium'
                           : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
@@ -602,17 +625,18 @@ export default function FAQ() {
                           onClick={() => {
                             setSelectedCategory(category.id);
                             setSearchQuery('');
+                            setShowMobileCategories(false);
                             window.scrollTo({ top: 0, behavior: 'smooth' });
                           }}
-                          className={`w-full text-left px-4 py-2.5 rounded-lg transition-colors flex items-center gap-3 ${
+                          className={`w-full text-left px-3 sm:px-4 py-2 sm:py-2.5 rounded-lg transition-colors flex items-center gap-2 sm:gap-3 text-sm ${
                             selectedCategory === category.id
                               ? 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 font-medium'
                               : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
                           }`}
                         >
                           <Icon className="h-4 w-4 flex-shrink-0" />
-                          <span className="flex-1">{category.label}</span>
-                          <span className="text-xs text-gray-500 dark:text-gray-400">{count}</span>
+                          <span className="flex-1 truncate">{category.label}</span>
+                          <span className="text-xs text-gray-500 dark:text-gray-400 flex-shrink-0">{count}</span>
                         </button>
                       );
                     })}
@@ -620,47 +644,48 @@ export default function FAQ() {
                 </div>
               </aside>
 
-              {/* FAQ Content */}
-              <div className="flex-1">
+              {/* FAQ Content - Responsive */}
+              <div className="flex-1 w-full min-w-0">
                 {selectedCategory && (
-                  <div className="mb-6">
+                  <div className="mb-4 sm:mb-6">
                     {selectedCategoryData && (
-                      <div className="flex items-center gap-3 mb-2">
+                      <div className="flex items-center gap-2 sm:gap-3 mb-2">
                         {React.createElement(selectedCategoryData.icon, {
-                          className: 'h-6 w-6 text-orange-600 dark:text-orange-400',
+                          className: 'h-5 w-5 sm:h-6 sm:w-6 text-orange-600 dark:text-orange-400 flex-shrink-0',
                         })}
-                        <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
+                        <h2 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-white truncate">
                           {selectedCategoryData.label}
                         </h2>
                       </div>
                     )}
-                    <p className="text-gray-600 dark:text-gray-400">
+                    <p className="text-sm sm:text-base text-gray-600 dark:text-gray-400">
                       {filteredFAQs.length} question{filteredFAQs.length !== 1 ? 's' : ''} found
                     </p>
                   </div>
                 )}
 
                 {filteredFAQs.length === 0 ? (
-                  <div className="text-center py-12">
-                    <HelpCircle className="h-16 w-16 text-gray-400 mx-auto mb-4" />
-                    <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">
+                  <div className="text-center py-8 sm:py-12">
+                    <HelpCircle className="h-12 w-12 sm:h-16 sm:w-16 text-gray-400 mx-auto mb-4" />
+                    <h3 className="text-lg sm:text-xl font-bold text-gray-900 dark:text-white mb-2">
                       No results found
                     </h3>
-                    <p className="text-gray-600 dark:text-gray-400 mb-6">
+                    <p className="text-sm sm:text-base text-gray-600 dark:text-gray-400 mb-4 sm:mb-6">
                       Try adjusting your search or browse categories
                     </p>
                     <button
                       onClick={() => {
                         setSearchQuery('');
                         setSelectedCategory(null);
+                        setShowMobileCategories(false);
                       }}
-                      className="px-6 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-lg transition-colors"
+                      className="px-4 sm:px-6 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-lg transition-colors text-sm sm:text-base"
                     >
                       Clear Filters
                     </button>
                   </div>
                 ) : (
-                  <div className="space-y-4">
+                  <div className="space-y-3 sm:space-y-4">
                     {filteredFAQs.map((faq) => {
                       const isExpanded = expandedItems.has(faq.id);
                       const relatedFAQs = getRelatedFAQs(faq);
@@ -671,14 +696,14 @@ export default function FAQ() {
                           key={faq.id}
                           id={`faq-${faq.id}`}
                           initial={false}
-                          className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden shadow-sm hover:shadow-md transition-shadow"
+                          className="bg-white dark:bg-gray-800 rounded-lg sm:rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden shadow-sm hover:shadow-md transition-shadow"
                         >
                           <button
                             onClick={() => toggleExpanded(faq.id)}
-                            className="w-full text-left p-6 flex items-start justify-between gap-4 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                            className="w-full text-left p-4 sm:p-6 flex items-start justify-between gap-3 sm:gap-4 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors active:bg-gray-100 dark:active:bg-gray-700"
                           >
-                            <div className="flex-1">
-                              <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">
+                            <div className="flex-1 min-w-0">
+                              <h3 className="text-base sm:text-lg font-bold text-gray-900 dark:text-white mb-1 sm:mb-2 pr-2">
                                 {faq.question}
                               </h3>
                               {faq.views && (
@@ -688,9 +713,9 @@ export default function FAQ() {
                               )}
                             </div>
                             {isExpanded ? (
-                              <ChevronUp className="h-5 w-5 text-gray-500 dark:text-gray-400 flex-shrink-0" />
+                              <ChevronUp className="h-5 w-5 text-gray-500 dark:text-gray-400 flex-shrink-0 mt-0.5" />
                             ) : (
-                              <ChevronDown className="h-5 w-5 text-gray-500 dark:text-gray-400 flex-shrink-0" />
+                              <ChevronDown className="h-5 w-5 text-gray-500 dark:text-gray-400 flex-shrink-0 mt-0.5" />
                             )}
                           </button>
 
@@ -703,29 +728,32 @@ export default function FAQ() {
                                 transition={{ duration: 0.3 }}
                                 className="overflow-hidden"
                               >
-                                <div className="px-6 pb-6 border-t border-gray-200 dark:border-gray-700">
-                                  <div className="pt-6">
-                                    <p className="text-gray-700 dark:text-gray-300 leading-relaxed mb-6 whitespace-pre-line">
+                                <div className="px-4 sm:px-6 pb-4 sm:pb-6 border-t border-gray-200 dark:border-gray-700">
+                                  <div className="pt-4 sm:pt-6">
+                                    <p className="text-sm sm:text-base text-gray-700 dark:text-gray-300 leading-relaxed mb-4 sm:mb-6 whitespace-pre-line">
                                       {faq.answer}
                                     </p>
 
                                     {/* Related Questions */}
                                     {relatedFAQs.length > 0 && (
-                                      <div className="mb-6 p-4 bg-gray-50 dark:bg-gray-900 rounded-lg">
-                                        <h4 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">
+                                      <div className="mb-4 sm:mb-6 p-3 sm:p-4 bg-gray-50 dark:bg-gray-900 rounded-lg">
+                                        <h4 className="text-xs sm:text-sm font-semibold text-gray-900 dark:text-white mb-2 sm:mb-3">
                                           Related Questions:
                                         </h4>
-                                        <div className="space-y-2">
+                                        <div className="space-y-1.5 sm:space-y-2">
                                           {relatedFAQs.map((related) => (
                                             <button
                                               key={related.id}
                                               onClick={() => {
                                                 setExpandedItems(new Set([related.id]));
-                                                document
-                                                  .getElementById(`faq-${related.id}`)
-                                                  ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                                setShowMobileCategories(false);
+                                                setTimeout(() => {
+                                                  document
+                                                    .getElementById(`faq-${related.id}`)
+                                                    ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                                }, 100);
                                               }}
-                                              className="block w-full text-left text-sm text-orange-600 dark:text-orange-400 hover:text-orange-700 dark:hover:text-orange-300 transition-colors"
+                                              className="block w-full text-left text-xs sm:text-sm text-orange-600 dark:text-orange-400 hover:text-orange-700 dark:hover:text-orange-300 transition-colors py-1"
                                             >
                                               • {related.question}
                                             </button>
@@ -734,9 +762,9 @@ export default function FAQ() {
                                       </div>
                                     )}
 
-                                    {/* Was this helpful? */}
-                                    <div className="flex items-center gap-4 pt-4 border-t border-gray-200 dark:border-gray-700">
-                                      <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                                    {/* Was this helpful? - Responsive */}
+                                    <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 pt-3 sm:pt-4 border-t border-gray-200 dark:border-gray-700">
+                                      <span className="text-xs sm:text-sm font-medium text-gray-700 dark:text-gray-300">
                                         Was this helpful?
                                       </span>
                                       <div className="flex items-center gap-2">
@@ -770,7 +798,7 @@ export default function FAQ() {
                                         </button>
                                       </div>
                                       {feedback && (
-                                        <span className="text-xs text-gray-500 dark:text-gray-400">
+                                        <span className="text-xs text-gray-500 dark:text-gray-400 sm:ml-auto">
                                           Thank you for your feedback!
                                         </span>
                                       )}
@@ -791,32 +819,32 @@ export default function FAQ() {
         </div>
       </section>
 
-      {/* Contact CTA */}
-      <section className="py-12 sm:py-16 bg-gray-50 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-800">
+      {/* Contact CTA - Responsive */}
+      <section className="py-8 sm:py-12 lg:py-16 bg-gray-50 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-800">
         <div className="w-full px-4 sm:px-6 lg:px-8">
           <div className="max-w-4xl mx-auto text-center">
-            <HelpCircle className="h-12 w-12 text-orange-600 dark:text-orange-400 mx-auto mb-4" />
-            <h2 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white mb-4">
+            <HelpCircle className="h-10 w-10 sm:h-12 sm:w-12 text-orange-600 dark:text-orange-400 mx-auto mb-3 sm:mb-4" />
+            <h2 className="text-xl sm:text-2xl lg:text-3xl font-bold text-gray-900 dark:text-white mb-3 sm:mb-4">
               Still need help?
             </h2>
-            <p className="text-lg text-gray-600 dark:text-gray-400 mb-8">
+            <p className="text-sm sm:text-base lg:text-lg text-gray-600 dark:text-gray-400 mb-6 sm:mb-8 px-2">
               Can't find the answer you're looking for? Our support team is here to help.
             </p>
-            <div className="flex flex-col sm:flex-row gap-4 justify-center">
+            <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 justify-center px-4">
               <Link
                 to="/contact"
-                className="inline-flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-orange-600 to-red-600 text-white rounded-lg font-semibold hover:from-orange-700 hover:to-red-700 transition-all shadow-lg hover:shadow-xl"
+                className="inline-flex items-center justify-center gap-2 px-5 sm:px-6 py-2.5 sm:py-3 bg-gradient-to-r from-orange-600 to-red-600 text-white rounded-lg font-semibold hover:from-orange-700 hover:to-red-700 transition-all shadow-lg hover:shadow-xl text-sm sm:text-base"
               >
-                <MessageCircle className="h-5 w-5" />
+                <MessageCircle className="h-4 w-4 sm:h-5 sm:w-5" />
                 Contact Support
               </Link>
               <a
                 href="https://wa.me/14313062173"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center justify-center gap-2 px-6 py-3 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 transition-all shadow-lg hover:shadow-xl"
+                className="inline-flex items-center justify-center gap-2 px-5 sm:px-6 py-2.5 sm:py-3 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 transition-all shadow-lg hover:shadow-xl text-sm sm:text-base"
               >
-                <Phone className="h-5 w-5" />
+                <Phone className="h-4 w-4 sm:h-5 sm:w-5" />
                 WhatsApp Support
               </a>
             </div>
