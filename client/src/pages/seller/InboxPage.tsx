@@ -916,7 +916,12 @@ const InboxPage: React.FC = () => {
             </div>
 
                 {/* Messages area - Responsive */}
-                <div className="flex-1 overflow-y-auto overflow-x-hidden scroll-smooth px-2 sm:px-3 md:px-4 py-2 sm:py-3 space-y-2 sm:space-y-3 bg-gray-50/60 dark:bg-black/30 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:dark:bg-gray-700 hover:[&::-webkit-scrollbar-thumb]:bg-gray-400 dark:hover:[&::-webkit-scrollbar-thumb]:bg-gray-600">
+                <div 
+                  className="flex-1 overflow-y-auto overflow-x-hidden scroll-smooth px-2 sm:px-3 md:px-4 py-2 sm:py-3 space-y-2 sm:space-y-3 bg-gray-50/60 dark:bg-gray-900/50 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:dark:bg-gray-700 hover:[&::-webkit-scrollbar-thumb]:bg-gray-400 dark:hover:[&::-webkit-scrollbar-thumb]:bg-gray-600" 
+                  style={{ 
+                    backgroundImage: 'url("data:image/svg+xml,%3Csvg width=\'60\' height=\'60\' viewBox=\'0 0 60 60\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cg fill=\'none\' fill-rule=\'evenodd\'%3E%3Cg fill=\'%23d4d4d4\' fill-opacity=\'0.1\'%3E%3Cpath d=\'M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z\'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")'
+                  }}
+                >
                   {messages.map((message) => {
                     const isSeller = message.senderType === 'seller';
                     const isDeleted = message.isDeleted;
