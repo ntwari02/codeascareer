@@ -1,0 +1,280 @@
+import { Router } from 'express';
+import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
+import { authenticate, AuthenticatedRequest } from '../middleware/auth';
+import {
+  getThreads,
+  getThread,
+  createThread,
+  sendMessage,
+  markThreadAsRead,
+  updateThread,
+  deleteThread,
+  getInboxStats,
+  editMessage,
+  deleteMessage,
+  reactToMessage,
+  forwardMessage,
+  getAvailableSellers,
+} from '../controllers/buyerInboxController';
+
+const router = Router();
+
+// Configure Multer for inbox attachments (same as seller)
+const uploadsDir = path.join(__dirname, '../../uploads/inbox');
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+const inboxStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, uploadsDir);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+    const ext = path.extname(file.originalname);
+    cb(null, `inbox-${uniqueSuffix}${ext}`);
+  },
+});
+
+const inboxUpload = multer({
+  storage: inboxStorage,
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB limit per file
+  },
+  fileFilter: (req, file, cb) => {
+    const allowedExtensions = [
+      '.jpeg',
+      '.jpg',
+      '.png',
+      '.gif',
+      '.webp',
+      '.pdf',
+      '.doc',
+      '.docx',
+      '.txt',
+      '.csv',
+      '.xlsx',
+      '.xls',
+      '.zip',
+      '.rar',
+      // Audio formats for voice notes
+      '.mp3',
+      '.wav',
+      '.m4a',
+      '.ogg',
+      '.webm',
+      '.aac',
+      '.flac',
+      '.opus',
+    ];
+    const allowedMimeTypes = [
+      'image/jpeg',
+      'image/jpg',
+      'image/png',
+      'image/gif',
+      'image/webp',
+      'application/pdf',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'text/plain',
+      'text/csv',
+      'application/vnd.ms-excel',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/zip',
+      'application/x-rar-compressed',
+      // Audio MIME types for voice notes
+      'audio/mpeg',
+      'audio/mp3',
+      'audio/wav',
+      'audio/wave',
+      'audio/x-wav',
+      'audio/mp4',
+      'audio/m4a',
+      'audio/ogg',
+      'audio/webm',
+      'audio/aac',
+      'audio/flac',
+      'audio/opus',
+      'audio/x-m4a',
+    ];
+
+    const ext = path.extname(file.originalname).toLowerCase();
+    const extnameValid = allowedExtensions.includes(ext);
+    const mimetypeValid = allowedMimeTypes.includes(file.mimetype);
+
+    if (extnameValid || mimetypeValid) {
+      cb(null, true);
+    } else {
+      cb(
+        new Error(
+          `Invalid file type: ${file.originalname}. Only images, PDFs, documents, archives, and audio files are allowed.`
+        )
+      );
+    }
+  },
+});
+
+// All routes require authentication (buyers don't need special role check)
+router.use(authenticate);
+
+// Get inbox statistics
+router.get('/stats', getInboxStats);
+
+// Get available sellers (for creating new threads)
+router.get('/sellers', getAvailableSellers);
+
+// Get all threads
+router.get('/threads', getThreads);
+
+// Get a single thread with messages
+router.get('/threads/:threadId', getThread);
+
+// Create a new thread
+router.post('/threads', createThread);
+
+// Upload attachments for messages (including voice notes)
+router.post('/upload', inboxUpload.array('attachments', 5), (req: AuthenticatedRequest, res) => {
+  try {
+    if (!req.files || (req.files as Express.Multer.File[]).length === 0) {
+      return res.status(400).json({ message: 'No files uploaded' });
+    }
+
+    const files = (req.files as Express.Multer.File[]).map((file) => {
+      const isAudio = file.mimetype.startsWith('audio/');
+      const isImage = file.mimetype.startsWith('image/');
+      
+      return {
+        filename: file.filename,
+        originalName: file.originalname,
+        path: `/uploads/inbox/${file.filename}`,
+        size: file.size,
+        mimetype: file.mimetype,
+        type: isAudio ? 'voice' : isImage ? 'image' : 'file',
+        uploadedAt: new Date().toISOString(),
+        duration: req.body.duration ? parseFloat(req.body.duration) : undefined, // Duration for voice notes
+      };
+    });
+
+    return res.json({
+      message: 'Files uploaded successfully',
+      files,
+    });
+  } catch (error: any) {
+    console.error('File upload error:', error);
+    return res.status(500).json({ message: 'Failed to upload files', error: error.message });
+  }
+});
+
+// Send a message in a thread (with optional file attachments)
+router.post('/threads/:threadId/messages', inboxUpload.array('attachments', 5), async (req: AuthenticatedRequest, res) => {
+  try {
+    // Handle file uploads first - convert to attachment objects with full metadata
+    const attachments: any[] = [];
+    if (req.files && (req.files as Express.Multer.File[]).length > 0) {
+      attachments.push(
+        ...(req.files as Express.Multer.File[]).map((file) => {
+          const isAudio = file.mimetype.startsWith('audio/');
+          const isImage = file.mimetype.startsWith('image/');
+          
+          return {
+            filename: file.filename,
+            originalName: file.originalname,
+            path: `/uploads/inbox/${file.filename}`,
+            size: file.size,
+            mimetype: file.mimetype,
+            type: isAudio ? 'voice' : isImage ? 'image' : 'file',
+            uploadedAt: new Date().toISOString(),
+            duration: req.body.duration ? parseFloat(req.body.duration) : undefined,
+          };
+        })
+      );
+    }
+
+    // If attachments are in body (from previous upload), parse them
+    if (req.body.attachments) {
+      let previousAttachments: any[] = [];
+      
+      // Check if it's a JSON string (from FormData)
+      if (typeof req.body.attachments === 'string') {
+        try {
+          previousAttachments = JSON.parse(req.body.attachments);
+        } catch (e) {
+          console.error('Failed to parse attachments JSON:', e);
+        }
+      } 
+      // Or if it's already an array
+      else if (Array.isArray(req.body.attachments)) {
+        previousAttachments = req.body.attachments;
+      }
+      
+      // Process the attachments
+      const processedAttachments = previousAttachments.map((att: any) => {
+        if (typeof att === 'string') {
+          // String path
+          return {
+            filename: att.split('/').pop() || '',
+            originalName: att.split('/').pop() || '',
+            path: att,
+            size: 0,
+            mimetype: 'application/octet-stream',
+            type: 'file',
+            uploadedAt: new Date().toISOString(),
+          };
+        }
+        // Already an object - ensure it has all required fields
+        return {
+          filename: att.filename || att.path?.split('/').pop() || '',
+          originalName: att.originalName || att.originalName || att.filename || '',
+          path: att.path || att.filename || '',
+          size: att.size || 0,
+          mimetype: att.mimetype || 'application/octet-stream',
+          type: att.type || (att.mimetype?.startsWith('audio/') ? 'voice' : att.mimetype?.startsWith('image/') ? 'image' : 'file'),
+          duration: att.duration,
+          uploadedAt: att.uploadedAt || new Date().toISOString(),
+        };
+      });
+      attachments.push(...processedAttachments);
+    }
+
+    // Add attachments to request body as array (not JSON string)
+    req.body.attachments = attachments;
+
+    // Get message from body or form data - ensure content exists (can be empty string)
+    if (req.body.content === undefined && req.body.message) {
+      req.body.content = req.body.message;
+    }
+    // Ensure content is always a string (even if empty) - WhatsApp style
+    if (req.body.content === undefined || req.body.content === null) {
+      req.body.content = '';
+    }
+    
+    // Ensure content is a string type
+    req.body.content = String(req.body.content || '');
+
+    // Call the sendMessage controller
+    return sendMessage(req, res);
+  } catch (error: any) {
+    console.error('Send message with attachments error:', error);
+    return res.status(500).json({ message: 'Failed to send message', error: error.message });
+  }
+});
+
+// Mark thread as read
+router.post('/threads/:threadId/read', markThreadAsRead);
+
+// Update thread
+router.put('/threads/:threadId', updateThread);
+
+// Delete thread
+router.delete('/threads/:threadId', deleteThread);
+
+// Message operations
+router.put('/threads/:threadId/messages/:messageId', editMessage);
+router.delete('/threads/:threadId/messages/:messageId', deleteMessage);
+router.post('/threads/:threadId/messages/:messageId/react', reactToMessage);
+router.post('/threads/:threadId/messages/:messageId/forward', forwardMessage);
+
+export default router;
+

@@ -1,4 +1,5 @@
 import express, { Request, Response, NextFunction } from 'express';
+import { createServer } from 'http';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import morgan from 'morgan';
@@ -20,10 +21,14 @@ import systemNotificationRoutes from './src/routes/systemNotificationRoutes';
 import subscriptionRoutes from './src/routes/subscriptionRoutes';
 import analyticsRoutes from './src/routes/analyticsRoutes';
 import productRoutes from './src/routes/productRoutes';
+import inboxRoutes from './src/routes/inboxRoutes';
+import buyerInboxRoutes from './src/routes/buyerInboxRoutes';
+import { websocketService } from './src/services/websocketService';
 
 dotenv.config();
 
 const app = express();
+const httpServer = createServer(app);
 const PORT = process.env.PORT || 5000;
 const MONGO_URI = process.env.MONGO_URI || '';
 
@@ -71,6 +76,12 @@ app.use('/api/seller/disputes', disputeRoutes);
 app.use('/api/seller/account-health', accountHealthRoutes);
 // Seller system notification routes
 app.use('/api/seller/notifications', systemNotificationRoutes);
+
+// Seller inbox routes
+app.use('/api/seller/inbox', inboxRoutes);
+
+// Buyer inbox routes
+app.use('/api/buyer/inbox', buyerInboxRoutes);
 
 // Seller routes
 app.use('/api/seller', sellerRoutes);
@@ -142,8 +153,14 @@ const connectDB = async () => {
     }
     
     console.log('✅ Connected to MongoDB');
-    app.listen(PORT, () => {
+    
+    // Initialize WebSocket server
+    websocketService.initialize(httpServer);
+    
+    // Start HTTP server (WebSocket is attached to it)
+    httpServer.listen(PORT, () => {
       console.log(`🚀 Server listening on port ${PORT}`);
+      console.log(`📡 WebSocket server ready`);
     });
   } catch (err: any) {
     console.error('❌ MongoDB connection error:', err.message || err);
