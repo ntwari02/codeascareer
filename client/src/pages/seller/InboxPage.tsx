@@ -1141,32 +1141,6 @@ const InboxPage: React.FC = () => {
                             {thread.sellerUnreadCount > 0 && (
                           <span className="w-2 h-2 rounded-full bg-red-500 dark:bg-red-400 flex-shrink-0" />
                         )}
-=======
-                    <div className="relative flex-shrink-0">
-                      <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 overflow-hidden">
-                        {buyer?.avatarUrl ? (
-                          <img
-                            src={resolveAvatarUrl(buyer.avatarUrl) || ''}
-                            alt={buyer.fullName || 'Buyer'}
-                            className="w-full h-full object-cover"
-                          />
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center text-white font-bold text-sm sm:text-base">
-                            {(buyer?.fullName || 'B')[0].toUpperCase()}
-                          </div>
-                        )}
-                      </div>
-                      {thread.type === 'rfq' && (
-                        <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-purple-500 rounded-full border-2 border-white dark:border-gray-800 flex items-center justify-center">
-                          <Mail className="h-3 w-3 text-white" />
-                        </div>
-                      )}
-                    </div>
-                    <div className="flex-1 min-w-0 flex flex-col gap-1">
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="text-sm font-semibold text-gray-900 dark:text-white line-clamp-1">
-                            {buyer?.fullName || 'Buyer'}
-                        </p>
                           <span className="text-[11px] text-gray-500 dark:text-gray-400 flex-shrink-0">
                             {formatTime(thread.lastMessageAt)}
                           </span>
