@@ -17,7 +17,6 @@ import { Testimonials } from '../components/buyer/Testimonials';
 import { RecentlyViewed } from '../components/buyer/RecentlyViewed';
 import { Footer } from '../components/buyer/Footer';
 import { TrendingUp, Sparkles, Award, Filter } from 'lucide-react';
-import { supabase } from '../lib/supabase';
 import { getCollections } from '../lib/collections';
 import type { Product, Collection } from '../types';
 
@@ -122,26 +121,54 @@ export function Home() {
 
   const loadData = async () => {
     try {
-      // Load products
-      const productsRes = await supabase
-        .from('products')
-        .select(`
-          *,
-          images:product_images(url, position)
-        `)
-        .eq('status', 'active')
-        .order('created_at', { ascending: false })
-        .limit(50);
+      // Load products from MongoDB API
+      const API_BASE = 'http://localhost:5000/api';
+      const response = await fetch(`${API_BASE}/products?status=in_stock&limit=50&sort=createdAt&order=desc`, {
+        method: 'GET',
+        credentials: 'include',
+      });
 
-      if (productsRes.data && productsRes.data.length > 0) {
-        productsRes.data.forEach((product: any) => {
+      if (response.ok) {
+        const data = await response.json();
+        const apiProducts = (data.products || []).map((p: any) => {
+          const product: Product = {
+            id: p._id || p.id,
+            title: p.name,
+            description: p.description || '',
+            price: p.price,
+            compare_at_price: p.discount ? p.price + p.discount : undefined,
+            category_id: p.category || '',
+            status: p.status === 'in_stock' || p.status === 'low_stock' ? 'active' : 'inactive',
+            seller_id: p.sellerId?.toString() || '',
+            created_at: p.createdAt || new Date().toISOString(),
+            updated_at: p.updatedAt || new Date().toISOString(),
+            stock_quantity: p.stock || 0,
+            is_shippable: true,
+            low_stock_threshold: 10,
+            views_count: p.views || 0,
+            sku: p.sku || '',
+            images: p.images?.map((img: string, index: number) => ({
+              id: `img-${p._id || p.id}-${index}`,
+              product_id: p._id || p.id,
+              url: img.startsWith('http') ? img : `http://localhost:5000${img}`,
+              position: index,
+              is_primary: index === 0,
+              created_at: new Date().toISOString(),
+            })) || [],
+            tags: p.tags || [],
+          };
+
+          // Sort images by position
           if (product.images) {
-            product.images.sort((a: any, b: any) => a.position - b.position);
+            product.images.sort((a: any, b: any) => (a.position || 0) - (b.position || 0));
           }
+
+          return product;
         });
-        setAllProductsData(productsRes.data);
+
+        setAllProductsData(apiProducts.length > 0 ? apiProducts : MOCK_PRODUCTS);
       } else {
-        // Use mock data if no products found
+        // Use mock data if API fails
         setAllProductsData(MOCK_PRODUCTS);
       }
 

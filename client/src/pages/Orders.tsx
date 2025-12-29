@@ -1,11 +1,13 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Header } from '../components/buyer/Header';
 import { Footer } from '../components/buyer/Footer';
 import { AnnouncementBar } from '../components/buyer/AnnouncementBar';
 import { Button } from '../components/ui/button';
 import { useAuthStore } from '../stores/authStore';
+import { useCartStore } from '../stores/cartStore';
 import { useTheme } from '../contexts/ThemeContext';
+import type { Product } from '../types';
 import { formatCurrency } from '../lib/utils';
 import {
   Package,
@@ -32,8 +34,13 @@ import {
   UserCheck,
   Store,
   DollarSign,
+  AlertCircle,
+  Loader2,
+  ChevronLeft,
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
+import ConfirmDialog from '../components/ui/ConfirmDialog';
+import { useToastStore } from '../stores/toastStore';
 
 interface OrderItem {
   id: string;
@@ -49,7 +56,7 @@ interface OrderItem {
 interface Order {
   id: string;
   order_number: string;
-  status: 'pending' | 'processing' | 'shipped' | 'delivered' | 'cancelled' | 'refunded';
+  status: 'pending' | 'processing' | 'packed' | 'shipped' | 'delivered' | 'cancelled';
   created_at: string;
   updated_at: string;
   items: OrderItem[];
@@ -73,6 +80,11 @@ interface Order {
     id: string;
     name: string;
   };
+  timeline?: Array<{
+    status: string;
+    date: Date | string;
+    time: string;
+  }>;
 }
 
 // Mock Orders Data
@@ -278,7 +290,7 @@ const MOCK_ORDERS: Order[] = [
   }
 ];
 
-type OrderStatus = 'all' | 'pending' | 'processing' | 'shipped' | 'delivered' | 'cancelled' | 'refunded';
+type OrderStatus = 'all' | 'pending' | 'processing' | 'packed' | 'shipped' | 'delivered' | 'cancelled';
 type SortOption = 'newest' | 'oldest' | 'total-high' | 'total-low';
 
 const returnReasons = [
@@ -307,7 +319,7 @@ const returnSteps = [
 
 export function Orders() {
   const navigate = useNavigate();
-  const { user } = useAuthStore();
+  const { user, loading: authLoading, initialized } = useAuthStore();
   const { currency } = useTheme();
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<OrderStatus>('all');
@@ -321,9 +333,138 @@ export function Orders() {
   const [returnImages, setReturnImages] = useState<File[]>([]);
   const [currentStep, setCurrentStep] = useState(1);
   const [returnRequested, setReturnRequested] = useState(false);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalOrders, setTotalOrders] = useState(0);
+  const [cancellingOrder, setCancellingOrder] = useState<string | null>(null);
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+  const [orderToCancel, setOrderToCancel] = useState<string | null>(null);
+  const { showToast } = useToastStore();
+
+  // Fetch orders from API
+  useEffect(() => {
+    if (user && initialized) {
+      loadOrders();
+    }
+  }, [user, initialized, statusFilter, currentPage]);
+
+  const loadOrders = async () => {
+    if (!user) return;
+    
+    setLoading(true);
+    setError(null);
+    
+    try {
+      const API_BASE = 'http://localhost:5000/api';
+      const token = localStorage.getItem('auth_token');
+      const params = new URLSearchParams();
+      
+      if (statusFilter !== 'all') {
+        params.append('status', statusFilter);
+      }
+      params.append('page', currentPage.toString());
+      params.append('limit', '10');
+      
+      const response = await fetch(`${API_BASE}/orders?${params.toString()}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        credentials: 'include',
+      });
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          navigate('/login', { replace: true });
+          return;
+        }
+        throw new Error('Failed to load orders');
+      }
+
+      const data = await response.json();
+      
+      console.log('Orders API Response:', data); // Debug log
+      console.log('Orders array:', data.orders); // Debug log
+      console.log('Orders count:', data.orders?.length); // Debug log
+      
+      if (!data.orders || !Array.isArray(data.orders)) {
+        console.error('Invalid orders data:', data);
+        setError('Invalid response from server');
+        setOrders([]);
+        setTotalOrders(0);
+        return;
+      }
+      
+      // Map API response to Order interface
+      const mappedOrders: Order[] = data.orders.map((order: any) => {
+        console.log('Mapping order:', order); // Debug log
+        return {
+        id: order.id,
+        order_number: order.order_number,
+        status: order.status,
+        created_at: order.created_at,
+        updated_at: order.updated_at,
+        items: (order.items || []).map((item: any) => {
+          // Handle product image - could be string, array, or object
+          let productImage = '';
+          if (typeof item.product_image === 'string') {
+            productImage = item.product_image.startsWith('http') 
+              ? item.product_image 
+              : item.product_image 
+                ? `http://localhost:5000${item.product_image}`
+                : 'https://images.pexels.com/photos/90946/pexels-photo-90946.jpeg';
+          } else if (Array.isArray(item.product_image) && item.product_image.length > 0) {
+            productImage = item.product_image[0].startsWith('http')
+              ? item.product_image[0]
+              : `http://localhost:5000${item.product_image[0]}`;
+          } else {
+            productImage = 'https://images.pexels.com/photos/90946/pexels-photo-90946.jpeg';
+          }
+          
+          return {
+            id: item.id || item.product_id || String(item.product_id),
+            product_id: String(item.product_id || item.id),
+            product_title: item.product_title || 'Unknown Product',
+            product_image: productImage,
+            variant: item.variant || '',
+            quantity: item.quantity || 1,
+            price: item.price || 0,
+            total: item.total || (item.price || 0) * (item.quantity || 1),
+          };
+        }),
+        subtotal: order.subtotal,
+        shipping: order.shipping,
+        tax: order.tax,
+        discount: order.discount || 0,
+        total: order.total,
+        shipping_address: order.shipping_address,
+        payment_method: order.payment_method,
+        tracking_number: order.tracking_number,
+        estimated_delivery: order.estimated_delivery,
+        seller: order.seller || { id: '', name: 'Unknown Seller' },
+        timeline: order.timeline || [],
+      };
+      });
+
+      setOrders(mappedOrders);
+      setTotalPages(data.pagination?.pages || 1);
+      setTotalOrders(data.pagination?.total || 0);
+    } catch (err: any) {
+      console.error('Error loading orders:', err);
+      setError(err.message || 'Failed to load orders');
+      // Fallback to empty array on error
+      setOrders([]);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const filteredAndSortedOrders = useMemo(() => {
-    let filtered = MOCK_ORDERS;
+    let filtered = [...orders];
 
     // Filter by search query
     if (searchQuery.trim()) {
@@ -352,7 +493,7 @@ export function Orders() {
       default:
         return sorted.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
     }
-  }, [searchQuery, statusFilter, sortBy]);
+  }, [orders, searchQuery, statusFilter, sortBy]);
 
   const toggleOrderExpansion = (orderId: string) => {
     const newExpanded = new Set(expandedOrders);
@@ -364,22 +505,203 @@ export function Orders() {
     setExpandedOrders(newExpanded);
   };
 
+  const handleCancelOrder = (orderId: string) => {
+    setOrderToCancel(orderId);
+    setShowCancelConfirm(true);
+  };
+
+  const confirmCancelOrder = async () => {
+    if (!orderToCancel) return;
+
+    setCancellingOrder(orderToCancel);
+    try {
+      const API_BASE = 'http://localhost:5000/api';
+      const token = localStorage.getItem('auth_token');
+      
+      const response = await fetch(`${API_BASE}/orders/${orderToCancel}/cancel`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        credentials: 'include',
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to cancel order');
+      }
+
+      // Reload orders to reflect the cancellation
+      await loadOrders();
+      showToast('Order cancelled successfully', 'success');
+    } catch (err: any) {
+      console.error('Error cancelling order:', err);
+      showToast(err.message || 'Failed to cancel order. Please try again.', 'error');
+    } finally {
+      setCancellingOrder(null);
+      setOrderToCancel(null);
+    }
+  };
+
+  const handleReorder = async (order: Order) => {
+    try {
+      const { addToCart } = useCartStore.getState();
+      const { user } = useAuthStore.getState();
+      
+      // Add all items from the order back to cart
+      for (const item of order.items) {
+        // Fetch product details
+        const API_BASE = 'http://localhost:5000/api';
+        const productResponse = await fetch(`${API_BASE}/products/${item.product_id}`);
+        
+        if (productResponse.ok) {
+          const productData = await productResponse.json();
+          const product: Product = {
+            id: productData._id || productData.id,
+            title: productData.name || productData.title,
+            price: productData.price,
+            images: productData.images || [],
+            seller_id: productData.sellerId || order.seller.id,
+            description: productData.description || '',
+            category_id: productData.category || '',
+            stock_quantity: productData.stock || 0,
+            low_stock_threshold: 10,
+            status: 'active',
+            is_shippable: true,
+            views_count: productData.views || 0,
+            created_at: productData.createdAt || new Date().toISOString(),
+            updated_at: productData.updatedAt || new Date().toISOString(),
+          };
+          
+          await addToCart(user?.id || null, product, item.variant ? { name: item.variant } : undefined, item.quantity);
+        }
+      }
+      
+      // Navigate to cart
+      navigate('/cart');
+      showToast('Items added to cart successfully', 'success');
+    } catch (err: any) {
+      console.error('Error reordering:', err);
+      showToast('Failed to add items to cart. Please try again.', 'error');
+    }
+  };
+
+  const handleDownloadInvoice = async (order: Order) => {
+    try {
+      // Generate invoice data
+      const invoiceData = {
+        orderNumber: order.order_number,
+        date: new Date(order.created_at).toLocaleDateString(),
+        items: order.items,
+        subtotal: order.subtotal,
+        shipping: order.shipping,
+        tax: order.tax,
+        discount: order.discount,
+        total: order.total,
+        shippingAddress: order.shipping_address,
+        paymentMethod: order.payment_method,
+      };
+
+      // Create CSV content
+      const csvRows: string[] = [];
+      
+      // Header section
+      csvRows.push('INVOICE');
+      csvRows.push(`Order Number,${invoiceData.orderNumber}`);
+      csvRows.push(`Date,${invoiceData.date}`);
+      csvRows.push(''); // Empty row
+      
+      // Items header
+      csvRows.push('Items');
+      csvRows.push('Product Name,Quantity,Unit Price,Total Price');
+      
+      // Items data
+      invoiceData.items.forEach(item => {
+        const unitPrice = item.total / item.quantity;
+        csvRows.push(`"${item.product_title.replace(/"/g, '""')}",${item.quantity},"${formatCurrency(unitPrice, currency)}","${formatCurrency(item.total, currency)}"`);
+      });
+      
+      csvRows.push(''); // Empty row
+      
+      // Summary section
+      csvRows.push('Summary');
+      csvRows.push(`Subtotal,"${formatCurrency(invoiceData.subtotal, currency)}"`);
+      csvRows.push(`Shipping,"${formatCurrency(invoiceData.shipping, currency)}"`);
+      csvRows.push(`Tax,"${formatCurrency(invoiceData.tax, currency)}"`);
+      if (invoiceData.discount > 0) {
+        csvRows.push(`Discount,"-${formatCurrency(invoiceData.discount, currency)}"`);
+      }
+      csvRows.push(`Total,"${formatCurrency(invoiceData.total, currency)}"`);
+      csvRows.push(''); // Empty row
+      
+      // Shipping Address section
+      csvRows.push('Shipping Address');
+      csvRows.push(`Full Name,"${invoiceData.shippingAddress.fullName.replace(/"/g, '""')}"`);
+      csvRows.push(`Address,"${invoiceData.shippingAddress.address.replace(/"/g, '""')}"`);
+      csvRows.push(`City,"${invoiceData.shippingAddress.city.replace(/"/g, '""')}"`);
+      csvRows.push(`State/Province,"${(invoiceData.shippingAddress.state || 'N/A').replace(/"/g, '""')}"`);
+      csvRows.push(`Country,"${invoiceData.shippingAddress.country.replace(/"/g, '""')}"`);
+      csvRows.push(`Postal Code,"${invoiceData.shippingAddress.postalCode || 'N/A'}"`);
+      csvRows.push(`Phone,"${invoiceData.shippingAddress.phone.replace(/"/g, '""')}"`);
+      csvRows.push(''); // Empty row
+      
+      // Payment Method
+      csvRows.push('Payment Information');
+      csvRows.push(`Payment Method,"${invoiceData.paymentMethod.replace(/"/g, '""')}"`);
+      
+      // Join all rows with newlines
+      const csvContent = csvRows.join('\n');
+      
+      // Add BOM for Excel compatibility (UTF-8 BOM)
+      const BOM = '\uFEFF';
+      const csvWithBOM = BOM + csvContent;
+
+      // Create and download file
+      const blob = new Blob([csvWithBOM], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `invoice-${invoiceData.orderNumber}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast('Invoice downloaded successfully', 'success');
+    } catch (err: any) {
+      console.error('Error downloading invoice:', err);
+      showToast('Failed to download invoice. Please try again.', 'error');
+    }
+  };
+
+  const handleRateReview = (order: Order, item?: OrderItem) => {
+    // Navigate to product page with review modal or open review modal
+    if (item) {
+      navigate(`/products/${item.product_id}?review=true`);
+    } else {
+      // If no specific item, navigate to first product
+      if (order.items.length > 0) {
+        navigate(`/products/${order.items[0].product_id}?review=true`);
+      }
+    }
+  };
+
   const getStatusColor = (status: Order['status']) => {
     switch (status) {
       case 'pending':
-        return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-400';
+        return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-400 shadow-sm';
       case 'processing':
-        return 'bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-400';
+        return 'bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-400 shadow-sm';
+      case 'packed':
+        return 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/20 dark:text-indigo-400 shadow-sm';
       case 'shipped':
-        return 'bg-purple-100 text-purple-800 dark:bg-purple-900/20 dark:text-purple-400';
+        return 'bg-purple-100 text-purple-800 dark:bg-purple-900/20 dark:text-purple-400 shadow-sm';
       case 'delivered':
-        return 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400';
+        return 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400 shadow-sm';
       case 'cancelled':
-        return 'bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400';
-      case 'refunded':
-        return 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300';
+        return 'bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400 shadow-sm';
       default:
-        return 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300';
+        return 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300 shadow-sm';
     }
   };
 
@@ -388,15 +710,15 @@ export function Orders() {
       case 'pending':
         return <Clock className="h-4 w-4" />;
       case 'processing':
-        return <RefreshCw className="h-4 w-4" />;
+        return <RefreshCw className="h-4 w-4 animate-spin" />;
+      case 'packed':
+        return <Package className="h-4 w-4" />;
       case 'shipped':
         return <Truck className="h-4 w-4" />;
       case 'delivered':
         return <CheckCircle2 className="h-4 w-4" />;
       case 'cancelled':
         return <X className="h-4 w-4" />;
-      case 'refunded':
-        return <RefreshCw className="h-4 w-4" />;
       default:
         return <Package className="h-4 w-4" />;
     }
@@ -404,17 +726,36 @@ export function Orders() {
 
   const stats = useMemo(() => {
     return {
-      total: MOCK_ORDERS.length,
-      pending: MOCK_ORDERS.filter(o => o.status === 'pending').length,
-      processing: MOCK_ORDERS.filter(o => o.status === 'processing').length,
-      shipped: MOCK_ORDERS.filter(o => o.status === 'shipped').length,
-      delivered: MOCK_ORDERS.filter(o => o.status === 'delivered').length,
-      totalSpent: MOCK_ORDERS.reduce((sum, order) => sum + order.total, 0),
+      total: totalOrders,
+      pending: orders.filter(o => o.status === 'pending').length,
+      processing: orders.filter(o => o.status === 'processing').length,
+      shipped: orders.filter(o => o.status === 'shipped').length,
+      delivered: orders.filter(o => o.status === 'delivered').length,
+      totalSpent: orders.reduce((sum, order) => sum + order.total, 0),
     };
-  }, []);
+  }, [orders, totalOrders]);
 
+  // Wait for auth to initialize before checking user
+  useEffect(() => {
+    if (!authLoading && initialized && !user) {
+      navigate('/login', { replace: true });
+    }
+  }, [authLoading, initialized, user, navigate]);
+
+  // Show loading while auth is initializing
+  if (authLoading || !initialized) {
+    return (
+      <div className="min-h-screen bg-gray-50 dark:bg-dark-primary flex items-center justify-center">
+        <div className="text-center">
+          <Package className="w-12 h-12 animate-spin text-orange-600 mx-auto mb-4" />
+          <p className="text-gray-600 dark:text-gray-400">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Redirect if not authenticated (handled by useEffect, but return null to prevent render)
   if (!user) {
-    navigate('/login');
     return null;
   }
 
@@ -431,39 +772,68 @@ export function Orders() {
               <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white mb-2">My Orders</h1>
               <p className="text-sm text-gray-600 dark:text-gray-400">View and manage your order history</p>
             </div>
-            <Link to="/products">
-              <Button className="gap-2">
-                <ShoppingBag className="h-4 w-4" />
-                Continue Shopping
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                onClick={loadOrders}
+                disabled={loading}
+                className="gap-2"
+              >
+                <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                Refresh
               </Button>
-            </Link>
+              <Link to="/products">
+                <Button className="gap-2">
+                  <ShoppingBag className="h-4 w-4" />
+                  Continue Shopping
+                </Button>
+              </Link>
+            </div>
           </div>
 
           {/* Statistics Cards */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4 mb-6">
-            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-4">
-              <div className="text-2xl font-bold text-gray-900 dark:text-white">{stats.total}</div>
-              <div className="text-xs text-gray-600 dark:text-gray-400">Total Orders</div>
+            <div className="bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/20 dark:to-blue-800/20 rounded-xl shadow-lg p-4 border border-blue-200 dark:border-blue-800 hover:shadow-xl transition-all duration-300">
+              <div className="flex items-center justify-between mb-2">
+                <Package className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+              </div>
+              <div className="text-2xl font-bold text-blue-900 dark:text-blue-100">{stats.total}</div>
+              <div className="text-xs text-blue-700 dark:text-blue-300 font-medium">Total Orders</div>
             </div>
-            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-4">
-              <div className="text-2xl font-bold text-yellow-600 dark:text-yellow-400">{stats.pending}</div>
-              <div className="text-xs text-gray-600 dark:text-gray-400">Pending</div>
+            <div className="bg-gradient-to-br from-yellow-50 to-yellow-100 dark:from-yellow-900/20 dark:to-yellow-800/20 rounded-xl shadow-lg p-4 border border-yellow-200 dark:border-yellow-800 hover:shadow-xl transition-all duration-300">
+              <div className="flex items-center justify-between mb-2">
+                <Clock className="h-5 w-5 text-yellow-600 dark:text-yellow-400" />
+              </div>
+              <div className="text-2xl font-bold text-yellow-900 dark:text-yellow-100">{stats.pending}</div>
+              <div className="text-xs text-yellow-700 dark:text-yellow-300 font-medium">Pending</div>
             </div>
-            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-4">
-              <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">{stats.processing}</div>
-              <div className="text-xs text-gray-600 dark:text-gray-400">Processing</div>
+            <div className="bg-gradient-to-br from-indigo-50 to-indigo-100 dark:from-indigo-900/20 dark:to-indigo-800/20 rounded-xl shadow-lg p-4 border border-indigo-200 dark:border-indigo-800 hover:shadow-xl transition-all duration-300">
+              <div className="flex items-center justify-between mb-2">
+                <RefreshCw className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
+              </div>
+              <div className="text-2xl font-bold text-indigo-900 dark:text-indigo-100">{stats.processing}</div>
+              <div className="text-xs text-indigo-700 dark:text-indigo-300 font-medium">Processing</div>
             </div>
-            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-4">
-              <div className="text-2xl font-bold text-purple-600 dark:text-purple-400">{stats.shipped}</div>
-              <div className="text-xs text-gray-600 dark:text-gray-400">Shipped</div>
+            <div className="bg-gradient-to-br from-purple-50 to-purple-100 dark:from-purple-900/20 dark:to-purple-800/20 rounded-xl shadow-lg p-4 border border-purple-200 dark:border-purple-800 hover:shadow-xl transition-all duration-300">
+              <div className="flex items-center justify-between mb-2">
+                <Truck className="h-5 w-5 text-purple-600 dark:text-purple-400" />
+              </div>
+              <div className="text-2xl font-bold text-purple-900 dark:text-purple-100">{stats.shipped}</div>
+              <div className="text-xs text-purple-700 dark:text-purple-300 font-medium">Shipped</div>
             </div>
-            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-4">
-              <div className="text-2xl font-bold text-green-600 dark:text-green-400">{stats.delivered}</div>
-              <div className="text-xs text-gray-600 dark:text-gray-400">Delivered</div>
+            <div className="bg-gradient-to-br from-green-50 to-green-100 dark:from-green-900/20 dark:to-green-800/20 rounded-xl shadow-lg p-4 border border-green-200 dark:border-green-800 hover:shadow-xl transition-all duration-300">
+              <div className="flex items-center justify-between mb-2">
+                <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400" />
+              </div>
+              <div className="text-2xl font-bold text-green-900 dark:text-green-100">{stats.delivered}</div>
+              <div className="text-xs text-green-700 dark:text-green-300 font-medium">Delivered</div>
             </div>
-            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-4">
-              <div className="text-2xl font-bold text-gray-900 dark:text-white">{formatCurrency(stats.totalSpent, currency)}</div>
-              <div className="text-xs text-gray-600 dark:text-gray-400">Total Spent</div>
+            <div className="bg-gradient-to-br from-orange-50 to-orange-100 dark:from-orange-900/20 dark:to-orange-800/20 rounded-xl shadow-lg p-4 border border-orange-200 dark:border-orange-800 hover:shadow-xl transition-all duration-300">
+              <div className="flex items-center justify-between mb-2">
+                <DollarSign className="h-5 w-5 text-orange-600 dark:text-orange-400" />
+              </div>
+              <div className="text-2xl font-bold text-orange-900 dark:text-orange-100">{formatCurrency(stats.totalSpent, currency)}</div>
+              <div className="text-xs text-orange-700 dark:text-orange-300 font-medium">Total Spent</div>
             </div>
           </div>
 
@@ -489,16 +859,19 @@ export function Orders() {
                 <Filter className="h-4 w-4 text-gray-400" />
                 <select
                   value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value as OrderStatus)}
+                  onChange={(e) => {
+                    setStatusFilter(e.target.value as OrderStatus);
+                    setCurrentPage(1); // Reset to first page when filter changes
+                  }}
                   className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
                 >
                   <option value="all">All Status</option>
                   <option value="pending">Pending</option>
                   <option value="processing">Processing</option>
+                  <option value="packed">Packed</option>
                   <option value="shipped">Shipped</option>
                   <option value="delivered">Delivered</option>
                   <option value="cancelled">Cancelled</option>
-                  <option value="refunded">Refunded</option>
                 </select>
               </div>
 
@@ -517,19 +890,64 @@ export function Orders() {
           </div>
         </div>
 
-        {/* Orders List */}
-        {filteredAndSortedOrders.length === 0 ? (
+        {/* Loading State */}
+        {loading && orders.length === 0 ? (
+          <div className="space-y-4">
+            {[...Array(3)].map((_, i) => (
+              <div key={i} className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 animate-pulse">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="h-6 bg-gray-200 dark:bg-gray-700 rounded w-48" />
+                  <div className="h-6 bg-gray-200 dark:bg-gray-700 rounded w-24" />
+                </div>
+                <div className="space-y-3">
+                  <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-full" />
+                  <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-3/4" />
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : error ? (
+          <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-6 text-center">
+            <AlertCircle className="w-12 h-12 text-red-600 dark:text-red-400 mx-auto mb-4" />
+            <h3 className="text-lg font-semibold text-red-900 dark:text-red-200 mb-2">Error Loading Orders</h3>
+            <p className="text-red-700 dark:text-red-300 mb-4">{error}</p>
+            <Button onClick={loadOrders} variant="outline">
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Try Again
+            </Button>
+          </div>
+        ) : !loading && orders.length === 0 ? (
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-12 text-center">
             <Package className="w-16 h-16 text-gray-300 dark:text-gray-700 mx-auto mb-4" />
             <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">No Orders Found</h3>
             <p className="text-gray-600 dark:text-gray-400 mb-6">
-              {searchQuery || statusFilter !== 'all' 
-                ? 'Try adjusting your filters to see more orders.'
-                : 'You haven\'t placed any orders yet.'}
+              You haven't placed any orders yet.
             </p>
             <Link to="/products">
               <Button>Start Shopping</Button>
             </Link>
+          </div>
+        ) : filteredAndSortedOrders.length === 0 && (searchQuery || statusFilter !== 'all') ? (
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-12 text-center">
+            <Package className="w-16 h-16 text-gray-300 dark:text-gray-700 mx-auto mb-4" />
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">No Orders Match Your Filters</h3>
+            <p className="text-gray-600 dark:text-gray-400 mb-6">
+              Try adjusting your search query or status filter to see more orders.
+            </p>
+            <div className="flex gap-3 justify-center">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setSearchQuery('');
+                  setStatusFilter('all');
+                }}
+              >
+                Clear Filters
+              </Button>
+              <Link to="/products">
+                <Button>Start Shopping</Button>
+              </Link>
+            </div>
           </div>
         ) : (
           <div className="space-y-4">
@@ -538,7 +956,7 @@ export function Orders() {
               return (
                 <div
                   key={order.id}
-                  className="bg-white dark:bg-gray-800 rounded-xl shadow-lg overflow-hidden hover:shadow-xl transition-shadow"
+                  className="bg-white dark:bg-gray-800 rounded-xl shadow-lg overflow-hidden hover:shadow-2xl transition-all duration-300 border border-gray-200 dark:border-gray-700 hover:border-orange-300 dark:hover:border-orange-700 transform hover:-translate-y-1"
                 >
                   {/* Order Header */}
                   <div className="p-4 sm:p-6 border-b border-gray-200 dark:border-gray-700">
@@ -651,30 +1069,65 @@ export function Orders() {
                         {isExpanded ? 'Hide Details' : 'View Details'}
                       </Button>
                       {order.tracking_number && (
-                        <Button variant="outline" size="sm" className="gap-2">
+                        <Button 
+                          variant="outline" 
+                          size="sm" 
+                          className="gap-2"
+                          onClick={() => navigate(`/track?id=${order.tracking_number}`)}
+                        >
                           <Truck className="h-4 w-4" />
                           Track Order
                         </Button>
                       )}
                       {order.status === 'delivered' && (
                         <>
-                          <Button variant="outline" size="sm" className="gap-2">
+                          <Button 
+                            variant="outline" 
+                            size="sm" 
+                            className="gap-2"
+                            onClick={() => handleRateReview(order)}
+                          >
                             <Star className="h-4 w-4" />
                             Rate & Review
                           </Button>
-                          <Button variant="outline" size="sm" className="gap-2">
+                          <Button 
+                            variant="outline" 
+                            size="sm" 
+                            className="gap-2"
+                            onClick={() => handleReorder(order)}
+                          >
                             <Repeat className="h-4 w-4" />
                             Reorder
                           </Button>
                         </>
                       )}
-                      {order.status === 'pending' && (
-                        <Button variant="outline" size="sm" className="gap-2 text-red-600 hover:text-red-700">
-                          <X className="h-4 w-4" />
-                          Cancel Order
+                      {(order.status === 'pending' || order.status === 'processing') && (
+                        <Button 
+                          variant="outline" 
+                          size="sm" 
+                          className="gap-2 text-red-600 hover:text-red-700"
+                          onClick={() => handleCancelOrder(order.id)}
+                          disabled={cancellingOrder === order.id}
+                        >
+                          {cancellingOrder === order.id ? (
+                            <>
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                              Cancelling...
+                            </>
+                          ) : (
+                            <>
+                              <X className="h-4 w-4" />
+                              Cancel Order
+                            </>
+                          )}
                         </Button>
                       )}
-                      <Button variant="outline" size="sm" className="gap-2">
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        className="gap-2"
+                        onClick={() => handleDownloadInvoice(order)}
+                      >
                         <Download className="h-4 w-4" />
                         Invoice
                       </Button>
@@ -706,89 +1159,134 @@ export function Orders() {
                             Order Timeline
                           </h4>
                           <div className="space-y-3">
-                            <div className="flex items-start gap-3">
-                              <div className="mt-1">
-                                <div className="w-2 h-2 bg-green-500 rounded-full" />
-                              </div>
-                              <div className="flex-1">
-                                <p className="text-sm font-medium text-gray-900 dark:text-white">Order Placed</p>
-                                <p className="text-xs text-gray-500 dark:text-gray-400">
-                                  {new Date(order.created_at).toLocaleString('en-US', { 
-                                    month: 'short', 
-                                    day: 'numeric', 
-                                    year: 'numeric',
-                                    hour: '2-digit',
-                                    minute: '2-digit'
-                                  })}
-                                </p>
-                              </div>
-                            </div>
-                            {order.status !== 'pending' && (
-                              <div className="flex items-start gap-3">
-                                <div className="mt-1">
-                                  <div className={`w-2 h-2 rounded-full ${
-                                    order.status === 'processing' || order.status === 'shipped' || order.status === 'delivered'
-                                      ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'
-                                  }`} />
-                                </div>
-                                <div className="flex-1">
-                                  <p className="text-sm font-medium text-gray-900 dark:text-white">Processing</p>
-                                  {order.status === 'processing' && (
+                            {order.timeline && order.timeline.length > 0 ? (
+                              order.timeline.map((entry: any, index: number) => {
+                                const isActive = index === order.timeline!.length - 1;
+                                const statusColors: Record<string, string> = {
+                                  pending: 'bg-yellow-500',
+                                  processing: 'bg-blue-500',
+                                  packed: 'bg-indigo-500',
+                                  shipped: 'bg-purple-500',
+                                  delivered: 'bg-green-500',
+                                  cancelled: 'bg-red-500',
+                                };
+                                
+                                return (
+                                  <div key={index} className="flex items-start gap-3">
+                                    <div className="mt-1 relative">
+                                      <div className={`w-3 h-3 rounded-full ${statusColors[entry.status] || 'bg-gray-500'} ${isActive ? 'ring-2 ring-offset-2 ring-offset-gray-50 dark:ring-offset-gray-900 ring-orange-500' : ''}`} />
+                                      {index < order.timeline!.length - 1 && (
+                                        <div className="absolute top-3 left-1/2 transform -translate-x-1/2 w-0.5 h-6 bg-gray-200 dark:bg-gray-700" />
+                                      )}
+                                    </div>
+                                    <div className="flex-1">
+                                      <p className={`text-sm font-medium ${isActive ? 'text-gray-900 dark:text-white' : 'text-gray-600 dark:text-gray-400'}`}>
+                                        {entry.status.charAt(0).toUpperCase() + entry.status.slice(1).replace('_', ' ')}
+                                      </p>
+                                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                                        {new Date(entry.date).toLocaleString('en-US', { 
+                                          month: 'short', 
+                                          day: 'numeric', 
+                                          year: 'numeric',
+                                          hour: '2-digit',
+                                          minute: '2-digit'
+                                        })}
+                                      </p>
+                                    </div>
+                                  </div>
+                                );
+                              })
+                            ) : (
+                              <>
+                                <div className="flex items-start gap-3">
+                                  <div className="mt-1">
+                                    <div className="w-3 h-3 bg-green-500 rounded-full ring-2 ring-offset-2 ring-offset-gray-50 dark:ring-offset-gray-900 ring-green-500" />
+                                  </div>
+                                  <div className="flex-1">
+                                    <p className="text-sm font-medium text-gray-900 dark:text-white">Order Placed</p>
                                     <p className="text-xs text-gray-500 dark:text-gray-400">
-                                      {new Date(order.updated_at).toLocaleString('en-US', { 
+                                      {new Date(order.created_at).toLocaleString('en-US', { 
                                         month: 'short', 
                                         day: 'numeric', 
+                                        year: 'numeric',
                                         hour: '2-digit',
                                         minute: '2-digit'
                                       })}
                                     </p>
-                                  )}
+                                  </div>
                                 </div>
-                              </div>
-                            )}
-                            {(order.status === 'shipped' || order.status === 'delivered') && (
-                              <div className="flex items-start gap-3">
-                                <div className="mt-1">
-                                  <div className={`w-2 h-2 rounded-full ${
-                                    order.status === 'delivered' ? 'bg-green-500' : 'bg-purple-500'
-                                  }`} />
-                                </div>
-                                <div className="flex-1">
-                                  <p className="text-sm font-medium text-gray-900 dark:text-white">Shipped</p>
-                                  {order.tracking_number && (
-                                    <p className="text-xs text-gray-500 dark:text-gray-400">
-                                      Tracking: {order.tracking_number}
-                                    </p>
-                                  )}
-                                  {order.estimated_delivery && (
-                                    <p className="text-xs text-gray-500 dark:text-gray-400">
-                                      Est. delivery: {new Date(order.estimated_delivery).toLocaleDateString('en-US', { 
-                                        month: 'short', 
-                                        day: 'numeric' 
-                                      })}
-                                    </p>
-                                  )}
-                                </div>
-                              </div>
-                            )}
-                            {order.status === 'delivered' && (
-                              <div className="flex items-start gap-3">
-                                <div className="mt-1">
-                                  <div className="w-2 h-2 bg-green-500 rounded-full" />
-                                </div>
-                                <div className="flex-1">
-                                  <p className="text-sm font-medium text-gray-900 dark:text-white">Delivered</p>
-                                  {order.estimated_delivery && (
-                                    <p className="text-xs text-gray-500 dark:text-gray-400">
-                                      {new Date(order.estimated_delivery).toLocaleDateString('en-US', { 
-                                        month: 'short', 
-                                        day: 'numeric',
-                                        year: 'numeric'
-                                      })}
-                                    </p>
-                                  )}
-                                </div>
-                              </div>
+                                {order.status !== 'pending' && (
+                                  <div className="flex items-start gap-3">
+                                    <div className="mt-1 relative">
+                                      <div className={`w-3 h-3 rounded-full ${
+                                        order.status === 'processing' || order.status === 'packed' || order.status === 'shipped' || order.status === 'delivered'
+                                          ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'
+                                      }`} />
+                                      <div className="absolute top-3 left-1/2 transform -translate-x-1/2 w-0.5 h-6 bg-gray-200 dark:bg-gray-700" />
+                                    </div>
+                                    <div className="flex-1">
+                                      <p className="text-sm font-medium text-gray-900 dark:text-white">Processing</p>
+                                      {(order.status === 'processing' || order.status === 'packed') && (
+                                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                                          {new Date(order.updated_at).toLocaleString('en-US', { 
+                                            month: 'short', 
+                                            day: 'numeric', 
+                                            hour: '2-digit',
+                                            minute: '2-digit'
+                                          })}
+                                        </p>
+                                      )}
+                                    </div>
+                                  </div>
+                                )}
+                                {(order.status === 'shipped' || order.status === 'delivered') && (
+                                  <div className="flex items-start gap-3">
+                                    <div className="mt-1 relative">
+                                      <div className={`w-3 h-3 rounded-full ${
+                                        order.status === 'delivered' ? 'bg-green-500' : 'bg-purple-500'
+                                      }`} />
+                                      {order.status !== 'delivered' && (
+                                        <div className="absolute top-3 left-1/2 transform -translate-x-1/2 w-0.5 h-6 bg-gray-200 dark:bg-gray-700" />
+                                      )}
+                                    </div>
+                                    <div className="flex-1">
+                                      <p className="text-sm font-medium text-gray-900 dark:text-white">Shipped</p>
+                                      {order.tracking_number && (
+                                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                                          Tracking: {order.tracking_number}
+                                        </p>
+                                      )}
+                                      {order.estimated_delivery && (
+                                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                                          Est. delivery: {new Date(order.estimated_delivery).toLocaleDateString('en-US', { 
+                                            month: 'short', 
+                                            day: 'numeric' 
+                                          })}
+                                        </p>
+                                      )}
+                                    </div>
+                                  </div>
+                                )}
+                                {order.status === 'delivered' && (
+                                  <div className="flex items-start gap-3">
+                                    <div className="mt-1">
+                                      <div className="w-3 h-3 bg-green-500 rounded-full ring-2 ring-offset-2 ring-offset-gray-50 dark:ring-offset-gray-900 ring-green-500" />
+                                    </div>
+                                    <div className="flex-1">
+                                      <p className="text-sm font-medium text-gray-900 dark:text-white">Delivered</p>
+                                      {order.estimated_delivery && (
+                                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                                          {new Date(order.estimated_delivery).toLocaleDateString('en-US', { 
+                                            month: 'short', 
+                                            day: 'numeric',
+                                            year: 'numeric'
+                                          })}
+                                        </p>
+                                      )}
+                                    </div>
+                                  </div>
+                                )}
+                              </>
                             )}
                           </div>
                         </div>
@@ -844,7 +1342,12 @@ export function Orders() {
                                       <RotateCcw className="h-3 w-3" />
                                       Return Item
                                     </Button>
-                                    <Button variant="outline" size="sm" className="gap-1 text-xs">
+                                    <Button 
+                                      variant="outline" 
+                                      size="sm" 
+                                      className="gap-1 text-xs"
+                                      onClick={() => handleRateReview(order, item)}
+                                    >
                                       <Star className="h-3 w-3" />
                                       Review
                                     </Button>
@@ -1163,6 +1666,21 @@ export function Orders() {
           ) : null}
         </DialogContent>
       </Dialog>
+
+      {/* Cancel Order Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={showCancelConfirm}
+        onClose={() => {
+          setShowCancelConfirm(false);
+          setOrderToCancel(null);
+        }}
+        onConfirm={confirmCancelOrder}
+        title="Cancel Order"
+        message="Are you sure you want to cancel this order? This action cannot be undone."
+        confirmText="Cancel Order"
+        cancelText="Keep Order"
+        variant="danger"
+      />
     </div>
   );
 }

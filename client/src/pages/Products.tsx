@@ -675,13 +675,75 @@ export function Products() {
   const loadProducts = async () => {
     setLoading(true);
     try {
-      // Simulate API delay
-      await new Promise(resolve => setTimeout(resolve, 500));
+      const API_BASE = 'http://localhost:5000/api';
+      const params = new URLSearchParams();
       
-      // Use mock products data
-      setProducts(MOCK_PRODUCTS);
+      // Add filters to query params
+      if (filters.category.length > 0) {
+        params.append('category', filters.category[0]); // For now, use first category
+      }
+      
+      if (filters.sort) {
+        if (filters.sort === 'price_asc') {
+          params.append('sort', 'price');
+          params.append('order', 'asc');
+        } else if (filters.sort === 'price_desc') {
+          params.append('sort', 'price');
+          params.append('order', 'desc');
+        } else if (filters.sort === 'newest') {
+          params.append('sort', 'createdAt');
+          params.append('order', 'desc');
+        } else if (filters.sort === 'popular') {
+          params.append('sort', 'views');
+          params.append('order', 'desc');
+        }
+      }
+      
+      params.append('status', 'in_stock');
+      params.append('limit', '100'); // Get more products for client-side filtering
+      
+      const response = await fetch(`${API_BASE}/products?${params.toString()}`, {
+        method: 'GET',
+        credentials: 'include',
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to load products');
+      }
+
+      const data = await response.json();
+      const apiProducts = (data.products || []).map((p: any) => ({
+        id: p._id || p.id,
+        title: p.name,
+        description: p.description || '',
+        price: p.price,
+        compare_at_price: p.discount ? p.price + p.discount : undefined,
+        category_id: p.category || '',
+        status: p.status === 'in_stock' || p.status === 'low_stock' ? 'active' : 'inactive',
+        seller_id: p.sellerId?.toString() || '',
+        created_at: p.createdAt || new Date().toISOString(),
+        updated_at: p.updatedAt || new Date().toISOString(),
+        stock_quantity: p.stock || 0,
+        is_shippable: true,
+        low_stock_threshold: 10,
+        views_count: p.views || 0,
+        sku: p.sku || '',
+        images: p.images?.map((img: string, index: number) => ({
+          id: `img-${p._id || p.id}-${index}`,
+          product_id: p._id || p.id,
+          url: img.startsWith('http') ? img : `http://localhost:5000${img}`,
+          position: index,
+          is_primary: index === 0,
+          created_at: new Date().toISOString(),
+        })) || [],
+        tags: p.tags || [],
+      }));
+
+      setProducts(apiProducts);
     } catch (error) {
       console.error('Error loading products:', error);
+      // Fallback to mock data on error
+      setProducts(MOCK_PRODUCTS);
     } finally {
       setLoading(false);
     }
@@ -915,16 +977,37 @@ export function Products() {
                 </button>
               </div>
 
-              {/* Filter Toggle - Mobile */}
-              <Button
-                variant="outline"
-                size="sm"
+              {/* Filter Toggle Button */}
+              <button
                 onClick={() => setShowFilters(!showFilters)}
-                className="sm:hidden"
+                className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-md transition-all font-medium text-xs sm:text-sm shadow-sm border ${
+                  showFilters
+                    ? 'bg-orange-600 text-white hover:bg-orange-700 border-orange-600'
+                    : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 border-gray-200 dark:border-gray-700'
+                }`}
               >
-                <Filter className="w-4 h-4 mr-2" />
-                Filters
-              </Button>
+                <Filter className={`h-3.5 w-3.5 sm:h-4 sm:w-4 transition-transform duration-300 ${showFilters ? 'rotate-180' : ''}`} />
+                <span className="hidden sm:inline">{showFilters ? 'Hide' : 'Filters'}</span>
+                {(() => {
+                  const activeCount = 
+                    filters.category.length +
+                    filters.brand.length +
+                    ((filters.priceRange?.[0] !== 0 || filters.priceRange?.[1] !== 10000) ? 1 : 0) +
+                    filters.color.length +
+                    filters.size.length +
+                    (filters.rating !== null ? 1 : 0) +
+                    filters.seller.length +
+                    filters.delivery.length +
+                    filters.stock.length +
+                    filters.quickFilters.length +
+                    (filters.sort !== 'relevance' ? 1 : 0);
+                  return activeCount > 0 ? (
+                    <span className="ml-1 px-1.5 py-0.5 bg-orange-500 text-white text-[10px] font-bold rounded-full">
+                      {activeCount}
+                    </span>
+                  ) : null;
+                })()}
+              </button>
             </div>
           </div>
 
@@ -981,24 +1064,31 @@ export function Products() {
           )}
         </div>
 
-        {/* Filters Section - Top */}
-        <div className={`mb-6 ${showFilters ? 'block' : 'hidden lg:block'}`}>
-          <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-lg p-4">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                <SlidersHorizontal className="w-5 h-5" />
-                Filters
-              </h2>
-              <button
-                onClick={() => setShowFilters(false)}
-                className="lg:hidden text-gray-400 hover:text-gray-600"
-              >
-                <X className="w-5 h-5" />
-              </button>
+        {/* Filters Section - Only show when filter button is clicked */}
+        {showFilters && (
+          <div className="mb-6">
+            <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-lg p-4">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                  <SlidersHorizontal className="w-5 h-5" />
+                  Filters
+                </h2>
+                <button
+                  onClick={() => setShowFilters(false)}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <ProductFilters 
+                products={products} 
+                onFilterChange={handleFilterChange}
+                showFilters={showFilters}
+                onToggleFilters={() => setShowFilters(!showFilters)}
+              />
             </div>
-            <ProductFilters products={products} onFilterChange={handleFilterChange} />
           </div>
-        </div>
+        )}
 
         {/* Products Grid/List */}
         <div>

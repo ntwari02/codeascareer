@@ -5,12 +5,15 @@ import { Footer } from '../components/buyer/Footer';
 import { AnnouncementBar } from '../components/buyer/AnnouncementBar';
 import { Button } from '../components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '../components/ui/dialog';
+import ConfirmDialog from '../components/ui/ConfirmDialog';
 import { useAuthStore } from '../stores/authStore';
 import { useCartStore } from '../stores/cartStore';
 import { useWishlistStore } from '../stores/wishlistStore';
 import { useTheme } from '../contexts/ThemeContext';
 import { profileAPI } from '../lib/api';
 import { useToastStore } from '../stores/toastStore';
+import { formatCurrency } from '../lib/utils';
+import imageCompression from 'browser-image-compression';
 import {
   User,
   Mail,
@@ -81,6 +84,8 @@ export function Profile() {
 
   const [showEditModal, setShowEditModal] = useState(false);
   const [activeTab, setActiveTab] = useState<'overview' | 'security' | 'addresses' | 'payments' | 'notifications' | 'privacy'>('overview');
+  const [showDeleteAddressConfirm, setShowDeleteAddressConfirm] = useState(false);
+  const [addressToDelete, setAddressToDelete] = useState<string | null>(null);
   const [showLanguageMenu, setShowLanguageMenu] = useState(false);
   const [showCurrencyMenu, setShowCurrencyMenu] = useState(false);
   
@@ -137,32 +142,10 @@ export function Profile() {
   const [twoFactorEnabled, setTwoFactorEnabled] = useState(false);
 
   // Addresses state
-  const [addresses, setAddresses] = useState<Address[]>([
-    {
-      id: '1',
-      label: 'Home',
-      fullName: user?.full_name || 'John Doe',
-      phone: user?.phone || '+250 788 123 456',
-      address: 'KG 123 St',
-      city: 'Kigali',
-      country: 'Rwanda',
-      postalCode: '00000',
-      isDefault: true,
-    }
-  ]);
+  const [addresses, setAddresses] = useState<Address[]>([]);
 
   // Payment methods state
-  const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([
-    {
-      id: '1',
-      type: 'card',
-      label: 'Visa •••• 4242',
-      last4: '4242',
-      expiryMonth: 12,
-      expiryYear: 2025,
-      isDefault: true,
-    }
-  ]);
+  const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
 
   // Notification preferences
   const [notifications, setNotifications] = useState({
@@ -192,12 +175,39 @@ export function Profile() {
     showActivity: true,
   });
 
-  const [avatarPreview, setAvatarPreview] = useState<string | null>(user?.avatar_url || null);
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const [avatarFile, setAvatarFile] = useState<File | null>(null); // Store the actual file for upload
   const [isSaving, setIsSaving] = useState(false);
   const [isChangingPassword, setIsChangingPassword] = useState(false);
   const hasLoadedProfile = useRef(false);
   const scrollPositionRef = useRef(0);
+
+  // Statistics state - must be before early returns
+  const [stats, setStats] = useState({
+    totalOrders: 0,
+    totalSpent: 0,
+    wishlistItems: wishlistItems.length,
+    cartItems: cartItems.length,
+    reviews: 0,
+    averageRating: 0,
+  });
+
+  // Recent activity state - must be before early returns
+  const [recentActivity, setRecentActivity] = useState<Array<{
+    id: string;
+    title: string;
+    detail: string;
+    time: string;
+  }>>([]);
+
+  // Loyalty state (optional - can be empty if not implemented) - must be before early returns
+  const [loyalty, setLoyalty] = useState<{
+    tier: string;
+    points: number;
+    nextTier: string;
+    progress: number;
+    perks: string[];
+  } | null>(null);
 
   // Helper to resolve avatar URL (handles both full URLs and relative paths)
   const resolveAvatarUrl = (url: string | null | undefined): string | null => {
@@ -246,16 +256,16 @@ export function Profile() {
 
         // Update form data
         setFormData({
-          full_name: profileData.fullName || user.full_name || '',
-          email: profileData.email || user.email || '',
-          phone: profileData.phone || '',
+          full_name: profileData.fullName || (user?.full_name || ''),
+          email: profileData.email || (user?.email || ''),
+          phone: profileData.phone || (user?.phone || ''),
           bio: profileData.bio || '',
           location: profileData.location || '',
           website: profileData.website || '',
           dateOfBirth: profileData.dateOfBirth ? new Date(profileData.dateOfBirth).toISOString().split('T')[0] : '',
         });
 
-        const avatarUrl = profileData.avatarUrl || user.avatar_url || null;
+        const avatarUrl = profileData.avatarUrl || (user?.avatar_url || null);
         setAvatarPreview(avatarUrl ? resolveAvatarUrl(avatarUrl) : null);
 
         // Load addresses
@@ -263,8 +273,8 @@ export function Profile() {
           setAddresses(profileData.addresses.map((addr: any, idx: number) => ({
             id: idx.toString(),
             label: addr.label || 'Address',
-            fullName: user.full_name || '',
-            phone: user.phone || '',
+            fullName: user?.full_name || '',
+            phone: user?.phone || '',
             address: addr.street || '',
             city: addr.city || '',
             country: addr.country || '',
@@ -353,6 +363,93 @@ export function Profile() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, navigate]);
 
+  // Helper function to calculate time ago
+  const getTimeAgo = (date: Date): string => {
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    if (diffDays < 7) return `${diffDays}d ago`;
+    return `${Math.floor(diffDays / 7)}w ago`;
+  };
+
+  // Load statistics from orders - MUST be before early returns
+  useEffect(() => {
+    const loadStatistics = async () => {
+      if (!user) return;
+
+      try {
+        const API_BASE = 'http://localhost:5000/api';
+        const token = localStorage.getItem('auth_token');
+        
+        // Fetch all orders to calculate statistics
+        const response = await fetch(`${API_BASE}/orders?limit=1000`, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          credentials: 'include',
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          const orders = data.orders || [];
+          
+          // Calculate statistics
+          const totalOrders = orders.length;
+          const totalSpent = orders.reduce((sum: number, order: any) => sum + (order.total || 0), 0);
+          
+          // Calculate reviews and average rating from orders (if available)
+          const ordersWithReviews = orders.filter((o: any) => o.reviewed);
+          const reviews = ordersWithReviews.length;
+          const averageRating = ordersWithReviews.length > 0
+            ? ordersWithReviews.reduce((sum: number, o: any) => sum + (o.rating || 0), 0) / reviews
+            : 0;
+
+          setStats({
+            totalOrders,
+            totalSpent,
+            wishlistItems: wishlistItems.length,
+            cartItems: cartItems.length,
+            reviews,
+            averageRating: Math.round(averageRating * 10) / 10,
+          });
+
+          // Generate recent activity from recent orders
+          const recentOrders = orders
+            .slice(0, 5)
+            .map((order: any, idx: number) => {
+              const orderDate = new Date(order.created_at || order.date);
+              const timeAgo = getTimeAgo(orderDate);
+              const firstItem = order.items?.[0];
+              const itemTitle = firstItem?.product_title || 'Product';
+              const itemPrice = firstItem?.price || order.total || 0;
+              
+              return {
+                id: `order-${order.orderNumber || order.id || idx}`,
+                title: `Order #${order.orderNumber || order.id} ${order.status}`,
+                detail: `${itemTitle} • ${formatCurrency(itemPrice, currency as 'USD' | 'EUR' | 'RWF' | 'KES')}`,
+                time: timeAgo,
+              };
+            });
+
+          setRecentActivity(recentOrders);
+        }
+      } catch (error) {
+        console.error('Failed to load statistics:', error);
+      }
+    };
+
+    if (user && !loading) {
+      loadStatistics();
+    }
+  }, [user, loading, wishlistItems.length, cartItems.length, currency]);
+
   if (!user) {
     return null;
   }
@@ -376,7 +473,55 @@ export function Profile() {
       // If there's a new file to upload, upload it first
       if (avatarFile) {
         try {
-          const uploadResponse = await profileAPI.uploadAvatar(avatarFile);
+          // Compress the image before uploading
+          const compressionOptions = {
+            maxSizeMB: 0.5, // 500KB max for avatar
+            maxWidthOrHeight: 512, // 512px max dimension for avatar (square)
+            useWebWorker: true,
+            fileType: avatarFile.type,
+            initialQuality: 0.85, // 85% quality for good balance
+          };
+
+          const compressedFile = await imageCompression(avatarFile, compressionOptions);
+          
+          // Create a new File with the original name and type for backend validation
+          // File properties are read-only, so we need to create a new File object
+          let fileToUpload: File;
+          
+          // Always create a new File to ensure correct name and type for backend validation
+          try {
+            // Read the compressed file as an ArrayBuffer
+            const arrayBuffer = await compressedFile.arrayBuffer();
+            
+            // Create a new File with the correct name and type
+            // File constructor is supported in all modern browsers
+            fileToUpload = new File(
+              [arrayBuffer],
+              avatarFile.name,
+              {
+                type: avatarFile.type,
+                lastModified: Date.now(),
+              }
+            );
+          } catch (error) {
+            // Fallback: if File constructor fails, use the compressed file as-is
+            // The backend should still accept it if the MIME type is correct
+            console.warn('Failed to create new File object, using compressed file as-is:', error);
+            fileToUpload = compressedFile;
+          }
+          
+          // Log compression results for debugging
+          const originalSize = (avatarFile.size / 1024 / 1024).toFixed(2);
+          const compressedSize = (compressedFile.size / 1024 / 1024).toFixed(2);
+          const compressionRatio = ((1 - compressedFile.size / avatarFile.size) * 100).toFixed(1);
+          console.log(`Avatar compressed: ${originalSize}MB → ${compressedSize}MB (${compressionRatio}% reduction)`);
+          
+          // If file is still large after compression, show warning
+          if (compressedFile.size > 2 * 1024 * 1024) {
+            showToast('Image is still large after compression. Please try a smaller image.', 'warning');
+          }
+
+          const uploadResponse = await profileAPI.uploadAvatar(fileToUpload);
           uploadedAvatarUrl = uploadResponse.avatarUrl;
           setAvatarFile(null); // Clear the file after successful upload
           // Update preview with the uploaded URL
@@ -472,9 +617,9 @@ export function Profile() {
         return;
       }
       
-      // Validate file size (5MB limit)
-      if (file.size > 5 * 1024 * 1024) {
-        showToast('Image size must be less than 5MB', 'error');
+      // Validate file size (10MB limit)
+      if (file.size > 10 * 1024 * 1024) {
+        showToast('Image size must be less than 10MB', 'error');
         return;
       }
 
@@ -530,11 +675,20 @@ export function Profile() {
     }
   };
 
-  const handleDeleteAddress = async (id: string) => {
-    const index = parseInt(id, 10);
-    if (isNaN(index)) return;
+  const handleDeleteAddress = (id: string) => {
+    setAddressToDelete(id);
+    setShowDeleteAddressConfirm(true);
+  };
 
-    if (!confirm('Are you sure you want to delete this address?')) return;
+  const confirmDeleteAddress = async () => {
+    if (!addressToDelete) return;
+
+    const index = parseInt(addressToDelete, 10);
+    if (isNaN(index)) {
+      setShowDeleteAddressConfirm(false);
+      setAddressToDelete(null);
+      return;
+    }
 
     try {
       const response = await profileAPI.deleteAddress(index);
@@ -553,6 +707,9 @@ export function Profile() {
     } catch (error: any) {
       console.error('Failed to delete address:', error);
       showToast(error.message || 'Failed to delete address', 'error');
+    } finally {
+      setShowDeleteAddressConfirm(false);
+      setAddressToDelete(null);
     }
   };
 
@@ -735,30 +892,6 @@ export function Profile() {
     }
   };
 
-  // Mock statistics
-  const stats = {
-    totalOrders: 12,
-    totalSpent: 2450.99,
-    wishlistItems: wishlistItems.length,
-    cartItems: cartItems.length,
-    reviews: 8,
-    averageRating: 4.7,
-  };
-
-  const recentActivity = [
-    { id: 'a1', title: 'Order #12345 delivered', detail: 'Nike Air Max 270 • RWF 180,000', time: '2h ago' },
-    { id: 'a2', title: 'Wishlist updated', detail: 'Added 2 items to Wishlist', time: '1d ago' },
-    { id: 'a3', title: 'Payment method added', detail: 'Visa •••• 4242', time: '3d ago' },
-    { id: 'a4', title: 'Security', detail: 'Two-factor authentication enabled', time: '5d ago' },
-  ];
-
-  const loyalty = {
-    tier: 'Gold',
-    points: 3280,
-    nextTier: 'Platinum',
-    progress: 72,
-    perks: ['Priority support', 'Early access', 'Free returns'],
-  };
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-[#0b0c10]">
@@ -792,7 +925,9 @@ export function Profile() {
                         <h1 className="text-3xl sm:text-4xl font-bold text-gray-900 dark:text-white">
                           {user.full_name || 'User'}
                         </h1>
-                        <span className="px-3 py-1 rounded-full bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-200 text-xs font-semibold uppercase tracking-wide">Loyalty {loyalty.tier}</span>
+                        {loyalty && (
+                          <span className="px-3 py-1 rounded-full bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-200 text-xs font-semibold uppercase tracking-wide">Loyalty {loyalty.tier}</span>
+                        )}
                       </div>
                       <div className="flex flex-wrap items-center gap-3 mt-2 text-sm text-gray-700 dark:text-gray-200">
                         <div className="flex items-center gap-1.5">
@@ -819,27 +954,29 @@ export function Profile() {
                     </div>
                   </div>
 
-                  {/* Loyalty strip */}
-                  <div className="flex flex-wrap items-center gap-4 text-sm text-gray-700 dark:text-gray-200">
-                    <div className="flex items-center gap-2">
-                      <Award className="h-4 w-4" />
-                      <span>{loyalty.points} pts</span>
-                    </div>
-                    <div className="flex-1 min-w-[200px]">
-                      <div className="flex items-center justify-between text-xs mb-1">
-                        <span>Progress to {loyalty.nextTier}</span>
-                        <span>{loyalty.progress}%</span>
+                  {/* Loyalty strip - Only show if loyalty data exists */}
+                  {loyalty && (
+                    <div className="flex flex-wrap items-center gap-4 text-sm text-gray-700 dark:text-gray-200">
+                      <div className="flex items-center gap-2">
+                        <Award className="h-4 w-4" />
+                        <span>{loyalty.points} pts</span>
                       </div>
-                      <div className="h-2 bg-white/20 rounded-full overflow-hidden">
-                        <div className="h-full bg-white/90" style={{ width: `${loyalty.progress}%` }} />
+                      <div className="flex-1 min-w-[200px]">
+                        <div className="flex items-center justify-between text-xs mb-1">
+                          <span>Progress to {loyalty.nextTier}</span>
+                          <span>{loyalty.progress}%</span>
+                        </div>
+                        <div className="h-2 bg-white/20 rounded-full overflow-hidden">
+                          <div className="h-full bg-white/90" style={{ width: `${loyalty.progress}%` }} />
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs">
+                        {loyalty.perks.slice(0, 3).map((perk) => (
+                          <span key={perk} className="px-2 py-1 rounded-full bg-white/15 border border-white/20">{perk}</span>
+                        ))}
                       </div>
                     </div>
-                    <div className="flex items-center gap-2 text-xs">
-                      {loyalty.perks.slice(0, 3).map((perk) => (
-                        <span key={perk} className="px-2 py-1 rounded-full bg-white/15 border border-white/20">{perk}</span>
-                      ))}
-                    </div>
-                  </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -888,7 +1025,7 @@ export function Profile() {
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
                   {[
                     { label: 'Total Orders', value: stats.totalOrders, icon: Package, accent: 'from-blue-50 to-blue-100 dark:from-blue-900/30 dark:to-blue-900/10', text: 'text-blue-600 dark:text-blue-300' },
-                    { label: 'Total Spent', value: `$${stats.totalSpent.toFixed(2)}`, icon: TrendingUp, accent: 'from-green-50 to-green-100 dark:from-green-900/30 dark:to-green-900/10', text: 'text-green-600 dark:text-green-300' },
+                    { label: 'Total Spent', value: formatCurrency(stats.totalSpent, currency as 'USD' | 'EUR' | 'RWF' | 'KES'), icon: TrendingUp, accent: 'from-green-50 to-green-100 dark:from-green-900/30 dark:to-green-900/10', text: 'text-green-600 dark:text-green-300' },
                     { label: 'Wishlist Items', value: stats.wishlistItems, icon: Heart, accent: 'from-red-50 to-red-100 dark:from-red-900/30 dark:to-red-900/10', text: 'text-red-600 dark:text-red-300' },
                     { label: 'Avg Rating', value: stats.averageRating, icon: Star, accent: 'from-orange-50 to-orange-100 dark:from-orange-900/30 dark:to-orange-900/10', text: 'text-orange-600 dark:text-orange-300' },
                   ].map((card) => {
@@ -979,7 +1116,7 @@ export function Profile() {
                   <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-4 sm:p-6 border border-gray-100 dark:border-gray-700/60">
                     <h2 className="text-lg sm:text-xl font-bold text-gray-900 dark:text-white mb-4">Recent Activity</h2>
                     <div className="space-y-3">
-                      {recentActivity.map((item) => (
+                      {recentActivity.length > 0 ? recentActivity.map((item) => (
                         <div key={item.id} className="flex items-start gap-3 p-3 rounded-lg border border-gray-100 dark:border-gray-700/60 hover:border-orange-200 dark:hover:border-orange-700/60 transition-colors">
                           <div className="p-2 rounded-full bg-orange-50 dark:bg-orange-900/30">
                             <Clock className="h-4 w-4 text-orange-600 dark:text-orange-400" />
@@ -990,28 +1127,35 @@ export function Profile() {
                           </div>
                           <span className="text-xs text-gray-500 dark:text-gray-400">{item.time}</span>
                         </div>
-                      ))}
+                      )) : (
+                        <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                          <Clock className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                          <p className="text-sm">No recent activity</p>
+                        </div>
+                      )}
                     </div>
                   </div>
 
-                  <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-4 sm:p-6 border border-gray-100 dark:border-gray-700/60">
-                    <h2 className="text-lg sm:text-xl font-bold text-gray-900 dark:text-white mb-2">Loyalty</h2>
-                    <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">Gold • {loyalty.points} pts</p>
-                    <div className="h-2 rounded-full bg-gray-100 dark:bg-gray-700 mb-3 overflow-hidden">
-                      <div className="h-full bg-gradient-to-r from-orange-500 to-pink-500" style={{ width: `${loyalty.progress}%` }} />
+                  {loyalty && (
+                    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-4 sm:p-6 border border-gray-100 dark:border-gray-700/60">
+                      <h2 className="text-lg sm:text-xl font-bold text-gray-900 dark:text-white mb-2">Loyalty</h2>
+                      <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">{loyalty.tier} • {loyalty.points} pts</p>
+                      <div className="h-2 rounded-full bg-gray-100 dark:bg-gray-700 mb-3 overflow-hidden">
+                        <div className="h-full bg-gradient-to-r from-orange-500 to-pink-500" style={{ width: `${loyalty.progress}%` }} />
+                      </div>
+                      <div className="flex items-center justify-between text-xs text-gray-600 dark:text-gray-400 mb-4">
+                        <span>Progress to {loyalty.nextTier}</span>
+                        <span>{loyalty.progress}%</span>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {loyalty.perks.map((perk) => (
+                          <span key={perk} className="px-2 py-1 rounded-full bg-orange-50 dark:bg-orange-900/20 text-orange-700 dark:text-orange-300 text-xs font-semibold">
+                            {perk}
+                          </span>
+                        ))}
+                      </div>
                     </div>
-                    <div className="flex items-center justify-between text-xs text-gray-600 dark:text-gray-400 mb-4">
-                      <span>Progress to {loyalty.nextTier}</span>
-                      <span>{loyalty.progress}%</span>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {loyalty.perks.map((perk) => (
-                        <span key={perk} className="px-2 py-1 rounded-full bg-orange-50 dark:bg-orange-900/20 text-orange-700 dark:text-orange-300 text-xs font-semibold">
-                          {perk}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
+                  )}
                 </div>
               </>
             )}
@@ -1734,6 +1878,21 @@ export function Profile() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Delete Address Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={showDeleteAddressConfirm}
+        onClose={() => {
+          setShowDeleteAddressConfirm(false);
+          setAddressToDelete(null);
+        }}
+        onConfirm={confirmDeleteAddress}
+        title="Delete Address"
+        message="Are you sure you want to delete this address? This action cannot be undone."
+        confirmText="Delete"
+        cancelText="Cancel"
+        variant="danger"
+      />
 
       <Footer />
     </div>

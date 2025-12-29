@@ -1,5 +1,4 @@
 import { create } from 'zustand';
-import { supabase } from '../lib/supabase';
 import type { Profile } from '../types';
 
 interface AuthState {
@@ -21,7 +20,6 @@ export const useAuthStore = create<AuthState>((set) => ({
   setUser: (user) => set({ user, loading: false }),
 
   signOut: async () => {
-    await supabase.auth.signOut();
     localStorage.removeItem('demo_user');
     localStorage.removeItem('user');
     localStorage.removeItem('auth_token');
@@ -146,44 +144,8 @@ export const useAuthStore = create<AuthState>((set) => ({
         }
       }
 
-      // Try Supabase session (legacy)
-      const { data, error } = await supabase.auth.getSession();
-
-      if (error) {
-        console.error('Error getting session:', error);
-        set({ user: null, loading: false, initialized: true });
-        return;
-      }
-
-      const session = data?.session;
-
-      if (session?.user) {
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', session.user.id)
-          .maybeSingle();
-
-        set({ user: profile, loading: false, initialized: true });
-      } else {
-        set({ user: null, loading: false, initialized: true });
-      }
-
-      supabase.auth.onAuthStateChange((_event, session) => {
-        (async () => {
-          if (session?.user) {
-            const { data: profile } = await supabase
-              .from('profiles')
-              .select('*')
-              .eq('id', session.user.id)
-              .maybeSingle();
-
-            set({ user: profile, loading: false });
-          } else {
-            set({ user: null, loading: false });
-          }
-        })();
-      });
+      // No user found, set to null
+      set({ user: null, loading: false, initialized: true });
     } catch (error) {
       console.error('Error initializing auth:', error);
       set({ user: null, loading: false, initialized: true });

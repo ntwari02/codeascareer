@@ -41,6 +41,17 @@ const getFileUrl = (path: string): string => {
   return `${serverBase}${path.startsWith('/') ? path : '/' + path}`;
 };
 
+// Helper to resolve avatar URL (handles both full URLs and relative paths)
+const resolveAvatarUrl = (url: string | null | undefined): string | null => {
+  if (!url) return null;
+  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) {
+    return url;
+  }
+  // If it's a relative path, prepend the API host
+  const API_HOST = import.meta.env.VITE_API_URL?.replace('/api', '') || 'http://localhost:5000';
+  return `${API_HOST}${url.startsWith('/') ? url : '/' + url}`;
+};
+
 const InboxPage: React.FC = () => {
   const { showToast } = useToastStore();
   const { user } = useAuthStore();
@@ -856,7 +867,7 @@ const InboxPage: React.FC = () => {
         showNotification(
           buyerName,
           message.content.substring(0, 50) + (message.content.length > 50 ? '...' : ''),
-          typeof thread?.buyerId === 'object' ? thread.buyerId.avatarUrl : undefined
+          typeof thread?.buyerId === 'object' ? resolveAvatarUrl(thread.buyerId.avatarUrl) : undefined
         );
         showToast(`New message from ${buyerName}`, 'info');
       }
@@ -960,14 +971,30 @@ const InboxPage: React.FC = () => {
     <div className="space-y-4 sm:space-y-6 h-full flex flex-col">
       {/* Header - Responsive */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
-        <div className="min-w-0 flex-1">
-          <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900 dark:text-white flex items-center gap-2 transition-colors duration-300">
-            <MessageCircle className="w-5 h-5 sm:w-6 sm:h-6 md:w-7 md:h-7 text-red-400 flex-shrink-0" />
-            <span className="truncate">Inbox & RFQ Communications</span>
-          </h1>
-          <p className="text-gray-600 dark:text-gray-400 mt-1 text-xs sm:text-sm transition-colors duration-300">
-            Central place for buyer messages, RFQs, and negotiation threads.
-          </p>
+        <div className="min-w-0 flex-1 flex items-center gap-3 sm:gap-4">
+          {/* User Profile Avatar */}
+          <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-gradient-to-br from-red-400 to-orange-500 overflow-hidden flex-shrink-0 border-2 border-white dark:border-gray-800 shadow-md">
+            {user?.avatar_url ? (
+              <img
+                src={resolveAvatarUrl(user.avatar_url) || ''}
+                alt={user.full_name || user.email || 'User'}
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center text-white font-bold text-lg sm:text-xl">
+                {(user?.full_name || user?.email || 'U')[0].toUpperCase()}
+              </div>
+            )}
+          </div>
+          <div className="min-w-0 flex-1">
+            <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900 dark:text-white flex items-center gap-2 transition-colors duration-300">
+              <MessageCircle className="w-5 h-5 sm:w-6 sm:h-6 md:w-7 md:h-7 text-red-400 flex-shrink-0" />
+              <span className="truncate">Inbox & RFQ Communications</span>
+            </h1>
+            <p className="text-gray-600 dark:text-gray-400 mt-1 text-xs sm:text-sm transition-colors duration-300">
+              Central place for buyer messages, RFQs, and negotiation threads.
+            </p>
+          </div>
         </div>
         <button
           onClick={() => {
@@ -1052,6 +1079,7 @@ const InboxPage: React.FC = () => {
               ) : (
                 threads.map((thread) => {
                   const isActive = thread._id === activeThread?._id;
+                  const buyer = typeof thread.buyerId === 'object' ? thread.buyerId : null;
                 return (
                   <button
                       key={thread._id}
@@ -1061,6 +1089,7 @@ const InboxPage: React.FC = () => {
                     }`}
                   >
                     {/* Buyer Avatar */}
+<<<<<<< HEAD
                     <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-xs sm:text-sm font-semibold text-white flex-shrink-0 overflow-hidden">
                       {typeof thread.buyerId === 'object' && thread.buyerId.avatarUrl && thread.buyerId.avatarUrl.trim() ? (
                         <img
@@ -1112,6 +1141,46 @@ const InboxPage: React.FC = () => {
                             {thread.sellerUnreadCount > 0 && (
                           <span className="w-2 h-2 rounded-full bg-red-500 dark:bg-red-400 flex-shrink-0" />
                         )}
+=======
+                    <div className="relative flex-shrink-0">
+                      <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 overflow-hidden">
+                        {buyer?.avatarUrl ? (
+                          <img
+                            src={resolveAvatarUrl(buyer.avatarUrl) || ''}
+                            alt={buyer.fullName || 'Buyer'}
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center text-white font-bold text-sm sm:text-base">
+                            {(buyer?.fullName || 'B')[0].toUpperCase()}
+                          </div>
+                        )}
+                      </div>
+                      {thread.type === 'rfq' && (
+                        <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-purple-500 rounded-full border-2 border-white dark:border-gray-800 flex items-center justify-center">
+                          <Mail className="h-3 w-3 text-white" />
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0 flex flex-col gap-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-sm font-semibold text-gray-900 dark:text-white line-clamp-1">
+                            {buyer?.fullName || 'Buyer'}
+                        </p>
+                          <span className="text-[11px] text-gray-500 dark:text-gray-400 flex-shrink-0">
+                            {formatTime(thread.lastMessageAt)}
+                          </span>
+                      </div>
+                      <p className="text-xs text-gray-700 dark:text-gray-300 line-clamp-1">{thread.subject}</p>
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-[11px] text-gray-500 dark:text-gray-400 line-clamp-1">
+                            {thread.lastMessagePreview}
+                        </p>
+                        <div className="flex items-center gap-1">
+                          {thread.sellerUnreadCount > 0 && (
+                            <span className="w-2 h-2 rounded-full bg-red-500 dark:bg-red-400 flex-shrink-0" />
+                          )}
+>>>>>>> c6abe0e33842de587eb46e6f3a68efa1ad54fa15
                         </div>
                       </div>
                     </div>
@@ -1144,7 +1213,7 @@ const InboxPage: React.FC = () => {
                       <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center overflow-hidden">
                         {typeof activeThread.buyerId === 'object' && activeThread.buyerId.avatarUrl && activeThread.buyerId.avatarUrl.trim() ? (
                           <img
-                            src={activeThread.buyerId.avatarUrl}
+                            src={resolveAvatarUrl(activeThread.buyerId.avatarUrl) || activeThread.buyerId.avatarUrl}
                             alt={activeThread.buyerId.fullName || 'Buyer'}
                             className="w-full h-full object-cover"
                             onError={(e) => {
@@ -1200,7 +1269,12 @@ const InboxPage: React.FC = () => {
             </div>
 
                 {/* Messages area - Responsive */}
-                <div className="flex-1 overflow-y-auto overflow-x-hidden scroll-smooth px-2 sm:px-3 md:px-4 py-2 sm:py-3 space-y-2 sm:space-y-3 bg-gray-50/60 dark:bg-black/30 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:dark:bg-gray-700 hover:[&::-webkit-scrollbar-thumb]:bg-gray-400 dark:hover:[&::-webkit-scrollbar-thumb]:bg-gray-600">
+                <div 
+                  className="flex-1 overflow-y-auto overflow-x-hidden scroll-smooth px-2 sm:px-3 md:px-4 py-2 sm:py-3 space-y-2 sm:space-y-3 bg-gray-50/60 dark:bg-gray-900/50 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:dark:bg-gray-700 hover:[&::-webkit-scrollbar-thumb]:bg-gray-400 dark:hover:[&::-webkit-scrollbar-thumb]:bg-gray-600" 
+                  style={{ 
+                    backgroundImage: 'url("data:image/svg+xml,%3Csvg width=\'60\' height=\'60\' viewBox=\'0 0 60 60\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cg fill=\'none\' fill-rule=\'evenodd\'%3E%3Cg fill=\'%23d4d4d4\' fill-opacity=\'0.1\'%3E%3Cpath d=\'M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z\'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")'
+                  }}
+                >
                   {messages.map((message) => {
                     const isSeller = message.senderType === 'seller';
                     const isDeleted = message.isDeleted;
@@ -1214,7 +1288,7 @@ const InboxPage: React.FC = () => {
                           <div className="w-7 h-7 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-[11px] font-semibold text-white flex-shrink-0 overflow-hidden">
                             {typeof message.senderId === 'object' && message.senderId.avatarUrl && message.senderId.avatarUrl.trim() ? (
                               <img
-                                src={message.senderId.avatarUrl}
+                                src={resolveAvatarUrl(message.senderId.avatarUrl) || message.senderId.avatarUrl}
                                 alt={message.senderId.fullName || 'Buyer'}
                                 className="w-full h-full object-cover"
                                 onError={(e) => {

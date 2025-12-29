@@ -270,7 +270,7 @@ export async function createThread(req: AuthenticatedRequest, res: Response) {
     return res.status(201).json({ thread: populatedThread });
   } catch (error: any) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({ message: 'Validation error', errors: error.errors });
+      return res.status(400).json({ message: 'Validation error', errors: error.issues });
     }
     console.error('Create thread error:', error);
     return res.status(500).json({ message: 'Failed to create thread', error: error.message });
@@ -318,8 +318,8 @@ export async function sendMessage(req: AuthenticatedRequest, res: Response) {
       const mainMessage = errorMessages[0] || 'Validation error';
       return res.status(400).json({
         message: mainMessage,
-        errors: validation.error.errors,
-        details: validation.error.errors.map(e => ({
+        errors: validation.error.issues,
+        details: validation.error.issues.map((e: any) => ({
           field: e.path.join('.'),
           message: e.message,
         })),
@@ -418,7 +418,8 @@ export async function sendMessage(req: AuthenticatedRequest, res: Response) {
     await thread.save();
 
     // Populate message
-    const populatedMessage = await Message.findById(message._id)
+    const messageId = (message as any)._id;
+    const populatedMessage = await Message.findById(messageId)
       .populate('senderId', 'fullName email avatarUrl')
       .populate('replyTo', 'content senderId senderType')
       .lean();
@@ -429,8 +430,8 @@ export async function sendMessage(req: AuthenticatedRequest, res: Response) {
 
     // Update message status to 'delivered' after a short delay (simulating delivery)
     setTimeout(async () => {
-      await Message.updateOne({ _id: message._id }, { status: 'delivered' });
-      const updatedMessage = await Message.findById(message._id)
+      await Message.updateOne({ _id: messageId }, { status: 'delivered' });
+      const updatedMessage = await Message.findById(messageId)
         .populate('senderId', 'fullName email avatarUrl')
         .populate('replyTo', 'content senderId senderType')
         .lean();
@@ -442,7 +443,7 @@ export async function sendMessage(req: AuthenticatedRequest, res: Response) {
     return res.status(201).json({ message: populatedMessage });
   } catch (error: any) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({ message: 'Validation error', errors: error.errors });
+      return res.status(400).json({ message: 'Validation error', errors: error.issues });
     }
     console.error('Send message error:', error);
     console.error('[Controller] Send message error:', error);
@@ -542,7 +543,7 @@ export async function updateThread(req: AuthenticatedRequest, res: Response) {
     return res.json({ thread });
   } catch (error: any) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({ message: 'Validation error', errors: error.errors });
+      return res.status(400).json({ message: 'Validation error', errors: error.issues });
     }
     console.error('Update thread error:', error);
     return res.status(500).json({ message: 'Failed to update thread', error: error.message });
@@ -630,7 +631,7 @@ export async function editMessage(req: AuthenticatedRequest, res: Response) {
     return res.json({ message });
   } catch (error: any) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({ message: 'Validation error', errors: error.errors });
+      return res.status(400).json({ message: 'Validation error', errors: error.issues });
     }
     console.error('Edit message error:', error);
     return res.status(500).json({ message: 'Failed to edit message', error: error.message });
@@ -710,8 +711,9 @@ export async function reactToMessage(req: AuthenticatedRequest, res: Response) {
     }
 
     // Toggle reaction
+    const buyerIdStr = buyerId.toString();
     const existingReactionIndex = message.reactions.findIndex(
-      (r) => r.userId.toString() === buyerId && r.emoji === validated.emoji
+      (r) => r.userId.toString() === buyerIdStr && r.emoji === validated.emoji
     );
 
     if (existingReactionIndex >= 0) {
@@ -742,7 +744,7 @@ export async function reactToMessage(req: AuthenticatedRequest, res: Response) {
     return res.json({ message: populatedMessage, reactions: populatedMessage?.reactions || [] });
   } catch (error: any) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({ message: 'Validation error', errors: error.errors });
+      return res.status(400).json({ message: 'Validation error', errors: error.issues });
     }
     console.error('React to message error:', error);
     return res.status(500).json({ message: 'Failed to react to message', error: error.message });
@@ -811,7 +813,7 @@ export async function forwardMessage(req: AuthenticatedRequest, res: Response) {
     return res.json({ message: populatedMessage });
   } catch (error: any) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({ message: 'Validation error', errors: error.errors });
+      return res.status(400).json({ message: 'Validation error', errors: error.issues });
     }
     console.error('Forward message error:', error);
     return res.status(500).json({ message: 'Failed to forward message', error: error.message });

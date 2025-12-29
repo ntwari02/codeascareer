@@ -1,9 +1,12 @@
 import { Router } from 'express';
-import { trackProductView, getProductById } from '../controllers/productController';
+import { listProducts, trackProductView, getProductById } from '../controllers/productController';
 
 const router = Router();
 
 // Public routes (no authentication required for viewing products)
+// List all products (with filtering and pagination)
+router.get('/', listProducts);
+
 // Track product view
 router.post('/:productId/view', trackProductView);
 

@@ -200,7 +200,6 @@ export function Header() {
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearchSuggestions, setShowSearchSuggestions] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
-  const [showCartPreview, setShowCartPreview] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [searchResults, setSearchResults] = useState<{
@@ -214,7 +213,6 @@ export function Header() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const [searchModalPosition, setSearchModalPosition] = useState<{ top: number; left: number; width: number } | null>(null);
-  const [cartPreviewPosition, setCartPreviewPosition] = useState<{ top: number; right: number } | null>(null);
   const [imageFileName, setImageFileName] = useState<string | null>(null);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [avatarKey, setAvatarKey] = useState(0); // Force re-render counter for avatar updates
@@ -222,8 +220,6 @@ export function Header() {
   const { toast } = useToast();
 
   const searchRef = useRef<HTMLDivElement>(null);
-  const cartPreviewTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const cartRef = useRef<HTMLDivElement>(null);
   const notificationsRef = useRef<HTMLDivElement>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
 
@@ -329,38 +325,6 @@ export function Header() {
     };
   }, [showSearchSuggestions]);
 
-  // Update cart preview position on scroll/resize
-  useEffect(() => {
-    if (!showCartPreview || !cartRef.current) return;
-
-    const updatePosition = () => {
-      if (cartRef.current) {
-        const rect = cartRef.current.getBoundingClientRect();
-        setCartPreviewPosition({
-          top: rect.bottom + 8,
-          right: window.innerWidth - rect.right,
-        });
-      }
-    };
-
-    updatePosition();
-    window.addEventListener('scroll', updatePosition, true);
-    window.addEventListener('resize', updatePosition);
-
-    return () => {
-      window.removeEventListener('scroll', updatePosition, true);
-      window.removeEventListener('resize', updatePosition);
-    };
-  }, [showCartPreview]);
-
-  // Cleanup cart preview timeout on unmount
-  useEffect(() => {
-    return () => {
-      if (cartPreviewTimeoutRef.current) {
-        clearTimeout(cartPreviewTimeoutRef.current);
-      }
-    };
-  }, []);
 
   // Close dropdowns on outside click
   useEffect(() => {
@@ -370,10 +334,6 @@ export function Header() {
       if (searchRef.current && !searchRef.current.contains(target) && !target.closest('[data-search-modal]')) {
         setShowSearchSuggestions(false);
         setSearchModalPosition(null);
-      }
-      if (cartRef.current && !cartRef.current.contains(target)) {
-        setShowCartPreview(false);
-        setCartPreviewPosition(null);
       }
       if (notificationsRef.current && !notificationsRef.current.contains(target)) {
         setShowNotifications(false);
@@ -1142,106 +1102,19 @@ export function Header() {
                 )}
               </button>
 
-              {/* Cart with Hover Preview */}
-              <div className="relative" ref={cartRef}>
-                <button
-                  onClick={() => navigate('/cart')}
-                  onMouseEnter={() => {
-                    if (cartItems.length > 0 && cartRef.current && window.innerWidth >= 768) {
-                      const rect = cartRef.current.getBoundingClientRect();
-                      setCartPreviewPosition({
-                        top: rect.bottom + 8,
-                        right: window.innerWidth - rect.right,
-                      });
-                      setShowCartPreview(true);
-                    }
-                  }}
-                  onMouseLeave={() => {
-                    setShowCartPreview(false);
-                    setCartPreviewPosition(null);
-                  }}
-                  className="relative p-1.5 sm:p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-                  aria-label="Shopping cart"
-                >
-                  <ShoppingCart className="h-4 w-4 sm:h-5 sm:w-5 text-gray-600 dark:text-gray-400" />
-                  {cartCount > 0 && (
-                    <span className="absolute -top-0.5 -right-0.5 sm:-top-1 sm:-right-1 bg-orange-600 text-white text-[10px] sm:text-xs font-bold rounded-full h-4 w-4 sm:h-5 sm:w-5 flex items-center justify-center animate-pulse">
-                      {cartCount > 9 ? '9+' : cartCount}
-                    </span>
-                  )}
-                </button>
-                {showCartPreview && cartItems.length > 0 && cartPreviewPosition && createPortal(
-                  <div 
-                    className="fixed w-80 bg-white dark:bg-dark-card border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl z-[9999] backdrop-blur-xl"
-                    style={{
-                      top: `${cartPreviewPosition.top}px`,
-                      right: `${cartPreviewPosition.right}px`,
-                    }}
-                    onMouseEnter={() => {
-                      if (cartPreviewTimeoutRef.current) {
-                        clearTimeout(cartPreviewTimeoutRef.current);
-                        cartPreviewTimeoutRef.current = null;
-                      }
-                      setShowCartPreview(true);
-                    }}
-                    onMouseLeave={() => {
-                      cartPreviewTimeoutRef.current = setTimeout(() => {
-                        setShowCartPreview(false);
-                        setCartPreviewPosition(null);
-                      }, 300); // 300ms delay before closing
-                    }}
-                  >
-                    <div className="p-4 border-b border-gray-200 dark:border-gray-700">
-                      <h3 className="font-semibold text-gray-900 dark:text-white">Shopping Cart</h3>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">{cartCount} item(s)</p>
-                    </div>
-                    <div className="max-h-64 overflow-y-auto">
-                      {cartItems.slice(0, 5).map((item) => (
-                        <div key={item.id} className="p-3 border-b border-gray-100 dark:border-gray-800 flex items-center gap-3">
-                          <img
-                            src={item.product?.images?.[0]?.url || 'https://images.pexels.com/photos/90946/pexels-photo-90946.jpeg'}
-                            alt={item.product?.title}
-                            className="w-12 h-12 rounded-lg object-cover"
-                          />
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
-                              {item.product?.title}
-                            </p>
-                            <p className="text-xs text-gray-500 dark:text-gray-400">
-                              Qty: {item.quantity} × {formatCurrency((item.variant?.price || item.product?.price || 0), currency)}
-                            </p>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="p-4 border-t border-gray-200 dark:border-gray-700">
-                      <div className="flex items-center justify-between mb-3">
-                        <span className="text-sm font-semibold text-gray-900 dark:text-white">Total:</span>
-                        <span className="text-lg font-bold text-orange-600 dark:text-orange-400">
-                          {formatCurrency(cartTotal, currency)}
-                        </span>
-                      </div>
-                      <Link
-                        to="/cart"
-                        className="block w-full text-center px-4 py-2.5 bg-gradient-to-r from-orange-600 to-red-600 hover:from-orange-700 hover:to-red-700 text-white font-semibold rounded-lg transition-all"
-                        onMouseEnter={() => {
-                          if (cartPreviewTimeoutRef.current) {
-                            clearTimeout(cartPreviewTimeoutRef.current);
-                            cartPreviewTimeoutRef.current = null;
-                          }
-                        }}
-                        onClick={() => {
-                          setShowCartPreview(false);
-                          setCartPreviewPosition(null);
-                        }}
-                      >
-                        View Cart & Checkout
-                      </Link>
-                    </div>
-                  </div>,
-                  document.body
+              {/* Cart */}
+              <button
+                onClick={() => navigate('/cart')}
+                className="relative p-1.5 sm:p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                aria-label="Shopping cart"
+              >
+                <ShoppingCart className="h-4 w-4 sm:h-5 sm:w-5 text-gray-600 dark:text-gray-400" />
+                {cartCount > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 sm:-top-1 sm:-right-1 bg-orange-600 text-white text-[10px] sm:text-xs font-bold rounded-full h-4 w-4 sm:h-5 sm:w-5 flex items-center justify-center animate-pulse">
+                    {cartCount > 9 ? '9+' : cartCount}
+                  </span>
                 )}
-              </div>
+              </button>
 
               {/* Wishlist - Hidden on very small screens, shown in mobile menu */}
               <Link

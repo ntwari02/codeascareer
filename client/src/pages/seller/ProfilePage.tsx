@@ -1,11 +1,13 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { User, Mail, Phone, MapPin, Save, Edit, Lock, Shield, Bell, FileText, Building2, Clock, CreditCard, Landmark, Smartphone, Upload, X, Package, CheckCircle, Users, Eye, EyeOff, File, Download, ExternalLink, Trash2, History, TrendingUp } from 'lucide-react';
+import { User, Mail, Phone, MapPin, Save, Edit, Lock, Shield, Bell, FileText, Building2, Clock, CreditCard, Landmark, Smartphone, Upload, X, Package, CheckCircle, Users, Eye, EyeOff, File, Download, ExternalLink, Trash2, History, TrendingUp, Camera } from 'lucide-react';
 import { PasswordStrengthIndicator } from '@/components/ui/PasswordStrengthIndicator';
 import { RichTextEditor } from '@/components/ui/RichTextEditor';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useToastStore } from '@/stores/toastStore';
+import { useAuthStore } from '@/stores/authStore';
+import { profileAPI } from '@/lib/api';
 import imageCompression from 'browser-image-compression';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import InputDialog from '@/components/ui/InputDialog';
@@ -260,6 +262,23 @@ const ProfilePage: React.FC = () => {
   });
   const [_hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [_profileCompletion, setProfileCompletion] = useState(0);
+  
+  // Avatar upload state
+  const { user, setUser } = useAuthStore();
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+
+  // Helper to resolve avatar URL (handles both full URLs and relative paths)
+  const resolveAvatarUrl = (url: string | null | undefined): string | null => {
+    if (!url) return null;
+    if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) {
+      return url;
+    }
+    // If it's a relative path, prepend the API host
+    const API_HOST = import.meta.env.VITE_API_URL?.replace('/api', '') || 'http://localhost:5000';
+    return `${API_HOST}${url}`;
+  };
 
   // Load seller settings on mount
   useEffect(() => {
@@ -448,8 +467,13 @@ const ProfilePage: React.FC = () => {
         setIsLoading(false);
       }
     };
-
+    
     fetchSellerSettings();
+    
+    // Load avatar from user profile
+    if (user?.avatar_url) {
+      setAvatarPreview(resolveAvatarUrl(user.avatar_url));
+    }
     
     // Fetch 2FA status
     const fetch2FAStatus = async () => {
@@ -721,6 +745,120 @@ const ProfilePage: React.FC = () => {
       ...prev,
       [policyKey]: value,
     }));
+  };
+
+  // Handle avatar upload
+  const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      showToast('Please select an image file', 'error');
+      return;
+    }
+
+    // Validate file size (10MB limit)
+    if (file.size > 10 * 1024 * 1024) {
+      showToast('Image size must be less than 10MB', 'error');
+      return;
+    }
+
+    // Store the file for later upload
+    setAvatarFile(file);
+
+    // Create preview
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setAvatarPreview(reader.result as string);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // Upload avatar when save is clicked
+  const handleAvatarUpload = async () => {
+    if (!avatarFile) return;
+
+    setIsUploadingAvatar(true);
+    try {
+      // Compress the image before uploading
+      const compressionOptions = {
+        maxSizeMB: 0.5, // 500KB max for avatar (smaller than logo/banner)
+        maxWidthOrHeight: 512, // 512px max dimension for avatar (square)
+        useWebWorker: true,
+        fileType: avatarFile.type,
+        initialQuality: 0.85, // 85% quality for good balance
+      };
+
+      const compressedFile = await imageCompression(avatarFile, compressionOptions);
+      
+      // Create a new File with the original name and type for backend validation
+      // File properties are read-only, so we need to create a new File object
+      let fileToUpload: File;
+      
+      // Always create a new File to ensure correct name and type for backend validation
+      try {
+        // Read the compressed file as an ArrayBuffer
+        const arrayBuffer = await compressedFile.arrayBuffer();
+        
+        // Create a new File with the correct name and type
+        // File constructor is supported in all modern browsers
+        fileToUpload = new File(
+          [arrayBuffer],
+          avatarFile.name,
+          {
+            type: avatarFile.type,
+            lastModified: Date.now(),
+          }
+        );
+      } catch (error) {
+        // Fallback: if File constructor fails, use the compressed file as-is
+        // The backend should still accept it if the MIME type is correct
+        console.warn('Failed to create new File object, using compressed file as-is:', error);
+        fileToUpload = compressedFile;
+      }
+      
+      // Log compression results for debugging
+      const originalSize = (avatarFile.size / 1024 / 1024).toFixed(2);
+      const compressedSize = (compressedFile.size / 1024 / 1024).toFixed(2);
+      const compressionRatio = ((1 - compressedFile.size / avatarFile.size) * 100).toFixed(1);
+      console.log(`Avatar compressed: ${originalSize}MB → ${compressedSize}MB (${compressionRatio}% reduction)`);
+      
+      // If file is still too large after compression, show warning
+      if (compressedFile.size > 2 * 1024 * 1024) {
+        showToast('Image is still large after compression. Please try a smaller image.', 'warning');
+      }
+
+      const uploadResponse = await profileAPI.uploadAvatar(fileToUpload);
+      const uploadedAvatarUrl = uploadResponse.avatarUrl;
+      setAvatarFile(null); // Clear the file after successful upload
+      
+      // Update preview with the uploaded URL
+      setAvatarPreview(resolveAvatarUrl(uploadedAvatarUrl));
+
+      // Immediately update user state with new avatar URL
+      if (user) {
+        const updatedUser = {
+          ...user,
+          avatar_url: uploadedAvatarUrl,
+          updated_at: new Date().toISOString(),
+        };
+        setUser(updatedUser);
+        localStorage.setItem('user', JSON.stringify(updatedUser));
+
+        // Trigger avatar update event immediately
+        window.dispatchEvent(new CustomEvent('avatarUpdated', {
+          detail: { avatarUrl: uploadedAvatarUrl }
+        }));
+      }
+
+      showToast('Profile picture updated successfully', 'success');
+    } catch (error: any) {
+      console.error('Failed to upload avatar:', error);
+      showToast(error.message || 'Failed to upload profile picture', 'error');
+    } finally {
+      setIsUploadingAvatar(false);
+    }
   };
 
   const handleImageUpload = async (file: File, key: 'storeLogo' | 'storeBanner') => {
@@ -1069,6 +1207,81 @@ const ProfilePage: React.FC = () => {
           {!isLoading && (
             <>
             <div className="lg:col-span-2 space-y-6">
+            {/* Profile Picture */}
+            <div className="bg-white/50 dark:bg-gray-900/50 rounded-xl p-4 sm:p-6 border border-gray-200 dark:border-gray-700/30 transition-colors duration-300">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 mb-4 sm:mb-6">
+                <h2 className="text-lg sm:text-xl font-bold text-gray-900 dark:text-white transition-colors duration-300 flex items-center gap-2">
+                  <User className="w-5 h-5 sm:w-6 sm:h-6 text-red-400 flex-shrink-0" />
+                  <span>Profile Picture</span>
+                </h2>
+              </div>
+
+              <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4 sm:gap-6">
+                {/* Avatar Display */}
+                <div className="relative">
+                  <div className="w-24 h-24 sm:w-32 sm:h-32 rounded-full border-4 border-gray-200 dark:border-gray-700 overflow-hidden bg-gray-100 dark:bg-gray-800 shadow-lg">
+                    {avatarPreview ? (
+                      <img
+                        src={avatarPreview}
+                        alt={user?.full_name || user?.email || 'Profile'}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-red-400 to-orange-500">
+                        <User className="w-12 h-12 sm:w-16 sm:h-16 text-white" />
+                      </div>
+                    )}
+                  </div>
+                  {isUploadingAvatar && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-full">
+                      <motion.div
+                        animate={{ rotate: 360 }}
+                        transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                        className="w-8 h-8 border-4 border-white border-t-transparent rounded-full"
+                      />
+                    </div>
+                  )}
+                </div>
+
+                {/* Upload Controls */}
+                <div className="flex-1 space-y-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Upload Profile Picture
+                    </label>
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <label className="flex-1 cursor-pointer">
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={handleAvatarChange}
+                          className="hidden"
+                        />
+                        <div className="flex items-center justify-center gap-2 px-4 py-2.5 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors">
+                          <Camera className="w-4 h-4 text-gray-600 dark:text-gray-400" />
+                          <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                            {avatarFile ? 'Change Picture' : 'Choose Picture'}
+                          </span>
+                        </div>
+                      </label>
+                      {avatarFile && (
+                        <Button
+                          onClick={handleAvatarUpload}
+                          disabled={isUploadingAvatar}
+                          className="bg-red-500 hover:bg-red-600 text-white"
+                        >
+                          {isUploadingAvatar ? 'Uploading...' : 'Upload'}
+                        </Button>
+                      )}
+                    </div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                      Recommended: Square image, max 10MB. JPG, PNG, or GIF.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             {/* Store Information */}
             <div className="bg-white/50 dark:bg-gray-900/50 rounded-xl p-4 sm:p-6 border border-gray-200 dark:border-gray-700/30 transition-colors duration-300">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 mb-4 sm:mb-6">

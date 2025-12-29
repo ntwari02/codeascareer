@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import { ChevronDown, ChevronUp, Check, X, SlidersHorizontal, Search, Save, RotateCcw } from 'lucide-react';
+import { ChevronDown, ChevronUp, Check, X, SlidersHorizontal, Search, Save, RotateCcw, Filter } from 'lucide-react';
 import { useAuthStore } from '../../stores/authStore';
 import type { Product } from '../../types';
 
@@ -50,6 +50,9 @@ interface FilterOption {
 interface ProductFiltersProps {
   products: Product[];
   onFilterChange: (filters: FilterState) => void;
+  showFilters?: boolean;
+  onToggleFilters?: () => void;
+  getTotalActiveFilters?: number;
 }
 
 export interface FilterState {
@@ -150,11 +153,14 @@ const RATING_OPTIONS = [
   { value: 2, label: '2+ Stars', stars: 2 },
 ];
 
-export function ProductFilters({ products, onFilterChange }: ProductFiltersProps) {
+export function ProductFilters({ products, onFilterChange, showFilters: externalShowFilters, onToggleFilters, getTotalActiveFilters: externalGetTotalActiveFilters }: ProductFiltersProps) {
   const { user } = useAuthStore();
   const [openFilter, setOpenFilter] = useState<string | null>(null);
   const [dropdownPosition, setDropdownPosition] = useState<{ top: number; left: number } | null>(null);
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+  const [internalShowFilters, setInternalShowFilters] = useState(false);
+  const showFilters = externalShowFilters !== undefined ? externalShowFilters : internalShowFilters;
+  const handleToggleFilters = onToggleFilters || (() => setInternalShowFilters(!internalShowFilters));
   const [searchQuery, setSearchQuery] = useState<Record<string, string>>({});
   const [localSearchQuery, setLocalSearchQuery] = useState<Record<string, string>>({});
   
@@ -341,7 +347,7 @@ export function ProductFilters({ products, onFilterChange }: ProductFiltersProps
     return (filters[filterKey] as string[]).length;
   }, [filters]);
 
-  const getTotalActiveFilters = useMemo(() => {
+  const internalGetTotalActiveFilters = useMemo(() => {
     return (
       filters.category.length +
       filters.brand.length +
@@ -369,6 +375,8 @@ export function ProductFilters({ products, onFilterChange }: ProductFiltersProps
     filters.quickFilters.length,
     filters.sort,
   ]);
+  
+  const getTotalActiveFilters = externalGetTotalActiveFilters !== undefined ? externalGetTotalActiveFilters : internalGetTotalActiveFilters;
 
   // Filter options based on search (using debounced search query)
   const getFilteredOptions = (options: FilterOption[], filterType: string): FilterOption[] => {
@@ -592,23 +600,25 @@ export function ProductFilters({ products, onFilterChange }: ProductFiltersProps
         <button
           ref={el => buttonRefs.current[filterId] = el}
           onClick={() => toggleFilter(filterId)}
-          className={`flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 lg:px-4 py-1.5 sm:py-2 lg:py-2.5 rounded-lg transition-all whitespace-nowrap text-xs sm:text-sm ${
+          className={`flex items-center justify-between gap-1 px-2 py-1 rounded-md transition-all whitespace-nowrap text-[10px] sm:text-xs border ${
             isOpen || selectedCount > 0
-              ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
-              : 'bg-white dark:bg-dark-card text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+              ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 border-blue-300 dark:border-blue-700'
+              : 'bg-white dark:bg-dark-card text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 border-gray-200 dark:border-gray-700'
           }`}
         >
-          <span className="font-medium">{label}</span>
-          {selectedCount > 0 && (
-            <span className="bg-blue-600 text-white text-[10px] sm:text-xs px-1 sm:px-1.5 py-0.5 rounded-full min-w-[16px] sm:min-w-[20px] text-center">
-              {selectedCount}
-            </span>
-          )}
-          {isOpen ? (
-            <ChevronUp className="h-3 w-3 sm:h-4 sm:w-4 flex-shrink-0" />
-          ) : (
-            <ChevronDown className="h-3 w-3 sm:h-4 sm:w-4 flex-shrink-0" />
-          )}
+          <span className="font-medium truncate">{label}</span>
+          <div className="flex items-center gap-0.5 flex-shrink-0">
+            {selectedCount > 0 && (
+              <span className="bg-blue-600 text-white text-[9px] px-1 py-0.5 rounded-full min-w-[14px] text-center">
+                {selectedCount}
+              </span>
+            )}
+            {isOpen ? (
+              <ChevronUp className="h-3 w-3 flex-shrink-0" />
+            ) : (
+              <ChevronDown className="h-3 w-3 flex-shrink-0" />
+            )}
+          </div>
         </button>
 
         {isOpen && dropdownPosition && (
@@ -858,11 +868,27 @@ export function ProductFilters({ products, onFilterChange }: ProductFiltersProps
         </div>
       )}
 
-      {/* Main Filter Bar */}
-      <div className="bg-white dark:bg-dark-card sticky z-40" style={{ top: getTotalActiveFilters > 0 ? '145px' : '73px' }}>
-        <div className="w-full px-1 sm:px-2 lg:px-6 xl:px-8">
-          {/* Primary Filter Bar */}
-          <div className="flex items-center gap-1 sm:gap-1.5 lg:gap-3 py-2 sm:py-3 overflow-x-auto scrollbar-hide -mx-1 sm:-mx-2 lg:mx-0 px-1 sm:px-2 lg:px-0">
+      {/* Main Filter Bar - Only show when filters are toggled on */}
+      {showFilters && (
+        <div className="bg-white dark:bg-dark-card sticky z-40" style={{ top: getTotalActiveFilters > 0 ? '145px' : '73px' }}>
+          <div className="w-full px-1 sm:px-2 lg:px-6 xl:px-8">
+            {/* Clear All Button - Only show if filters are visible */}
+            {getTotalActiveFilters > 0 && (
+              <div className="flex items-center justify-end py-1.5 sm:py-2 border-b border-gray-200 dark:border-gray-700">
+                <button
+                  onClick={clearAllFilters}
+                  className="flex items-center gap-1 px-2 py-1 text-xs text-gray-600 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400 transition-colors"
+                >
+                  <X className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline">Clear All</span>
+                </button>
+              </div>
+            )}
+
+            {/* Filter Container */}
+            <div className="overflow-visible">
+            {/* Primary Filter Bar - Compact Grid Layout */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-1.5 sm:gap-2 py-1.5 sm:py-2 px-1 sm:px-2">
             {/* Add scroll indicator on mobile */}
             <style>{`
               .scrollbar-hide::-webkit-scrollbar {
@@ -879,18 +905,18 @@ export function ProductFilters({ products, onFilterChange }: ProductFiltersProps
               options={SORT_OPTIONS.map(opt => ({ ...opt, count: 0 }))}
               filterKey="sort"
               customContent={
-                <div className="p-2">
+                <div className="p-1.5">
                   {SORT_OPTIONS.map((option) => (
                     <button
                       key={option.id}
                       onClick={() => handleSortChange(option.id)}
-                      className={`w-full text-left px-3 py-2.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors flex items-center justify-between ${
+                      className={`w-full text-left px-2 py-1.5 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors flex items-center justify-between ${
                         filters.sort === option.id ? 'bg-blue-50 dark:bg-blue-900/20' : ''
                       }`}
                     >
-                      <span className="text-sm text-gray-900 dark:text-white">{option.label}</span>
+                      <span className="text-xs text-gray-900 dark:text-white">{option.label}</span>
                       {filters.sort === option.id && (
-                        <Check className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                        <Check className="h-3 w-3 text-blue-600 dark:text-blue-400" />
                       )}
                     </button>
                   ))}
@@ -936,29 +962,29 @@ export function ProductFilters({ products, onFilterChange }: ProductFiltersProps
               label="Rating"
               filterKey="rating"
               customContent={
-                <div className="p-2">
+                <div className="p-1.5">
                   {RATING_OPTIONS.map((option) => {
                     const isSelected = filters.rating === option.value;
                     return (
                       <button
                         key={option.value}
                         onClick={() => handleRatingChange(option.value)}
-                        className={`w-full text-left px-3 py-2.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors flex items-center justify-between ${
+                        className={`w-full text-left px-2 py-1.5 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors flex items-center justify-between ${
                           isSelected ? 'bg-blue-50 dark:bg-blue-900/20' : ''
                         }`}
                       >
-                        <div className="flex items-center gap-2">
-                          <div className="flex">
+                        <div className="flex items-center gap-1.5">
+                          <div className="flex text-xs">
                             {[...Array(5)].map((_, i) => (
                               <span key={i} className={i < option.stars ? 'text-yellow-400' : 'text-gray-300'}>
                                 ★
                               </span>
                             ))}
                           </div>
-                          <span className="text-sm text-gray-900 dark:text-white">{option.label}</span>
+                          <span className="text-xs text-gray-900 dark:text-white">{option.label}</span>
                         </div>
                         {isSelected && (
-                          <Check className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                          <Check className="h-3 w-3 text-blue-600 dark:text-blue-400" />
                         )}
                       </button>
                     );
@@ -980,60 +1006,60 @@ export function ProductFilters({ products, onFilterChange }: ProductFiltersProps
             />
             <button
               onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
-              className={`flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 lg:px-4 py-1.5 sm:py-2 lg:py-2.5 rounded-lg transition-all whitespace-nowrap text-xs sm:text-sm flex-shrink-0 ${
+              className={`flex items-center justify-center gap-1 px-2 py-1 rounded-md transition-all whitespace-nowrap text-[10px] sm:text-xs border ${
                 showAdvancedFilters
-                  ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
-                  : 'bg-white dark:bg-dark-card text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+                  ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 border-blue-300 dark:border-blue-700'
+                  : 'bg-white dark:bg-dark-card text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 border-gray-200 dark:border-gray-700'
               }`}
             >
-              <SlidersHorizontal className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+              <SlidersHorizontal className="h-3 w-3" />
               <span>More</span>
             </button>
             {user && getTotalActiveFilters > 0 && (
               <button
                 onClick={saveFilter}
-                className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 lg:px-4 py-1.5 sm:py-2 lg:py-2.5 rounded-lg transition-all whitespace-nowrap text-xs sm:text-sm bg-white dark:bg-dark-card text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 border border-gray-300 dark:border-gray-600 flex-shrink-0"
+                className="flex items-center justify-center gap-1 px-2 py-1 rounded-md transition-all whitespace-nowrap text-[10px] sm:text-xs bg-white dark:bg-dark-card text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 border border-gray-200 dark:border-gray-700"
               >
-                <Save className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                <Save className="h-3 w-3" />
                 <span className="hidden sm:inline">Save</span>
               </button>
             )}
-          </div>
+            </div>
 
-          {/* Quick Filters Bar */}
-          <div className="flex items-center gap-1.5 sm:gap-2 lg:gap-3 py-2 border-t border-gray-200 dark:border-gray-700 overflow-x-auto scrollbar-hide -mx-1 sm:-mx-2 lg:mx-0 px-1 sm:px-2 lg:px-0">
-            {QUICK_FILTERS.map((filter) => {
-              const isSelected = filters.quickFilters.includes(filter.id);
-              return (
-                <button
-                  key={filter.id}
-                  onClick={() => handleQuickFilter(filter.id)}
-                  className={`px-2 sm:px-3 lg:px-4 py-1 sm:py-1.5 lg:py-2 rounded-lg text-[10px] sm:text-xs lg:text-sm font-medium whitespace-nowrap transition-all flex-shrink-0 ${
-                    isSelected
-                      ? 'bg-orange-600 text-white'
-                      : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
-                  }`}
-                >
-                  {filter.label}
-                </button>
-              );
-            })}
-          </div>
+            {/* Quick Filters Bar */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-1.5 sm:gap-2 py-1.5 border-t border-gray-200 dark:border-gray-700 px-1 sm:px-2">
+              {QUICK_FILTERS.map((filter) => {
+                const isSelected = filters.quickFilters.includes(filter.id);
+                return (
+                  <button
+                    key={filter.id}
+                    onClick={() => handleQuickFilter(filter.id)}
+                    className={`px-2 py-1 rounded-md text-[10px] sm:text-xs font-medium whitespace-nowrap transition-all text-center ${
+                      isSelected
+                        ? 'bg-orange-600 text-white'
+                        : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
+                    }`}
+                  >
+                    {filter.label}
+                  </button>
+                );
+              })}
+            </div>
 
-          {/* Advanced Filters Panel */}
-          {showAdvancedFilters && (
-            <div className="border-t border-gray-200 dark:border-gray-700 p-4 bg-gray-50 dark:bg-gray-900/50">
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+            {/* Advanced Filters Panel */}
+            {showAdvancedFilters && (
+              <div className="border-t border-gray-200 dark:border-gray-700 p-2 sm:p-3 bg-gray-50 dark:bg-gray-900/50">
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
                 <div>
-                  <h4 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">Stock Status</h4>
-                  <div className="space-y-2">
+                  <h4 className="text-xs font-semibold text-gray-900 dark:text-white mb-2">Stock Status</h4>
+                  <div className="space-y-1.5">
                     {stockOptions.map((option) => {
                       const isSelected = filters.stock.includes(option.id);
                       return (
                         <button
                           key={option.id}
                           onClick={() => handleMultiSelect('stock', option.id)}
-                          className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors flex items-center justify-between ${
+                          className={`w-full text-left px-2 py-1.5 rounded-md text-xs transition-colors flex items-center justify-between ${
                             isSelected
                               ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
                               : 'bg-white dark:bg-dark-card text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
@@ -1041,8 +1067,8 @@ export function ProductFilters({ products, onFilterChange }: ProductFiltersProps
                         >
                           <span>{option.label}</span>
                           <div className="flex items-center gap-2">
-                            <span className="text-xs text-gray-500 dark:text-gray-400">({option.count})</span>
-                            {isSelected && <Check className="h-4 w-4" />}
+                            <span className="text-[10px] text-gray-500 dark:text-gray-400">({option.count})</span>
+                            {isSelected && <Check className="h-3 w-3" />}
                           </div>
                         </button>
                       );
@@ -1050,15 +1076,15 @@ export function ProductFilters({ products, onFilterChange }: ProductFiltersProps
                   </div>
                 </div>
                 <div>
-                  <h4 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">Seller Type</h4>
-                  <div className="space-y-2">
+                  <h4 className="text-xs font-semibold text-gray-900 dark:text-white mb-2">Seller Type</h4>
+                  <div className="space-y-1.5">
                     {sellerOptions.map((option) => {
                       const isSelected = filters.seller.includes(option.id);
                       return (
                         <button
                           key={option.id}
                           onClick={() => handleMultiSelect('seller', option.id)}
-                          className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors flex items-center justify-between ${
+                          className={`w-full text-left px-2 py-1.5 rounded-md text-xs transition-colors flex items-center justify-between ${
                             isSelected
                               ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
                               : 'bg-white dark:bg-dark-card text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
@@ -1066,8 +1092,8 @@ export function ProductFilters({ products, onFilterChange }: ProductFiltersProps
                         >
                           <span>{option.label}</span>
                           <div className="flex items-center gap-2">
-                            <span className="text-xs text-gray-500 dark:text-gray-400">({option.count})</span>
-                            {isSelected && <Check className="h-4 w-4" />}
+                            <span className="text-[10px] text-gray-500 dark:text-gray-400">({option.count})</span>
+                            {isSelected && <Check className="h-3 w-3" />}
                           </div>
                         </button>
                       );
@@ -1075,15 +1101,15 @@ export function ProductFilters({ products, onFilterChange }: ProductFiltersProps
                   </div>
                 </div>
                 <div>
-                  <h4 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">Delivery Options</h4>
-                  <div className="space-y-2">
+                  <h4 className="text-xs font-semibold text-gray-900 dark:text-white mb-2">Delivery Options</h4>
+                  <div className="space-y-1.5">
                     {deliveryOptions.map((option) => {
                       const isSelected = filters.delivery.includes(option.id);
                       return (
                         <button
                           key={option.id}
                           onClick={() => handleMultiSelect('delivery', option.id)}
-                          className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors flex items-center justify-between ${
+                          className={`w-full text-left px-2 py-1.5 rounded-md text-xs transition-colors flex items-center justify-between ${
                             isSelected
                               ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
                               : 'bg-white dark:bg-dark-card text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
@@ -1091,8 +1117,8 @@ export function ProductFilters({ products, onFilterChange }: ProductFiltersProps
                         >
                           <span>{option.label}</span>
                           <div className="flex items-center gap-2">
-                            <span className="text-xs text-gray-500 dark:text-gray-400">({option.count})</span>
-                            {isSelected && <Check className="h-4 w-4" />}
+                            <span className="text-[10px] text-gray-500 dark:text-gray-400">({option.count})</span>
+                            {isSelected && <Check className="h-3 w-3" />}
                           </div>
                         </button>
                       );
@@ -1100,15 +1126,15 @@ export function ProductFilters({ products, onFilterChange }: ProductFiltersProps
                   </div>
                 </div>
                 <div>
-                  <h4 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">Rating</h4>
-                  <div className="space-y-2">
+                  <h4 className="text-xs font-semibold text-gray-900 dark:text-white mb-2">Rating</h4>
+                  <div className="space-y-1.5">
                     {RATING_OPTIONS.map((option) => {
                       const isSelected = filters.rating === option.value;
                       return (
                         <button
                           key={option.value}
                           onClick={() => handleRatingChange(option.value)}
-                          className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors flex items-center justify-between ${
+                          className={`w-full text-left px-2 py-1.5 rounded-md text-xs transition-colors flex items-center justify-between ${
                             isSelected
                               ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
                               : 'bg-white dark:bg-dark-card text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
@@ -1132,9 +1158,11 @@ export function ProductFilters({ products, onFilterChange }: ProductFiltersProps
                 </div>
               </div>
             </div>
-          )}
+            )}
+            </div>
+          </div>
         </div>
-      </div>
+      )}
     </>
   );
 }

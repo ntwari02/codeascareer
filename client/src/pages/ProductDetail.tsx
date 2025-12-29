@@ -601,19 +601,70 @@ export function ProductDetail() {
 
       setProduct(transformedProduct);
 
-      // Load related products (same category) - for now using mock data
-      // TODO: Implement API endpoint for related products
+      // Load related products (same category) from API
       if (transformedProduct.category_id) {
-        const related = MOCK_PRODUCTS
-          .filter(p => p.category_id === transformedProduct.category_id && p.id !== id && p.status === 'active')
-          .slice(0, 8);
-        
-        related.forEach((p: any) => {
-          if (p.images) {
-            p.images.sort((a: any, b: any) => (a.position || 0) - (b.position || 0));
+        try {
+          const relatedResponse = await fetch(
+            `http://localhost:5000/api/products?category=${encodeURIComponent(transformedProduct.category_id)}&status=in_stock&limit=9`,
+            {
+              method: 'GET',
+              credentials: 'include',
+            }
+          );
+
+          if (relatedResponse.ok) {
+            const relatedData = await relatedResponse.json();
+            const related = (relatedData.products || [])
+              .filter((p: any) => (p._id || p.id) !== id)
+              .slice(0, 8)
+              .map((p: any) => ({
+                id: p._id || p.id,
+                title: p.name,
+                description: p.description || '',
+                price: p.price,
+                compare_at_price: p.discount ? p.price + p.discount : undefined,
+                category_id: p.category || '',
+                status: p.status === 'in_stock' || p.status === 'low_stock' ? 'active' : 'inactive',
+                seller_id: p.sellerId?.toString() || '',
+                created_at: p.createdAt || new Date().toISOString(),
+                updated_at: p.updatedAt || new Date().toISOString(),
+                stock_quantity: p.stock || 0,
+                is_shippable: true,
+                low_stock_threshold: 10,
+                views_count: p.views || 0,
+                sku: p.sku || '',
+                images: p.images?.map((img: string, index: number) => ({
+                  id: `img-${p._id || p.id}-${index}`,
+                  product_id: p._id || p.id,
+                  url: img.startsWith('http') ? img : `http://localhost:5000${img}`,
+                  position: index,
+                  is_primary: index === 0,
+                  created_at: new Date().toISOString(),
+                })) || [],
+                tags: p.tags || [],
+              }));
+
+            related.forEach((p: any) => {
+              if (p.images) {
+                p.images.sort((a: any, b: any) => (a.position || 0) - (b.position || 0));
+              }
+            });
+            setRelatedProducts(related);
+          } else {
+            // Fallback to mock data if API fails
+            const related = MOCK_PRODUCTS
+              .filter(p => p.category_id === transformedProduct.category_id && p.id !== id && p.status === 'active')
+              .slice(0, 8);
+            setRelatedProducts(related);
           }
-        });
-        setRelatedProducts(related);
+        } catch (error) {
+          console.error('Error loading related products:', error);
+          // Fallback to mock data on error
+          const related = MOCK_PRODUCTS
+            .filter(p => p.category_id === transformedProduct.category_id && p.id !== id && p.status === 'active')
+            .slice(0, 8);
+          setRelatedProducts(related);
+        }
       }
     } catch (error) {
       console.error('Error loading product:', error);

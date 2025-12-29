@@ -1,5 +1,4 @@
 import { create } from 'zustand';
-import { supabase } from '../lib/supabase';
 import { useToastStore } from './toastStore';
 import type { CartItem, Product, ProductVariant, Profile } from '../types';
 
@@ -77,31 +76,24 @@ export const useCartStore = create<CartState>((set, get) => ({
 
   fetchCart: async (userId: string) => {
     set({ loading: true });
-    const { data, error } = await supabase
-      .from('cart_items')
-      .select(`
-        *,
-        product:products(*, images:product_images(url, position)),
-        variant:product_variants(*)
-      `)
-      .eq('user_id', userId);
-
-    if (!error && data) {
-      set({ items: data as CartItem[], loading: false });
+    
+    // Load from localStorage
+    try {
+      const stored = localStorage.getItem(`cart_${userId}`);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+      set({ items: parsed, loading: false });
       // Auto-select all sellers by default
-      const sellerIds = new Set(data.map((item: CartItem) => item.product?.seller_id).filter(Boolean));
+      const sellerIds = new Set(parsed.map((item: CartItem) => item.product?.seller_id).filter(Boolean));
       set({ selectedSellers: sellerIds });
-      // Validate cart after fetching (don't await to avoid blocking)
-      get().validateCart().catch(err => console.error('Cart validation error:', err));
-    } else {
-      // Only clear items if there's an actual error, not if cart is just empty
-      if (error) {
-        console.error('Error fetching cart:', error);
-        // Don't clear items on error - keep existing items
+      // Removed automatic validation to prevent cart values from being lost
       } else {
         // Cart is empty - set empty array
         set({ items: [], loading: false });
       }
+    } catch (error) {
+      console.error('Error loading cart from localStorage:', error);
+      set({ items: [], loading: false });
     }
   },
 
@@ -165,51 +157,32 @@ export const useCartStore = create<CartState>((set, get) => ({
       return;
     }
 
-    // Real logged-in user: persist to Supabase
+    // Real logged-in user: persist to localStorage
     if (existing) {
       // Flowchart: Product Already in Cart → Increase Quantity
       await get().updateQuantity(existing.id, existing.quantity + quantity);
     } else {
       // Flowchart: Product Not in Cart → Add Product as New Cart Item
-      const { data, error } = await supabase
-        .from('cart_items')
-        .insert({
-          user_id: userId,
-          product_id: product.id,
-          variant_id: variantId,
-          quantity,
-        })
-        .select(`
-          *,
-          product:products(*, images:product_images(url, position)),
-          variant:product_variants(*)
-        `)
-        .single();
-
-      if (!error && data) {
-        set({ items: [...get().items, data as CartItem] });
-        
-        // Show toast notification
-        const toastStore = useToastStore.getState();
-        toastStore.showToast(`${product.title} added to cart!`, 'success');
-      } else if (error) {
-        // If Supabase fails, fall back to localStorage for demo/guest mode
-        console.warn('Failed to add to cart in Supabase, using localStorage:', error);
-        const now = new Date().toISOString();
-        const newItem: CartItem = {
-          id: `guest-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-          user_id: userId,
-          product_id: product.id,
-          variant_id: variantId,
-          quantity,
-          created_at: now,
-          updated_at: now,
-          product,
-          variant,
-        };
-        set({ items: [...get().items, newItem] });
-        localStorage.setItem('guest_cart', JSON.stringify(get().items));
-      }
+      const now = new Date().toISOString();
+      const newItem: CartItem = {
+        id: `user-${userId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        user_id: userId,
+        product_id: product.id,
+        variant_id: variantId,
+        quantity,
+        created_at: now,
+        updated_at: now,
+        product,
+        variant,
+      };
+      set({ items: [...get().items, newItem] });
+      
+      // Save to localStorage
+      localStorage.setItem(`cart_${userId}`, JSON.stringify(get().items));
+      
+      // Show toast notification
+      const toastStore = useToastStore.getState();
+      toastStore.showToast(`${product.title} added to cart!`, 'success');
     }
     // After adding/updating, cart will automatically recalculate via useEffect in Cart component
     // Flowchart: → Group Items by Seller → Recalculate Subtotal → Calculate Shipping → Calculate Taxes
@@ -220,120 +193,96 @@ export const useCartStore = create<CartState>((set, get) => ({
     const existing = get().items.find(item => item.id === itemId);
     if (!existing) return;
 
-    // Guest cart item: update locally only
-    if (itemId.startsWith('guest-')) {
-      set({
-        items: get().items.map(item =>
-          item.id === itemId ? { ...item, quantity, updated_at: new Date().toISOString() } : item
-        ),
-      });
-      // Flowchart: After quantity change → Group Items by Seller → Recalculate Subtotal → Calculate Shipping → Calculate Taxes
-      return;
+    // Update locally
+    const updatedItems = get().items.map(item =>
+      item.id === itemId ? { ...item, quantity, updated_at: new Date().toISOString() } : item
+    );
+    set({ items: updatedItems });
+    
+    // Save to localStorage
+    if (existing.user_id && !existing.user_id.startsWith('guest-')) {
+      localStorage.setItem(`cart_${existing.user_id}`, JSON.stringify(updatedItems));
+    } else {
+      localStorage.setItem('guest_cart', JSON.stringify(updatedItems));
     }
-
-    const { error } = await supabase
-      .from('cart_items')
-      .update({ quantity })
-      .eq('id', itemId);
-
-    if (!error) {
-      set({
-        items: get().items.map(item =>
-          item.id === itemId ? { ...item, quantity } : item
-        ),
-      });
-      // Flowchart: After quantity change → Group Items by Seller → Recalculate Subtotal → Calculate Shipping → Calculate Taxes
-    }
+    
+    // Flowchart: After quantity change → Group Items by Seller → Recalculate Subtotal → Calculate Shipping → Calculate Taxes
   },
 
   removeItem: async (itemId: string) => {
     // Flowchart: User Updates Cart → Remove Item → Delete Cart Item → Loop back to Group Items by Seller
     const item = get().items.find(i => i.id === itemId);
     const productTitle = item?.product?.title || 'Item';
+    const userId = item?.user_id;
     
-    // Guest cart item: remove locally only
-    if (itemId.startsWith('guest-')) {
-      set({ items: get().items.filter(item => item.id !== itemId) });
-      
-      // Show toast notification
-      const toastStore = useToastStore.getState();
-      toastStore.showToast(`${productTitle} removed from cart`, 'success');
-      
-      // Flowchart: After removal → Group Items by Seller → Recalculate Subtotal → Calculate Shipping → Calculate Taxes
-      return;
+    // Remove locally
+    const updatedItems = get().items.filter(item => item.id !== itemId);
+    set({ items: updatedItems });
+    
+    // Save to localStorage
+    if (userId && !userId.startsWith('guest-')) {
+      localStorage.setItem(`cart_${userId}`, JSON.stringify(updatedItems));
+    } else {
+      localStorage.setItem('guest_cart', JSON.stringify(updatedItems));
     }
-
-    const { error } = await supabase
-      .from('cart_items')
-      .delete()
-      .eq('id', itemId);
-
-    if (!error) {
-      set({ items: get().items.filter(item => item.id !== itemId) });
-      
-      // Show toast notification
-      const toastStore = useToastStore.getState();
-      toastStore.showToast(`${productTitle} removed from cart`, 'success');
-      
-      // Flowchart: After removal → Group Items by Seller → Recalculate Subtotal → Calculate Shipping → Calculate Taxes
-    }
+    
+    // Show toast notification
+    const toastStore = useToastStore.getState();
+    toastStore.showToast(`${productTitle} removed from cart`, 'success');
+    
+    // Flowchart: After removal → Group Items by Seller → Recalculate Subtotal → Calculate Shipping → Calculate Taxes
   },
 
   clearCart: async (userId: string) => {
-    const { error } = await supabase
-      .from('cart_items')
-      .delete()
-      .eq('user_id', userId);
-
-    if (!error) {
-      set({ items: [], appliedCoupon: null });
-    }
+    set({ items: [], appliedCoupon: null });
+    // Clear from localStorage
+    localStorage.removeItem(`cart_${userId}`);
+    localStorage.removeItem('guest_cart');
   },
 
   applyCoupon: async (code: string, subtotal: number, sellerId?: string) => {
     // Flowchart: User Updates Cart → Apply Coupon → Validate Coupon → Apply Discount → Update Cart Summary
-    // Step 1: Validate Coupon
-    const { data: coupon, error } = await supabase
-      .from('coupons')
-      .select('*')
-      .eq('code', code.toUpperCase())
-      .eq('is_active', true)
-      .maybeSingle();
+    // Note: Coupon validation should be done via API endpoint
+    // For now, this is a placeholder that can be extended with API calls
+    
+    // Simple validation - in production, this should call an API endpoint
+    const API_BASE = 'http://localhost:5000/api';
+    try {
+      const response = await fetch(`${API_BASE}/coupons/validate?code=${encodeURIComponent(code.toUpperCase())}&subtotal=${subtotal}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
 
-    if (error || !coupon) {
-      throw new Error('Invalid coupon code');
-    }
-
-    if (coupon.valid_until && new Date(coupon.valid_until) < new Date()) {
-      throw new Error('Coupon has expired');
-    }
-
-    if (subtotal < coupon.min_purchase_amount) {
-      throw new Error(`Minimum purchase amount is $${coupon.min_purchase_amount}`);
-    }
-
-    if (coupon.usage_limit && coupon.usage_count >= coupon.usage_limit) {
-      throw new Error('Coupon usage limit reached');
-    }
-
-    // Step 2: Apply Discount
-    let discount = 0;
-    if (coupon.discount_type === 'percentage') {
-      discount = (subtotal * coupon.discount_value) / 100;
-      if (coupon.max_discount_amount) {
-        discount = Math.min(discount, coupon.max_discount_amount);
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Invalid coupon code');
       }
-    } else {
-      discount = coupon.discount_value;
-    }
 
-    // Step 3: Update Cart Summary (store discount)
-    if (sellerId) {
-      set({ sellerCoupons: { ...get().sellerCoupons, [sellerId]: { code: coupon.code, discount } } });
-    } else {
-      set({ appliedCoupon: { code: coupon.code, discount } });
+      const coupon = await response.json();
+      
+      // Step 2: Apply Discount
+      let discount = 0;
+      if (coupon.discount_type === 'percentage') {
+        discount = (subtotal * coupon.discount_value) / 100;
+        if (coupon.max_discount_amount) {
+          discount = Math.min(discount, coupon.max_discount_amount);
+        }
+      } else {
+        discount = coupon.discount_value;
+      }
+
+      // Step 3: Update Cart Summary (store discount)
+      if (sellerId) {
+        set({ sellerCoupons: { ...get().sellerCoupons, [sellerId]: { code: coupon.code, discount } } });
+      } else {
+        set({ appliedCoupon: { code: coupon.code, discount } });
+      }
+      // Flowchart: After discount applied → Update Cart Summary → Recalculate totals
+    } catch (error: any) {
+      throw new Error(error.message || 'Failed to apply coupon');
     }
-    // Flowchart: After discount applied → Update Cart Summary → Recalculate totals
   },
 
   removeCoupon: (sellerId?: string) => {
@@ -369,26 +318,51 @@ export const useCartStore = create<CartState>((set, get) => ({
       const sellerId = item.product.seller_id;
 
       if (!groups[sellerId]) {
-        // Fetch seller profile
-        const { data: seller } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', sellerId)
-          .maybeSingle();
-
-        groups[sellerId] = {
-          sellerId,
-          seller: seller as Profile | null,
-          items: [],
-          subtotal: 0,
-          shippingCost: 0,
-          tax: 0,
-          discount: 0,
-          total: 0,
-          appliedCoupon: get().sellerCoupons[sellerId] || null,
-          isAvailable: true,
-          warnings: [],
-        };
+        // Fetch seller profile from API
+        try {
+          const API_BASE = 'http://localhost:5000/api';
+          const response = await fetch(`${API_BASE}/sellers/${sellerId}`, {
+            method: 'GET',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+          });
+          
+          let seller: Profile | null = null;
+          if (response.ok) {
+            const data = await response.json();
+            seller = data.seller || data;
+          }
+          
+          groups[sellerId] = {
+            sellerId,
+            seller,
+            items: [],
+            subtotal: 0,
+            shippingCost: 0,
+            tax: 0,
+            discount: 0,
+            total: 0,
+            appliedCoupon: get().sellerCoupons[sellerId] || null,
+            isAvailable: true,
+            warnings: [],
+          };
+        } catch (error) {
+          console.error('Error fetching seller:', error);
+          groups[sellerId] = {
+            sellerId,
+            seller: null,
+            items: [],
+            subtotal: 0,
+            shippingCost: 0,
+            tax: 0,
+            discount: 0,
+            total: 0,
+            appliedCoupon: get().sellerCoupons[sellerId] || null,
+            isAvailable: true,
+            warnings: [],
+          };
+        }
       }
 
       groups[sellerId].items.push(item);
@@ -426,12 +400,23 @@ export const useCartStore = create<CartState>((set, get) => ({
         warnings: [],
       };
 
-      // Fetch current product data
-      const { data: product } = await supabase
-        .from('products')
-        .select('*, variant:product_variants(*)')
-        .eq('id', item.product_id)
-        .maybeSingle();
+      // Fetch current product data from API
+      let product = null;
+      try {
+        const API_BASE = 'http://localhost:5000/api';
+        const response = await fetch(`${API_BASE}/products/${item.product_id}`, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        });
+        
+        if (response.ok) {
+          product = await response.json();
+        }
+      } catch (error) {
+        console.error('Error fetching product for validation:', error);
+      }
 
       if (!product || product.status !== 'active') {
         validation.isValid = false;
@@ -478,11 +463,22 @@ export const useCartStore = create<CartState>((set, get) => ({
       }
 
       // Only sync prices for logged-in user items with product_id
-      const { data: product } = await supabase
-        .from('products')
-        .select('*, images:product_images(url, position), variant:product_variants(*)')
-        .eq('id', item.product_id)
-        .maybeSingle();
+      let product = null;
+      try {
+        const API_BASE = 'http://localhost:5000/api';
+        const response = await fetch(`${API_BASE}/products/${item.product_id}`, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        });
+        
+        if (response.ok) {
+          product = await response.json();
+        }
+      } catch (error) {
+        console.error('Error fetching product for price sync:', error);
+      }
 
       if (product) {
         const currentPrice = item.variant_id
