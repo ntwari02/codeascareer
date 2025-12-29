@@ -36,12 +36,34 @@ const sendMessageSchema = z.object({
 }).refine(
   (data) => {
     // Either content must have text OR attachments must be present (like WhatsApp)
-    const hasContent = data.content && String(data.content).trim().length > 0;
-    const hasAttachments = data.attachments && Array.isArray(data.attachments) && data.attachments.length > 0;
+    const contentStr = data.content ? String(data.content).trim() : '';
+    const hasContent = contentStr.length > 0;
+    
+    // Ensure attachments is treated as array
+    let attachmentsArray: any[] = [];
+    if (data.attachments) {
+      if (Array.isArray(data.attachments)) {
+        attachmentsArray = data.attachments;
+      } else if (typeof data.attachments === 'string') {
+        // Try to parse if it's a JSON string
+        try {
+          attachmentsArray = JSON.parse(data.attachments);
+        } catch (e) {
+          console.error('[Schema Validation] Failed to parse attachments string:', e);
+        }
+      }
+    }
+    
+    const hasAttachments = Array.isArray(attachmentsArray) && attachmentsArray.length > 0;
+    
+    console.log('[Schema Validation] hasContent:', hasContent, 'hasAttachments:', hasAttachments);
+    console.log('[Schema Validation] content length:', contentStr.length);
+    console.log('[Schema Validation] attachments type:', typeof data.attachments, 'isArray:', Array.isArray(data.attachments), 'length:', attachmentsArray.length);
+    
     return hasContent || hasAttachments;
   },
   {
-    message: 'Message must have either content or attachments',
+    message: 'Please add a message text or attach a file/image/voice note. You cannot send an empty message.',
     path: ['content'], // Point to content field for better error message
   }
 );
@@ -279,18 +301,47 @@ export async function sendMessage(req: AuthenticatedRequest, res: Response) {
       return res.status(404).json({ message: 'Thread not found' });
     }
 
+    console.log('[Controller] Validating send message request');
+    console.log('[Controller] Request body:', {
+      content: req.body.content,
+      contentType: typeof req.body.content,
+      contentLength: req.body.content?.length || 0,
+      attachments: req.body.attachments,
+      attachmentsType: typeof req.body.attachments,
+      attachmentsLength: Array.isArray(req.body.attachments) ? req.body.attachments.length : 'not array',
+    });
+    
     const validation = sendMessageSchema.safeParse(req.body);
     if (!validation.success) {
+      console.error('[Controller] Validation failed:', validation.error.errors);
+      const errorMessages = validation.error.errors.map(e => e.message).filter((msg, idx, arr) => arr.indexOf(msg) === idx);
+      const mainMessage = errorMessages[0] || 'Validation error';
       return res.status(400).json({
-        message: 'Validation error',
+        message: mainMessage,
         errors: validation.error.errors,
+        details: validation.error.errors.map(e => ({
+          field: e.path.join('.'),
+          message: e.message,
+        })),
       });
     }
 
     const { content, attachments = [], replyTo, forwardedFrom } = validation.data;
+    console.log('[Controller] Validation passed');
+    console.log('[Controller] Content:', content, '(length:', content?.length || 0, ')');
+    console.log('[Controller] Attachments:', attachments.length);
 
     // Process attachments - determine type
-    const processedAttachments = attachments.map((att: any) => {
+    console.log('[Controller] Processing', attachments.length, 'attachment(s)');
+    const processedAttachments = attachments.map((att: any, index: number) => {
+      console.log(`[Controller] Attachment ${index + 1}:`, {
+        filename: att.filename,
+        originalName: att.originalName,
+        path: att.path,
+        mimetype: att.mimetype,
+        type: att.type,
+      });
+      
       const isAudio = att.mimetype?.startsWith('audio/') || att.type === 'voice';
       const isImage = att.mimetype?.startsWith('image/') || att.type === 'image';
       
@@ -305,9 +356,19 @@ export async function sendMessage(req: AuthenticatedRequest, res: Response) {
         uploadedAt: new Date(),
       };
     });
+    console.log('[Controller] Processed', processedAttachments.length, 'attachment(s)');
 
     // Create message - WhatsApp style: allow empty content if attachments exist
     const messageContent = content ? String(content).trim() : '';
+    console.log('[Controller] Creating message with content length:', messageContent.length, 'and', processedAttachments.length, 'attachment(s)');
+    
+    if (!messageContent && processedAttachments.length === 0) {
+      console.error('[Controller] ERROR: Both content and attachments are empty!');
+      return res.status(400).json({
+        message: 'Message must have either content or attachments',
+      });
+    }
+    
     const messageData: any = {
       threadId: thread._id,
       senderId: buyerId,
@@ -331,6 +392,7 @@ export async function sendMessage(req: AuthenticatedRequest, res: Response) {
     }
 
     const message = await Message.create(messageData);
+    await message.populate('senderId', 'fullName email avatarUrl');
 
     // Update thread - create preview from content or attachment info (WhatsApp style)
     let preview = messageContent && messageContent.trim() ? messageContent : '';
@@ -383,7 +445,24 @@ export async function sendMessage(req: AuthenticatedRequest, res: Response) {
       return res.status(400).json({ message: 'Validation error', errors: error.errors });
     }
     console.error('Send message error:', error);
-    return res.status(500).json({ message: 'Failed to send message', error: error.message });
+    console.error('[Controller] Send message error:', error);
+    console.error('[Controller] Error stack:', error.stack);
+    console.error('[Controller] Error name:', error.name);
+    console.error('[Controller] Error message:', error.message);
+    
+    // Return more detailed error information
+    if (error.name === 'ValidationError') {
+      return res.status(400).json({ 
+        message: 'Validation error: ' + error.message,
+        error: error.message 
+      });
+    }
+    
+    return res.status(500).json({ 
+      message: 'Failed to send message: ' + (error.message || 'Unknown error'),
+      error: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
   }
 }
 

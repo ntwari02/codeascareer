@@ -145,6 +145,22 @@ router.post('/upload', inboxUpload.array('attachments', 5), (req: AuthenticatedR
       const isAudio = file.mimetype.startsWith('audio/');
       const isImage = file.mimetype.startsWith('image/');
       
+      // Log file details for debugging (especially for voice notes)
+      console.log('[File Upload] File received:', {
+        filename: file.filename,
+        originalName: file.originalname,
+        size: file.size,
+        mimetype: file.mimetype,
+        isAudio,
+        isImage,
+        duration: req.body.duration,
+      });
+      
+      // Verify file size is not zero (especially important for voice notes)
+      if (file.size === 0) {
+        console.error('[File Upload] WARNING: File size is 0 bytes!', file.originalname);
+      }
+      
       return {
         filename: file.filename,
         originalName: file.originalname,
@@ -157,12 +173,13 @@ router.post('/upload', inboxUpload.array('attachments', 5), (req: AuthenticatedR
       };
     });
 
+    console.log('[File Upload] Successfully processed', files.length, 'file(s)');
     return res.json({
       message: 'Files uploaded successfully',
       files,
     });
   } catch (error: any) {
-    console.error('File upload error:', error);
+    console.error('[File Upload] Error:', error);
     return res.status(500).json({ message: 'Failed to upload files', error: error.message });
   }
 });
@@ -170,9 +187,16 @@ router.post('/upload', inboxUpload.array('attachments', 5), (req: AuthenticatedR
 // Send a message in a thread (with optional file attachments)
 router.post('/threads/:threadId/messages', inboxUpload.array('attachments', 5), async (req: AuthenticatedRequest, res) => {
   try {
+    console.log('[Route] Received send message request');
+    console.log('[Route] Body keys:', Object.keys(req.body));
+    console.log('[Route] Content:', req.body.content, '(type:', typeof req.body.content, ')');
+    console.log('[Route] Files count:', req.files ? (req.files as Express.Multer.File[]).length : 0);
+    console.log('[Route] Attachments in body:', req.body.attachments, '(type:', typeof req.body.attachments, ')');
+    
     // Handle file uploads first - convert to attachment objects with full metadata
     const attachments: any[] = [];
     if (req.files && (req.files as Express.Multer.File[]).length > 0) {
+      console.log('[Route] Processing', (req.files as Express.Multer.File[]).length, 'uploaded file(s)');
       attachments.push(
         ...(req.files as Express.Multer.File[]).map((file) => {
           const isAudio = file.mimetype.startsWith('audio/');
@@ -200,13 +224,15 @@ router.post('/threads/:threadId/messages', inboxUpload.array('attachments', 5), 
       if (typeof req.body.attachments === 'string') {
         try {
           previousAttachments = JSON.parse(req.body.attachments);
+          console.log('[Route] Parsed', previousAttachments.length, 'attachment(s) from JSON string');
         } catch (e) {
-          console.error('Failed to parse attachments JSON:', e);
+          console.error('[Route] Failed to parse attachments JSON:', e);
         }
       } 
       // Or if it's already an array
       else if (Array.isArray(req.body.attachments)) {
         previousAttachments = req.body.attachments;
+        console.log('[Route] Using', previousAttachments.length, 'attachment(s) from array');
       }
       
       // Process the attachments
@@ -239,7 +265,10 @@ router.post('/threads/:threadId/messages', inboxUpload.array('attachments', 5), 
     }
 
     // Add attachments to request body as array (not JSON string)
-    req.body.attachments = attachments;
+    // CRITICAL: Ensure attachments is always an array, even if empty
+    req.body.attachments = Array.isArray(attachments) ? attachments : [];
+    console.log('[Route] Total attachments after processing:', req.body.attachments.length);
+    console.log('[Route] Attachments type:', typeof req.body.attachments, 'isArray:', Array.isArray(req.body.attachments));
 
     // Get message from body or form data - ensure content exists (can be empty string)
     if (req.body.content === undefined && req.body.message) {
@@ -252,11 +281,24 @@ router.post('/threads/:threadId/messages', inboxUpload.array('attachments', 5), 
     
     // Ensure content is a string type
     req.body.content = String(req.body.content || '');
+    console.log('[Route] Final content:', req.body.content, '(length:', req.body.content.length, ')');
+    console.log('[Route] Final attachments count:', req.body.attachments.length);
+    console.log('[Route] Final attachments:', JSON.stringify(req.body.attachments));
+    console.log('[Route] Validation check - hasContent:', req.body.content.trim().length > 0, 'hasAttachments:', req.body.attachments.length > 0);
+
+    // CRITICAL: Pre-validate before sending to controller to catch issues early
+    if (!req.body.content.trim() && (!req.body.attachments || req.body.attachments.length === 0)) {
+      console.error('[Route] PRE-VALIDATION FAILED: No content and no attachments');
+      return res.status(400).json({
+        message: 'Please add a message text or attach a file/image/voice note. You cannot send an empty message.',
+      });
+    }
 
     // Call the sendMessage controller
     return sendMessage(req, res);
   } catch (error: any) {
-    console.error('Send message with attachments error:', error);
+    console.error('[Route] Send message with attachments error:', error);
+    console.error('[Route] Error stack:', error.stack);
     return res.status(500).json({ message: 'Failed to send message', error: error.message });
   }
 });

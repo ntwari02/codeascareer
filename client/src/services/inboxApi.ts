@@ -27,11 +27,17 @@ async function handleResponse<T>(response: Response): Promise<T> {
     let errorMessage = 'An error occurred';
     try {
       const error = await response.json();
+      // Prefer the main message field, which contains user-friendly validation errors
       errorMessage = error.message || error.error || errorMessage;
+      
+      // Log validation errors for debugging
+      if (error.errors || error.details) {
+        console.error('[API] Validation errors:', error.errors || error.details);
+      }
     } catch {
       // If response is not JSON, use status text
-      if (response.status === 0 || response.statusText === 'Failed to fetch') {
-        errorMessage = 'Network error. Please check your connection.';
+      if (response.status === 0 || response.statusText === 'Failed to fetch' || response.statusText === '') {
+        errorMessage = 'No internet connection. Please check your network and try again.';
       } else {
         errorMessage = `Error: ${response.status} ${response.statusText}`;
       }
@@ -39,6 +45,29 @@ async function handleResponse<T>(response: Response): Promise<T> {
     throw new Error(errorMessage);
   }
   return response.json();
+}
+
+/**
+ * Wrapper for fetch that handles network errors gracefully
+ */
+async function safeFetch(url: string, options: RequestInit = {}): Promise<Response> {
+  try {
+    const response = await fetch(url, options);
+    return response;
+  } catch (error: any) {
+    // Handle network errors (no internet connection)
+    if (error.name === 'TypeError' && (error.message.includes('fetch') || error.message.includes('Failed to fetch'))) {
+      console.error('[API] Network error - no internet connection');
+      throw new Error('No internet connection. Please check your network and try again.');
+    }
+    // Handle other network errors
+    if (error.message && (error.message.includes('Failed to fetch') || error.message.includes('NetworkError') || error.message.includes('Network request failed'))) {
+      console.error('[API] Network error detected');
+      throw new Error('Connection failed. Please check your internet connection and try again.');
+    }
+    // Re-throw other errors as-is
+    throw error;
+  }
 }
 
 export interface MessageAttachment {
@@ -136,7 +165,7 @@ export const inboxAPI = {
     if (params?.sortBy) queryParams.append('sortBy', params.sortBy);
     if (params?.sortOrder) queryParams.append('sortOrder', params.sortOrder);
 
-    const response = await fetch(`${API_BASE_URL}/seller/inbox/threads?${queryParams}`, {
+    const response = await safeFetch(`${API_BASE_URL}/seller/inbox/threads?${queryParams}`, {
       method: 'GET',
       headers: getAuthHeaders(),
       credentials: 'include',
@@ -152,7 +181,7 @@ export const inboxAPI = {
     if (page) queryParams.append('page', page.toString());
     if (limit) queryParams.append('limit', limit.toString());
 
-    const response = await fetch(`${API_BASE_URL}/seller/inbox/threads/${threadId}?${queryParams}`, {
+    const response = await safeFetch(`${API_BASE_URL}/seller/inbox/threads/${threadId}?${queryParams}`, {
       method: 'GET',
       headers: getAuthHeaders(),
       credentials: 'include',
@@ -170,9 +199,12 @@ export const inboxAPI = {
     relatedOrderId?: string;
     relatedRfqId?: string;
   }) {
-    const response = await fetch(`${API_BASE_URL}/seller/inbox/threads`, {
+    const response = await safeFetch(`${API_BASE_URL}/seller/inbox/threads`, {
       method: 'POST',
-      headers: getAuthHeaders(),
+      headers: {
+        ...getAuthHeaders(),
+        'Content-Type': 'application/json',
+      },
       credentials: 'include',
       body: JSON.stringify(data),
     });
@@ -195,11 +227,15 @@ export const inboxAPI = {
     }
   ) {
     const formData = new FormData();
-    formData.append('content', data.content);
+    // Always append content, even if empty (WhatsApp style: can send media without text)
+    formData.append('content', data.content || '');
     
     if (data.attachments && data.attachments.length > 0) {
       // If attachments are already uploaded, send as JSON
+      console.log('[API] Sending message with', data.attachments.length, 'attachment(s)');
       formData.append('attachments', JSON.stringify(data.attachments));
+    } else {
+      console.log('[API] Sending message with no attachments');
     }
     
     if (data.replyTo) {
@@ -211,7 +247,11 @@ export const inboxAPI = {
     }
 
     const token = localStorage.getItem('auth_token');
-    const response = await fetch(`${API_BASE_URL}/seller/inbox/threads/${threadId}/messages`, {
+    console.log('[API] Sending to:', `${API_BASE_URL}/seller/inbox/threads/${threadId}/messages`);
+    console.log('[API] Content:', data.content || '(empty)');
+    console.log('[API] Attachments count:', data.attachments?.length || 0);
+    
+    const response = await safeFetch(`${API_BASE_URL}/seller/inbox/threads/${threadId}/messages`, {
       method: 'POST',
       headers: {
         'Authorization': token ? `Bearer ${token}` : '',
@@ -219,6 +259,18 @@ export const inboxAPI = {
       credentials: 'include',
       body: formData,
     });
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('[API] Send message error response:', errorText);
+      try {
+        const error = JSON.parse(errorText);
+        throw new Error(error.message || 'Failed to send message');
+      } catch {
+        throw new Error(errorText || 'Failed to send message');
+      }
+    }
+    
     return handleResponse<{ message: Message }>(response);
   },
 
@@ -270,7 +322,7 @@ export const inboxAPI = {
       });
       
       xhr.addEventListener('error', () => {
-        reject(new Error('Network error during upload'));
+        reject(new Error('No internet connection. Please check your network and try again.'));
       });
       
       xhr.addEventListener('abort', () => {
@@ -287,7 +339,7 @@ export const inboxAPI = {
    * Mark thread as read
    */
   async markThreadAsRead(threadId: string) {
-    const response = await fetch(`${API_BASE_URL}/seller/inbox/threads/${threadId}/read`, {
+    const response = await safeFetch(`${API_BASE_URL}/seller/inbox/threads/${threadId}/read`, {
       method: 'POST',
       headers: getAuthHeaders(),
       credentials: 'include',
@@ -299,7 +351,7 @@ export const inboxAPI = {
    * Update thread (status, subject, etc.)
    */
   async updateThread(threadId: string, data: { status?: string; subject?: string }) {
-    const response = await fetch(`${API_BASE_URL}/seller/inbox/threads/${threadId}`, {
+    const response = await safeFetch(`${API_BASE_URL}/seller/inbox/threads/${threadId}`, {
       method: 'PUT',
       headers: getAuthHeaders(),
       credentials: 'include',
@@ -312,7 +364,7 @@ export const inboxAPI = {
    * Delete thread
    */
   async deleteThread(threadId: string) {
-    const response = await fetch(`${API_BASE_URL}/seller/inbox/threads/${threadId}`, {
+    const response = await safeFetch(`${API_BASE_URL}/seller/inbox/threads/${threadId}`, {
       method: 'DELETE',
       headers: getAuthHeaders(),
       credentials: 'include',
@@ -324,7 +376,7 @@ export const inboxAPI = {
    * Edit a message
    */
   async editMessage(threadId: string, messageId: string, content: string) {
-    const response = await fetch(`${API_BASE_URL}/seller/inbox/threads/${threadId}/messages/${messageId}`, {
+    const response = await safeFetch(`${API_BASE_URL}/seller/inbox/threads/${threadId}/messages/${messageId}`, {
       method: 'PUT',
       headers: getAuthHeaders(),
       credentials: 'include',
@@ -337,7 +389,7 @@ export const inboxAPI = {
    * Delete a message
    */
   async deleteMessage(threadId: string, messageId: string) {
-    const response = await fetch(`${API_BASE_URL}/seller/inbox/threads/${threadId}/messages/${messageId}`, {
+    const response = await safeFetch(`${API_BASE_URL}/seller/inbox/threads/${threadId}/messages/${messageId}`, {
       method: 'DELETE',
       headers: getAuthHeaders(),
       credentials: 'include',
@@ -349,7 +401,7 @@ export const inboxAPI = {
    * React to a message
    */
   async reactToMessage(threadId: string, messageId: string, emoji: string) {
-    const response = await fetch(`${API_BASE_URL}/seller/inbox/threads/${threadId}/messages/${messageId}/react`, {
+    const response = await safeFetch(`${API_BASE_URL}/seller/inbox/threads/${threadId}/messages/${messageId}/react`, {
       method: 'POST',
       headers: getAuthHeaders(),
       credentials: 'include',
@@ -362,7 +414,7 @@ export const inboxAPI = {
    * Forward a message
    */
   async forwardMessage(threadId: string, messageId: string, targetThreadId: string) {
-    const response = await fetch(`${API_BASE_URL}/seller/inbox/threads/${threadId}/messages/${messageId}/forward`, {
+    const response = await safeFetch(`${API_BASE_URL}/seller/inbox/threads/${threadId}/messages/${messageId}/forward`, {
       method: 'POST',
       headers: getAuthHeaders(),
       credentials: 'include',
@@ -375,7 +427,7 @@ export const inboxAPI = {
    * Update message status
    */
   async updateMessageStatus(threadId: string, messageId: string, status: 'delivered' | 'read') {
-    const response = await fetch(`${API_BASE_URL}/seller/inbox/threads/${threadId}/messages/${messageId}/status`, {
+    const response = await safeFetch(`${API_BASE_URL}/seller/inbox/threads/${threadId}/messages/${messageId}/status`, {
       method: 'PUT',
       headers: getAuthHeaders(),
       credentials: 'include',
@@ -388,7 +440,7 @@ export const inboxAPI = {
    * Get inbox statistics
    */
   async getStats() {
-    const response = await fetch(`${API_BASE_URL}/seller/inbox/stats`, {
+    const response = await safeFetch(`${API_BASE_URL}/seller/inbox/stats`, {
       method: 'GET',
       headers: getAuthHeaders(),
       credentials: 'include',
@@ -405,7 +457,7 @@ export const inboxAPI = {
    * Get available buyers (for creating new threads)
    */
   async getBuyers() {
-    const response = await fetch(`${API_BASE_URL}/seller/inbox/buyers`, {
+    const response = await safeFetch(`${API_BASE_URL}/seller/inbox/buyers`, {
       method: 'GET',
       headers: getAuthHeaders(),
       credentials: 'include',
@@ -417,7 +469,7 @@ export const inboxAPI = {
    * Seed test threads for current seller
    */
   async seedTestThreads() {
-    const response = await fetch(`${API_BASE_URL}/seller/inbox/seed-test-threads`, {
+    const response = await safeFetch(`${API_BASE_URL}/seller/inbox/seed-test-threads`, {
       method: 'POST',
       headers: getAuthHeaders(),
       credentials: 'include',

@@ -44,14 +44,30 @@ app.use(cookieParser());
 app.use(morgan('dev'));
 app.use(helmet());
 app.use(compression());
-// Static files for uploaded images
+// Static files for uploaded images and audio
 // Allow product images to be embedded from a different origin (e.g. Vite dev server on 5173)
 // by relaxing the Cross-Origin-Resource-Policy for this path only.
 app.use(
   '/uploads',
   helmet.crossOriginResourcePolicy({ policy: 'cross-origin' })
 );
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// Serve static files with proper content-type headers (especially for audio files)
+app.use('/uploads', express.static(path.join(__dirname, 'uploads'), {
+  setHeaders: (res, filePath) => {
+    // Set proper content-type for audio files to ensure correct playback
+    if (filePath.endsWith('.webm')) {
+      res.setHeader('Content-Type', 'audio/webm');
+    } else if (filePath.endsWith('.ogg')) {
+      res.setHeader('Content-Type', 'audio/ogg');
+    } else if (filePath.endsWith('.m4a') || filePath.endsWith('.mp4')) {
+      res.setHeader('Content-Type', 'audio/mp4');
+    } else if (filePath.endsWith('.wav')) {
+      res.setHeader('Content-Type', 'audio/wav');
+    }
+    // Express.static will handle other file types automatically
+  }
+}));
 
 // Health check
 app.get('/api/health', (_req: Request, res: Response) => {

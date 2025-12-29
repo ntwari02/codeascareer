@@ -151,6 +151,22 @@ router.post('/upload', inboxUpload.array('attachments', 5), (req: AuthenticatedR
       const isAudio = file.mimetype.startsWith('audio/');
       const isImage = file.mimetype.startsWith('image/');
       
+      // Log file details for debugging (especially for voice notes)
+      console.log('[File Upload] File received:', {
+        filename: file.filename,
+        originalName: file.originalname,
+        size: file.size,
+        mimetype: file.mimetype,
+        isAudio,
+        isImage,
+        duration: req.body.duration,
+      });
+      
+      // Verify file size is not zero (especially important for voice notes)
+      if (file.size === 0) {
+        console.error('[File Upload] WARNING: File size is 0 bytes!', file.originalname);
+      }
+      
       return {
         filename: file.filename,
         originalName: file.originalname,
@@ -163,12 +179,13 @@ router.post('/upload', inboxUpload.array('attachments', 5), (req: AuthenticatedR
       };
     });
 
+    console.log('[File Upload] Successfully processed', files.length, 'file(s)');
     return res.json({
       message: 'Files uploaded successfully',
       files,
     });
   } catch (error: any) {
-    console.error('File upload error:', error);
+    console.error('[File Upload] Error:', error);
     return res.status(500).json({ message: 'Failed to upload files', error: error.message });
   }
 });
@@ -243,7 +260,10 @@ router.post('/threads/:threadId/messages', inboxUpload.array('attachments', 5), 
     }
 
     // Add attachments to request body
-    req.body.attachments = attachments;
+    // CRITICAL: Ensure attachments is always an array, even if empty
+    req.body.attachments = Array.isArray(attachments) ? attachments : [];
+    console.log('[Route] Total attachments after processing:', req.body.attachments.length);
+    console.log('[Route] Attachments type:', typeof req.body.attachments, 'isArray:', Array.isArray(req.body.attachments));
 
     // Get message from body or form data - ensure content exists (can be empty string)
     if (req.body.content === undefined && req.body.message) {
@@ -256,6 +276,18 @@ router.post('/threads/:threadId/messages', inboxUpload.array('attachments', 5), 
     
     // Ensure content is a string type
     req.body.content = String(req.body.content || '');
+    console.log('[Route] Final content:', req.body.content, '(length:', req.body.content.length, ')');
+    console.log('[Route] Final attachments count:', req.body.attachments.length);
+    console.log('[Route] Final attachments:', JSON.stringify(req.body.attachments));
+    console.log('[Route] Validation check - hasContent:', req.body.content.trim().length > 0, 'hasAttachments:', req.body.attachments.length > 0);
+
+    // CRITICAL: Pre-validate before sending to controller to catch issues early
+    if (!req.body.content.trim() && (!req.body.attachments || req.body.attachments.length === 0)) {
+      console.error('[Route] PRE-VALIDATION FAILED: No content and no attachments');
+      return res.status(400).json({
+        message: 'Please add a message text or attach a file/image/voice note. You cannot send an empty message.',
+      });
+    }
 
     // Call the sendMessage controller
     return sendMessage(req, res);
