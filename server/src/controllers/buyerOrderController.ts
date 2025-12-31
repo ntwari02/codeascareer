@@ -159,8 +159,13 @@ export async function getBuyerOrders(req: AuthenticatedRequest, res: Response) {
     const limitNum = parseInt(limit, 10) || 20;
     const skip = (pageNum - 1) * limitNum;
 
+    // Debug logging
+    console.log('Fetching orders for buyerId:', buyerId.toString());
+    console.log('Filter:', filter);
+    console.log('User ID from token:', req.user.id);
+
     const orders = await Order.find(filter)
-      .populate('sellerId', 'name email full_name')
+      .populate('sellerId', 'fullName email')
       .populate('items.productId', 'name images price')
       .sort({ createdAt: -1 })
       .skip(skip)
@@ -168,6 +173,8 @@ export async function getBuyerOrders(req: AuthenticatedRequest, res: Response) {
       .lean();
 
     const total = await Order.countDocuments(filter);
+
+    console.log(`Found ${orders.length} orders out of ${total} total for buyer ${buyerId.toString()}`);
 
     return res.json({
       orders: orders.map(order => {
@@ -224,7 +231,7 @@ export async function getBuyerOrders(req: AuthenticatedRequest, res: Response) {
             : undefined,
           seller: {
             id: seller?._id || order.sellerId,
-            name: seller?.name || seller?.full_name || 'Unknown Seller',
+            name: seller?.fullName || 'Unknown Seller',
           },
           timeline: order.timeline,
         };

@@ -17,6 +17,7 @@ import { StorePage } from './pages/StorePage';
 import { Profile } from './pages/Profile';
 import { Orders } from './pages/Orders';
 import { Messages } from './pages/Messages';
+import { Disputes } from './pages/Disputes';
 import { About } from './pages/About';
 import { Support } from './pages/Support';
 import Careers from './pages/Careers';
@@ -61,6 +62,7 @@ function App() {
           <Route path="/profile" element={<Profile />} />
           <Route path="/orders" element={<Orders />} />
           <Route path="/messages" element={<Messages />} />
+          <Route path="/disputes" element={<Disputes />} />
           <Route path="/cart" element={<Cart />} />
           <Route path="/wishlist" element={<Wishlist />} />
           <Route path="/about" element={<About />} />

@@ -31,7 +31,7 @@ import { useToastStore } from '@/stores/toastStore';
 const API_BASE = 'http://localhost:5000/api/seller/disputes';
 
 interface DisputeEvidence {
-  type: 'photo' | 'document' | 'message' | 'receipt' | 'other';
+  type: 'photo' | 'document' | 'message' | 'receipt' | 'video' | 'other';
   url: string;
   description?: string;
   uploadedAt: string;
@@ -65,6 +65,7 @@ interface Buyer {
   _id: string;
   fullName?: string;
   email?: string;
+  avatar_url?: string;
 }
 
 interface Dispute {
@@ -237,8 +238,8 @@ const DisputeResolution: React.FC = () => {
     
     // Validate file types and sizes
     const validFiles = fileArray.filter(file => {
-      const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'text/plain'];
-      const maxSize = 10 * 1024 * 1024; // 10MB
+      const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'text/plain', 'video/mp4', 'video/mov', 'video/avi', 'video/wmv', 'video/flv', 'video/webm', 'video/mkv'];
+      const maxSize = 50 * 1024 * 1024; // 50MB (increased for videos)
       
       if (!validTypes.includes(file.type)) {
         showToast(`File ${file.name} is not a supported type`, 'error');
@@ -680,7 +681,17 @@ const DisputeResolution: React.FC = () => {
                         </td>
                         <td className="py-3 px-4">
                           <div className="flex items-center gap-2">
-                            <User className="w-4 h-4 text-gray-400" />
+                            {buyer?.avatar_url ? (
+                              <img
+                                src={buyer.avatar_url.startsWith('http') ? buyer.avatar_url : `http://localhost:5000${buyer.avatar_url.startsWith('/') ? buyer.avatar_url : '/' + buyer.avatar_url}`}
+                                alt={buyer?.fullName || 'Buyer'}
+                                className="w-8 h-8 rounded-full object-cover"
+                              />
+                            ) : (
+                              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-orange-400 to-teal-500 flex items-center justify-center">
+                                <User className="w-4 h-4 text-white" />
+                              </div>
+                            )}
                             <div>
                               <div className="text-sm text-gray-900 dark:text-white">
                                 {buyer?.fullName || 'Unknown'}
@@ -871,6 +882,14 @@ const DisputeResolution: React.FC = () => {
                             alt={ev.description || `Evidence ${idx + 1}`}
                             className="w-full h-full object-cover"
                           />
+                        ) : ev.type === 'video' || ev.url.match(/\.(mp4|mov|avi|wmv|flv|webm|mkv)$/i) ? (
+                          <video
+                            src={`http://localhost:5000${ev.url}`}
+                            controls
+                            className="w-full h-full object-cover"
+                          >
+                            Your browser does not support the video tag.
+                          </video>
                         ) : (
                           <div className="w-full h-full flex items-center justify-center bg-gray-100 dark:bg-gray-800">
                             <FileText className="w-12 h-12 text-gray-400" />
@@ -1035,7 +1054,7 @@ const DisputeResolution: React.FC = () => {
                     multiple
                     className="hidden"
                     onChange={(e) => handleEvidenceFileChange(e.target.files)}
-                    accept="image/*,.pdf,.doc,.docx,.txt"
+                    accept="image/*,.pdf,.doc,.docx,.txt,video/*"
                   />
                 </label>
                 {evidenceFiles.length > 0 && (

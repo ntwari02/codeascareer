@@ -100,7 +100,7 @@ export async function getDisputes(req: AuthenticatedRequest, res: Response) {
 
     const disputes = await Dispute.find(filter)
       .populate('orderId', 'orderNumber total items customer customerEmail')
-      .populate('buyerId', 'fullName email')
+      .populate('buyerId', 'fullName email avatar_url')
       .sort({ updatedAt: sortOrder })
       .limit(Number(limit))
       .skip(skip)
@@ -144,7 +144,7 @@ export async function getDispute(req: AuthenticatedRequest, res: Response) {
       sellerId,
     })
       .populate('orderId', 'orderNumber total items customer customerEmail')
-      .populate('buyerId', 'fullName email')
+      .populate('buyerId', 'fullName email avatar_url')
       .populate('resolvedBy', 'fullName email')
       .lean();
 
@@ -294,14 +294,20 @@ export async function uploadEvidence(req: AuthenticatedRequest, res: Response) {
     }
 
     const files = (req.files as Express.Multer.File[] || []).map((file) => {
-      // Determine file type based on extension
-      const ext = file.originalname.split('.').pop()?.toLowerCase();
-      let evidenceType: 'photo' | 'document' | 'message' | 'receipt' | 'other' = 'document';
+      // Determine file type based on MIME type and extension
+      let evidenceType: 'photo' | 'document' | 'video' | 'message' | 'receipt' | 'other' = 'document';
       
-      if (['jpg', 'jpeg', 'png', 'gif'].includes(ext || '')) {
+      if (file.mimetype.startsWith('image/')) {
         evidenceType = 'photo';
-      } else if (['pdf'].includes(ext || '')) {
-        evidenceType = 'document';
+      } else if (file.mimetype.startsWith('video/')) {
+        evidenceType = 'video';
+      } else {
+        const ext = file.originalname.split('.').pop()?.toLowerCase();
+        if (['jpg', 'jpeg', 'png', 'gif'].includes(ext || '')) {
+          evidenceType = 'photo';
+        } else if (['pdf', 'doc', 'docx', 'txt'].includes(ext || '')) {
+          evidenceType = 'document';
+        }
       }
 
       return {

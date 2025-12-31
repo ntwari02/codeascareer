@@ -74,7 +74,7 @@ const orderTimelineSchema = new Schema<IOrderTimelineEntry>(
 const orderSchema = new Schema<IOrder>(
   {
     sellerId: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
-    buyerId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    buyerId: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
     orderNumber: { type: String, required: true, unique: true },
     customer: { type: String, required: true },
     customerEmail: { type: String, required: true },

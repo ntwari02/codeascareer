@@ -2,13 +2,14 @@ import { Router } from 'express';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
-import { authenticate, authorize, AuthenticatedRequest } from '../middleware/auth';
+import { authenticate } from '../middleware/auth';
 import {
-  getDisputes,
-  getDispute,
-  submitSellerResponse,
-  uploadEvidence,
-} from '../controllers/disputeController';
+  createDispute,
+  getBuyerDisputes,
+  getBuyerDispute,
+  submitBuyerResponse,
+  uploadBuyerEvidence,
+} from '../controllers/buyerDisputeController';
 
 const router = Router();
 
@@ -47,21 +48,23 @@ const disputeUpload = multer({
   },
 });
 
-// All routes require authentication and seller role
+// All routes require authentication
 router.use(authenticate);
-router.use(authorize('seller', 'admin'));
 
-// Get all disputes
-router.get('/', getDisputes);
+// Create new dispute
+router.post('/', createDispute);
+
+// Get all disputes for buyer
+router.get('/', getBuyerDisputes);
 
 // Get single dispute
-router.get('/:disputeId', getDispute);
+router.get('/:disputeId', getBuyerDispute);
 
-// Submit seller response
-router.post('/:disputeId/response', submitSellerResponse);
+// Submit buyer response
+router.post('/:disputeId/response', submitBuyerResponse);
 
 // Upload evidence
-router.post('/:disputeId/evidence', disputeUpload.array('files', 10), uploadEvidence);
+router.post('/:disputeId/evidence', disputeUpload.array('files', 10), uploadBuyerEvidence);
 
 export default router;
 

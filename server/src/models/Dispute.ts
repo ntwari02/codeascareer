@@ -1,7 +1,7 @@
 import mongoose, { Document, Schema } from 'mongoose';
 
 export interface IDisputeEvidence {
-  type: 'photo' | 'document' | 'message' | 'receipt' | 'other';
+  type: 'photo' | 'document' | 'message' | 'receipt' | 'video' | 'other';
   url: string;
   description?: string;
   uploadedAt: Date;
@@ -36,7 +36,7 @@ const disputeEvidenceSchema = new Schema<IDisputeEvidence>(
   {
     type: {
       type: String,
-      enum: ['photo', 'document', 'message', 'receipt', 'other'],
+      enum: ['photo', 'document', 'message', 'receipt', 'video', 'other'],
       required: true,
     },
     url: { type: String, required: true },

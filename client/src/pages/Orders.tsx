@@ -37,6 +37,7 @@ import {
   AlertCircle,
   Loader2,
   ChevronLeft,
+  AlertTriangle,
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
@@ -1131,6 +1132,17 @@ export function Orders() {
                         <Download className="h-4 w-4" />
                         Invoice
                       </Button>
+                      {(order.status === 'delivered' || order.status === 'shipped' || order.status === 'processing') && (
+                        <Button 
+                          variant="outline" 
+                          size="sm" 
+                          className="gap-2 text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+                          onClick={() => navigate(`/disputes?orderId=${order.id}`)}
+                        >
+                          <AlertTriangle className="h-4 w-4" />
+                          File Dispute
+                        </Button>
+                      )}
                     </div>
                   </div>
 

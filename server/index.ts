@@ -24,6 +24,10 @@ import productRoutes from './src/routes/productRoutes';
 import buyerOrderRoutes from './src/routes/buyerOrderRoutes';
 import inboxRoutes from './src/routes/inboxRoutes';
 import buyerInboxRoutes from './src/routes/buyerInboxRoutes';
+import buyerDisputeRoutes from './src/routes/buyerDisputeRoutes';
+import blogRoutes from './src/routes/blogRoutes';
+import affiliateRoutes from './src/routes/affiliateRoutes';
+import trackingRoutes from './src/routes/trackingRoutes';
 import { websocketService } from './src/services/websocketService';
 
 dotenv.config();
@@ -83,6 +87,8 @@ app.use('/api/seller/inbox', inboxRoutes);
 
 // Buyer inbox routes
 app.use('/api/buyer/inbox', buyerInboxRoutes);
+// Buyer dispute routes
+app.use('/api/buyer/disputes', buyerDisputeRoutes);
 
 // Seller routes
 app.use('/api/seller', sellerRoutes);
@@ -93,6 +99,12 @@ app.use('/api/seller/subscription', subscriptionRoutes);
 app.use('/api/seller/analytics', analyticsRoutes);
 // Product routes (public - for buyers to view products)
 app.use('/api/products', productRoutes);
+// Blog routes (public - for blog posts)
+app.use('/api/blog', blogRoutes);
+// Affiliate routes
+app.use('/api/affiliate', affiliateRoutes);
+// Tracking routes
+app.use('/api/track', trackingRoutes);
 // Buyer order routes
 app.use('/api/orders', buyerOrderRoutes);
 
