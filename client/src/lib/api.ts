@@ -365,3 +365,54 @@ export const authAPI = {
   },
 };
 
+/**
+ * Admin API Service
+ */
+export const adminAPI = {
+  /**
+   * Get all buyers with statistics
+   */
+  async getBuyers(params?: {
+    status?: string;
+    search?: string;
+    page?: number;
+    limit?: number;
+  }) {
+    const queryParams = new URLSearchParams();
+    if (params?.status) queryParams.append('status', params.status);
+    if (params?.search) queryParams.append('search', params.search);
+    if (params?.page) queryParams.append('page', params.page.toString());
+    if (params?.limit) queryParams.append('limit', params.limit.toString());
+
+    const queryString = queryParams.toString();
+    const url = `${API_BASE_URL}/admin/buyers${queryString ? `?${queryString}` : ''}`;
+
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: getAuthHeaders(),
+      credentials: 'include',
+    });
+    return handleResponse<{
+      customers: Array<{
+        id: string;
+        name: string;
+        email: string;
+        phone: string;
+        status: 'active' | 'pending' | 'banned';
+        kyc: 'verified' | 'pending' | 'rejected';
+        orders: number;
+        totalSpent: number;
+        lastOrder: string;
+        tickets: number;
+        notes: string;
+      }>;
+      pagination: {
+        page: number;
+        limit: number;
+        total: number;
+        totalPages: number;
+      };
+    }>(response);
+  },
+};
+

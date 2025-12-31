@@ -313,8 +313,8 @@ export async function sendMessage(req: AuthenticatedRequest, res: Response) {
     
     const validation = sendMessageSchema.safeParse(req.body);
     if (!validation.success) {
-      console.error('[Controller] Validation failed:', validation.error.errors);
-      const errorMessages = validation.error.errors.map(e => e.message).filter((msg, idx, arr) => arr.indexOf(msg) === idx);
+      console.error('[Controller] Validation failed:', validation.error.issues);
+      const errorMessages = validation.error.issues.map((e: { message: string }) => e.message).filter((msg: string, idx: number, arr: string[]) => arr.indexOf(msg) === idx);
       const mainMessage = errorMessages[0] || 'Validation error';
       return res.status(400).json({
         message: mainMessage,
@@ -392,7 +392,7 @@ export async function sendMessage(req: AuthenticatedRequest, res: Response) {
     }
 
     const message = await Message.create(messageData);
-    await message.populate('senderId', 'fullName email avatarUrl');
+    await (message as any).populate('senderId', 'fullName email avatarUrl');
 
     // Update thread - create preview from content or attachment info (WhatsApp style)
     let preview = messageContent && messageContent.trim() ? messageContent : '';

@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { adminAPI } from '../../lib/api';
 import {
   Users,
   UserPlus,
@@ -72,47 +73,6 @@ type NewCustomerForm = {
   notes: string;
 };
 
-const customers: CustomerRecord[] = [
-  {
-    id: 'CUS-1024',
-    name: 'Diane Akimana',
-    email: 'diane@clients.com',
-    phone: '+250 788 120 220',
-    status: 'active',
-    kyc: 'verified',
-    orders: 54,
-    totalSpent: 128600,
-    lastOrder: 'Mar 18, 2024',
-    tickets: 1,
-    notes: 'Fashion buyer · Kigali RW',
-  },
-  {
-    id: 'CUS-1091',
-    name: 'Samuel Keita',
-    email: 'samuel@clients.com',
-    phone: '+225 05 20 33 44',
-    status: 'pending',
-    kyc: 'pending',
-    orders: 8,
-    totalSpent: 6400,
-    lastOrder: 'Mar 11, 2024',
-    tickets: 0,
-    notes: 'Electronics reseller · Abidjan CI',
-  },
-  {
-    id: 'CUS-0871',
-    name: 'Lena Fofana',
-    email: 'lena@clients.com',
-    phone: '+221 77 102 4586',
-    status: 'banned',
-    kyc: 'rejected',
-    orders: 112,
-    totalSpent: 20120,
-    lastOrder: 'Feb 01, 2024',
-    tickets: 4,
-    notes: 'Chargeback abuse · Dakar SN',
-  },
-];
 
 const staffMembers: StaffRecord[] = [
   {
@@ -176,7 +136,9 @@ export default function UserManagement() {
   const [activeTab, setActiveTab] = useState<'customers' | 'staff' | 'roles'>('customers');
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<CustomerStatus | 'all'>('all');
-  const [customerRows, setCustomerRows] = useState<CustomerRecord[]>(customers);
+  const [customerRows, setCustomerRows] = useState<CustomerRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [addUserOpen, setAddUserOpen] = useState(false);
   const [newCustomer, setNewCustomer] = useState<NewCustomerForm>({
     name: '',
@@ -221,6 +183,33 @@ export default function UserManagement() {
   ]);
   const [tabMenuOpen, setTabMenuOpen] = useState(false);
   const tabMenuRef = useRef<HTMLDivElement | null>(null);
+
+  // Load buyers data from API
+  useEffect(() => {
+    if (activeTab === 'customers') {
+      loadBuyers();
+    }
+  }, [activeTab]);
+
+  const loadBuyers = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const response = await adminAPI.getBuyers({
+        status: statusFilter !== 'all' ? statusFilter : undefined,
+        search: searchQuery || undefined,
+        page: 1,
+        limit: 100,
+      });
+      setCustomerRows(response.customers);
+    } catch (err: any) {
+      console.error('Failed to load buyers:', err);
+      setError(err.message || 'Failed to load buyers');
+      setCustomerRows([]);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
     const handler = (event: MouseEvent) => {
@@ -291,9 +280,22 @@ export default function UserManagement() {
     resetForm();
   };
 
+  // Reload buyers when search or status filter changes (with debounce for search)
+  useEffect(() => {
+    if (activeTab === 'customers') {
+      const timeoutId = setTimeout(() => {
+        loadBuyers();
+      }, searchQuery ? 500 : 0); // Debounce search by 500ms
+      return () => clearTimeout(timeoutId);
+    }
+  }, [searchQuery, statusFilter, activeTab]);
+
   const filteredCustomers = useMemo(() => {
+    // Client-side filtering for additional refinement if needed
+    // The API already filters by search and status, but we keep this for any additional client-side filtering
     return customerRows.filter((customer) => {
       const matchesQuery =
+        !searchQuery ||
         customer.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         customer.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
         customer.id.toLowerCase().includes(searchQuery.toLowerCase());
@@ -461,22 +463,40 @@ export default function UserManagement() {
               </div>
             </div>
 
-            <div className="overflow-x-auto overflow-y-hidden scroll-smooth rounded-xl border border-gray-100 dark:border-gray-800 [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:dark:bg-gray-700 hover:[&::-webkit-scrollbar-thumb]:bg-gray-400 dark:hover:[&::-webkit-scrollbar-thumb]:bg-gray-600">
-              <table className="min-w-full text-sm">
-                <thead className="bg-gray-50 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:bg-gray-800">
-                  <tr>
-                    <th className="px-4 py-3">Customer</th>
-                    <th className="px-4 py-3">Contact</th>
-                    <th className="px-4 py-3">Status</th>
-                    <th className="px-4 py-3">KYC</th>
-                    <th className="px-4 py-3">Orders</th>
-                    <th className="px-4 py-3">Total spent</th>
-                    <th className="px-4 py-3">Last order</th>
-                    <th className="px-4 py-3 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                  {filteredCustomers.map((customer) => (
+            {error && (
+              <div className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
+                {error}
+              </div>
+            )}
+            {loading ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="h-8 w-8 animate-spin text-emerald-500" />
+                <span className="ml-3 text-gray-600 dark:text-gray-300">Loading buyers...</span>
+              </div>
+            ) : (
+              <div className="overflow-x-auto overflow-y-hidden scroll-smooth rounded-xl border border-gray-100 dark:border-gray-800 [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:dark:bg-gray-700 hover:[&::-webkit-scrollbar-thumb]:bg-gray-400 dark:hover:[&::-webkit-scrollbar-thumb]:bg-gray-600">
+                <table className="min-w-full text-sm">
+                  <thead className="bg-gray-50 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:bg-gray-800">
+                    <tr>
+                      <th className="px-4 py-3">Customer</th>
+                      <th className="px-4 py-3">Contact</th>
+                      <th className="px-4 py-3">Status</th>
+                      <th className="px-4 py-3">KYC</th>
+                      <th className="px-4 py-3">Orders</th>
+                      <th className="px-4 py-3">Total spent</th>
+                      <th className="px-4 py-3">Last order</th>
+                      <th className="px-4 py-3 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                    {filteredCustomers.length === 0 ? (
+                      <tr>
+                        <td colSpan={8} className="px-4 py-8 text-center text-gray-500 dark:text-gray-400">
+                          No buyers found
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredCustomers.map((customer) => (
                     <tr key={customer.id} className="bg-white hover:bg-gray-50 dark:bg-gray-900 dark:hover:bg-gray-800/60">
                       <td className="px-4 py-4">
                         <div className="space-y-1">
@@ -519,10 +539,12 @@ export default function UserManagement() {
                         </div>
                       </td>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </section>
 
           <section className="grid gap-6 lg:grid-cols-3">

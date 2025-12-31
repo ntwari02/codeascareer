@@ -28,6 +28,7 @@ import buyerDisputeRoutes from './src/routes/buyerDisputeRoutes';
 import blogRoutes from './src/routes/blogRoutes';
 import affiliateRoutes from './src/routes/affiliateRoutes';
 import trackingRoutes from './src/routes/trackingRoutes';
+import adminRoutes from './src/routes/adminRoutes';
 import { websocketService } from './src/services/websocketService';
 
 dotenv.config();
@@ -134,6 +135,8 @@ app.use('/api/affiliate', affiliateRoutes);
 app.use('/api/track', trackingRoutes);
 // Buyer order routes
 app.use('/api/orders', buyerOrderRoutes);
+// Admin routes
+app.use('/api/admin', adminRoutes);
 
 // 404 handler
 app.use((req: Request, res: Response) => {
