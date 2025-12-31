@@ -1,16 +1,18 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Header } from '../components/buyer/Header';
 import { Footer } from '../components/buyer/Footer';
 import { AnnouncementBar } from '../components/buyer/AnnouncementBar';
 import { Button } from '../components/ui/button';
 import { useAuthStore } from '../stores/authStore';
 import { useToastStore } from '../stores/toastStore';
+import { useNotificationStore } from '../stores/notificationStore';
 import { buyerInboxAPI, MessageThread, Message } from '../services/buyerInboxApi';
 import { websocketService } from '../services/websocketService';
 import { AudioWave } from '../components/AudioWave';
 import { ImageLightbox } from '../components/ImageLightbox';
 import { UploadProgress } from '../components/UploadProgress';
+import ChatIndicator from '../components/ChatIndicator';
 
 // Get server base URL for file attachments
 const getFileUrl = (path: string): string => {
@@ -55,35 +57,125 @@ import {
   Play,
   X,
   Trash2,
+  Edit2,
+  Reply,
+  Smile,
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 
 type FilterType = 'all' | 'unread' | 'order' | 'seller' | 'support';
 
-// Request browser notification permission
+// Request browser notification permission (improved)
 const requestNotificationPermission = async () => {
-  if ('Notification' in window && Notification.permission === 'default') {
-    await Notification.requestPermission();
+  if ('Notification' in window) {
+    if (Notification.permission === 'default') {
+      try {
+        const permission = await Notification.requestPermission();
+        console.log('[Notifications] Permission result:', permission);
+      } catch (error) {
+        console.error('[Notifications] Error requesting permission:', error);
+      }
+    } else if (Notification.permission === 'denied') {
+      console.warn('[Notifications] Permission denied. User needs to enable notifications in browser settings.');
+    } else {
+      console.log('[Notifications] Permission already granted');
+    }
+  } else {
+    console.warn('[Notifications] Browser does not support notifications');
   }
 };
 
-// Show browser notification
-const showNotification = (title: string, body: string, icon?: string) => {
-  if ('Notification' in window && Notification.permission === 'granted') {
-    new Notification(title, {
-      body,
-      icon: icon || '/favicon.ico',
-      badge: '/favicon.ico',
-      tag: 'message-notification',
-      requireInteraction: false,
+// Show browser notification (Instagram-style) with configurable timeout
+const showNotification = (title: string, body: string, icon?: string, threadId?: string, timeout: number = 3000) => {
+  console.log('[Notifications] Attempting to show notification:', { title, body, permission: Notification.permission, timeout });
+  
+  if (!('Notification' in window)) {
+    console.warn('[Notifications] Browser does not support notifications');
+    return;
+  }
+
+  if (Notification.permission === 'granted') {
+    try {
+      const notificationOptions: NotificationOptions = {
+        body,
+        icon: icon || '/favicon.ico',
+        badge: '/favicon.ico',
+        tag: threadId || 'message-notification',
+        requireInteraction: false,
+        silent: false,
+      };
+
+      // Add vibrate if supported (mobile)
+      if ('vibrate' in navigator) {
+        (notificationOptions as any).vibrate = [200, 100, 200];
+      }
+
+      const notification = new Notification(title, notificationOptions);
+      console.log('[Notifications] Notification created successfully');
+
+      // Store timeout ID to allow manual closing
+      let timeoutId: NodeJS.Timeout | null = null;
+
+      // Handle notification click - navigate to messages page
+      notification.onclick = () => {
+        console.log('[Notifications] Notification clicked, navigating to messages');
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+          timeoutId = null;
+        }
+        window.focus();
+        const messagesUrl = threadId ? `/messages?threadId=${threadId}` : '/messages';
+        window.location.href = messagesUrl;
+        notification.close();
+      };
+
+      // Handle notification close
+      notification.onclose = () => {
+        console.log('[Notifications] Notification closed');
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+          timeoutId = null;
+        }
+      };
+
+      // Handle notification error
+      notification.onerror = (error) => {
+        console.error('[Notifications] Notification error:', error);
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+          timeoutId = null;
+        }
+      };
+
+      // Auto-close after specified timeout (default 3 seconds, Instagram-style)
+      timeoutId = setTimeout(() => {
+        console.log('[Notifications] Notification timeout, closing...');
+        notification.close();
+        timeoutId = null;
+      }, timeout);
+    } catch (error) {
+      console.error('[Notifications] Error creating notification:', error);
+    }
+  } else if (Notification.permission === 'default') {
+    console.log('[Notifications] Permission not yet granted, requesting...');
+    Notification.requestPermission().then((permission) => {
+      console.log('[Notifications] Permission result:', permission);
+      if (permission === 'granted') {
+        // Retry showing notification after permission is granted
+        showNotification(title, body, icon, threadId, timeout);
+      }
     });
+  } else {
+    console.warn('[Notifications] Permission denied. User needs to enable notifications in browser settings.');
   }
 };
 
 export function Messages() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuthStore();
   const { showToast } = useToastStore();
+  const { setUnreadCount } = useNotificationStore();
   const [selectedThread, setSelectedThread] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<FilterType>('all');
@@ -109,10 +201,12 @@ export function Messages() {
   const [newThreadType, setNewThreadType] = useState<'rfq' | 'message' | 'order'>('message');
   const [isTyping, setIsTyping] = useState(false);
   const [typingUserId, setTypingUserId] = useState<string | null>(null);
+  const [typingUserName, setTypingUserName] = useState<string | null>(null);
   
   // Real-time indicators state
   const [isRecordingIndicator, setIsRecordingIndicator] = useState(false);
   const [recordingUserId, setRecordingUserId] = useState<string | null>(null);
+  const [recordingUserName, setRecordingUserName] = useState<string | null>(null);
   const [recordingDurationIndicator, setRecordingDurationIndicator] = useState(0);
   const [isSelectingFile, setIsSelectingFile] = useState(false);
   const [selectingFileUserId, setSelectingFileUserId] = useState<string | null>(null);
@@ -123,7 +217,11 @@ export function Messages() {
   
   // Audio playing state
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
-
+  
+  // Message actions state
+  const [editingMessage, setEditingMessage] = useState<Message | null>(null);
+  const [replyTo, setReplyTo] = useState<Message | null>(null);
+  
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -132,6 +230,10 @@ export function Messages() {
   const recordingIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const recordingCompleteRef = useRef<((file: File) => void) | null>(null);
+  const recordingStreamRef = useRef<MediaStream | null>(null); // Store stream to keep it alive
+  // Store chunks in ref to ensure they persist across function calls
+  const recordingChunksRef = useRef<Blob[]>([]);
+  const recordingMimeTypeRef = useRef<string>('audio/webm');
 
   const activeThread = useMemo(() => {
     return threads.find(t => t._id === selectedThread);
@@ -143,42 +245,126 @@ export function Messages() {
   }, []);
 
   // Load threads
-  const loadThreads = useCallback(async (showLoading: boolean = true) => {
+  const loadThreads = useCallback(async (silent = false) => {
     try {
-      if (showLoading) {
-        setLoading(true);
+      // Check if user is available
+      if (!user) {
+        console.warn('[Load Threads] No user available, cannot load threads');
+        setThreads([]);
+        setLoading(false);
+        return;
       }
+      
+      // Check if auth token exists
+      const token = localStorage.getItem('auth_token');
+      if (!token) {
+        console.warn('[Load Threads] No auth token found in localStorage');
+        setThreads([]);
+        setLoading(false);
+        return;
+      }
+      
+      console.log('[Load Threads] Starting to load threads...', { 
+        searchQuery, 
+        filter,
+        userId: user?.id,
+        hasToken: !!token
+      });
+      setLoading(true);
+      
       const typeFilter = filter === 'order' ? 'order' : filter === 'seller' ? 'message' : undefined;
-      const response = await buyerInboxAPI.getThreads({
+      const params = {
         search: searchQuery || undefined,
         status: filter === 'unread' ? undefined : 'active',
         type: typeFilter,
         page: 1,
         limit: 50,
-      });
-      setThreads(response.threads);
-    } catch (error: any) {
-      showToast(error.message || 'Failed to load conversations', 'error');
-    } finally {
-      if (showLoading) {
-        setLoading(false);
+      };
+      
+      console.log('[Load Threads] API call params:', params);
+      console.log('[Load Threads] Calling buyerInboxAPI.getThreads...');
+      
+      const response = await buyerInboxAPI.getThreads(params);
+      
+      console.log('[Load Threads] API response received:', response);
+      console.log('[Load Threads] Threads count:', response.threads?.length || 0);
+      console.log('[Load Threads] Threads data:', response.threads);
+      
+      if (response.threads && Array.isArray(response.threads)) {
+        setThreads(response.threads);
+        console.log('[Load Threads] Threads state updated with', response.threads.length, 'thread(s)');
+      } else {
+        console.warn('[Load Threads] Response.threads is not an array:', response.threads);
+        setThreads([]);
       }
+      
+      // Clear any previous errors on success
+      if (!silent) {
+        console.log('[Load Threads] Successfully loaded', response.threads?.length || 0, 'thread(s)');
+      }
+    } catch (error: any) {
+      console.error('[Load Threads] Error details:', {
+        message: error.message,
+        stack: error.stack,
+        name: error.name,
+        error: error,
+      });
+      // Only show toast if not silent retry
+      if (!silent) {
+        showToast(error.message || 'Failed to load conversations', 'error');
+      }
+      // Set empty array on error to prevent UI issues
+      setThreads([]);
+      // Re-throw to allow caller to handle
+      throw error;
+    } finally {
+      setLoading(false);
+      console.log('[Load Threads] Finished loading threads, loading state set to false');
     }
-  }, [searchQuery, filter, showToast]);
+  }, [searchQuery, filter, showToast, user]);
 
   // Load thread messages
   const loadThreadMessages = useCallback(async (threadId: string) => {
+    if (!threadId) {
+      console.error('[Load Thread Messages] No thread ID provided');
+      return;
+    }
+    
     try {
+      console.log('[Load Thread Messages] Loading messages for thread:', threadId);
       const response = await buyerInboxAPI.getThread(threadId);
+      console.log('[Load Thread Messages] Received', response.messages?.length || 0, 'message(s)');
+      
       setMessages(response.messages || []);
-      await buyerInboxAPI.markThreadAsRead(threadId);
-      websocketService.joinThread(threadId);
+      
+      // Mark as read
+      try {
+        await buyerInboxAPI.markThreadAsRead(threadId);
+      } catch (readError) {
+        console.warn('[Load Thread Messages] Failed to mark as read:', readError);
+        // Don't fail the whole operation if marking as read fails
+      }
+      
+      // Join WebSocket room
+      try {
+        websocketService.joinThread(threadId);
+      } catch (wsError) {
+        console.warn('[Load Thread Messages] Failed to join WebSocket room:', wsError);
+        // Don't fail the whole operation if WebSocket join fails
+      }
+      
+      // Scroll to bottom
       setTimeout(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        if (messagesEndRef.current) {
+          messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+        }
       }, 100);
     } catch (error: any) {
-      showToast(error.message || 'Failed to load messages', 'error');
+      console.error('[Load Thread Messages] Error:', error);
+      const errorMessage = error.message || 'Failed to load messages';
+      showToast(errorMessage, 'error');
       setMessages([]);
+      // Don't clear selectedThread on error, just show error message
     }
   }, [showToast]);
 
@@ -187,49 +373,141 @@ export function Messages() {
     if (!selectedThread) return;
     if (sending) return;
 
+    // Reset typing indicator when message is sent
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = null;
+    }
+    // Emit stop typing event when message is sent
+    websocketService.sendTyping(selectedThread, false);
+    setIsTyping(false);
+    setTypingUserId(null);
+    setTypingUserName(null);
+
     // Auto-send if recording or has files
     if (isRecording) {
       stopRecording();
       await new Promise(resolve => setTimeout(resolve, 300));
     }
 
-    // Check if we have content to send
-    if (!newMessage.trim() && uploadedAttachments.length === 0 && selectedFiles.length === 0) {
-      return;
+    // Check if we have content or files to send (allow sending with just files/images/voice notes)
+    const hasContent = newMessage.trim().length > 0;
+    const hasFiles = selectedFiles.length > 0 || uploadedAttachments.length > 0;
+    
+    if (!hasContent && !hasFiles) {
+      return; // Nothing to send
     }
 
     try {
       setSending(true);
       
+      // Wait for any in-progress uploads to complete (max 10 seconds)
+      const maxWaitTime = 10000; // 10 seconds
+      const startTime = Date.now();
+      while (uploadingFiles.size > 0 && (Date.now() - startTime) < maxWaitTime) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      
       // Upload remaining files if any (voice notes or files that weren't auto-uploaded)
       let attachments = [...uploadedAttachments];
-      const remainingFiles = selectedFiles.filter(f => 
-        !uploadedAttachments.some(a => a.originalName === f.name) &&
-        !Array.from(uploadingFiles.values()).includes(f)
-      );
       
-      if (remainingFiles.length > 0) {
+      // Get all files that need to be uploaded (not in uploadedAttachments and not currently uploading)
+      const filesToUpload = selectedFiles.filter(f => {
+        const isUploaded = uploadedAttachments.some(a => a.originalName === f.name);
+        const isUploading = Array.from(uploadingFiles.values()).some(uf => uf === f);
+        return !isUploaded && !isUploading;
+      });
+      
+      if (filesToUpload.length > 0) {
         try {
+          console.log('[Send Message] Uploading', filesToUpload.length, 'file(s) before sending');
           const uploaded = await buyerInboxAPI.uploadFiles(
-            remainingFiles,
+            filesToUpload,
             recordingDuration > 0 ? recordingDuration : undefined,
             (progress) => {
               setUploadProgress(prev => new Map(prev).set('sending', progress));
             }
           );
-          attachments = [...attachments, ...uploaded];
+          
+          if (uploaded && uploaded.length > 0) {
+            attachments = [...attachments, ...uploaded];
+            console.log('[Send Message] Successfully uploaded', uploaded.length, 'file(s)');
+          } else {
+            console.warn('[Send Message] Upload returned empty array');
+          }
         } catch (error: any) {
+          console.error('[Send Message] Upload error:', error);
           showToast('Failed to upload some files', 'error');
           throw error;
         }
       }
 
-      // Send message - WhatsApp style: allow empty content if attachments exist
+      // Validate: Must have either content OR attachments after upload
       const messageText = newMessage.trim();
-      await buyerInboxAPI.sendMessage(selectedThread, {
+      console.log('[Send Message] Validation - Content:', messageText.length > 0, 'Attachments:', attachments.length);
+      
+      if (!messageText && (!attachments || attachments.length === 0)) {
+        console.error('[Send Message] Validation failed - no content and no attachments');
+        showToast('Please add a message or attachment', 'error');
+        setSending(false);
+        return;
+      }
+
+      // Send message - WhatsApp style: allow empty content if attachments exist
+      console.log('[Send Message] Sending message with', attachments.length, 'attachment(s)');
+      const response = await buyerInboxAPI.sendMessage(selectedThread, {
         content: messageText || '', // Empty string is allowed if attachments exist
-        attachments,
+        attachments: attachments || [],
+        replyTo: replyTo?._id,
       });
+
+      // Optimistically add the sent message to the messages array immediately
+      if (response.message) {
+        setMessages((prev) => {
+          // Check if message already exists
+          if (prev.some(m => m._id === response.message._id)) {
+            return prev;
+          }
+          return [...prev, response.message];
+        });
+        
+        // Update thread list immediately to show the new message preview
+        setThreads((prevThreads) => {
+          return prevThreads.map((thread) => {
+            if (thread._id === selectedThread) {
+              // Generate preview from message content or attachments
+              let preview = messageText || '';
+              if (!preview && attachments.length > 0) {
+                const firstAtt = attachments[0];
+                if (firstAtt.type === 'voice') {
+                  preview = '🎤 Voice note';
+                } else if (firstAtt.type === 'image') {
+                  preview = '📷 Image';
+                } else {
+                  preview = `📎 ${firstAtt.originalName || 'File'}`;
+                }
+                if (attachments.length > 1) {
+                  preview += ` (+${attachments.length - 1} more)`;
+                }
+              }
+              preview = preview.length > 200 ? preview.substring(0, 200) + '...' : preview;
+              
+              return {
+                ...thread,
+                lastMessageAt: new Date().toISOString(),
+                lastMessagePreview: preview,
+                buyerUnreadCount: 0, // Sender has read their own message
+              };
+            }
+            return thread;
+          }).sort((a, b) => {
+            // Sort by lastMessageAt descending
+            const aTime = new Date(a.lastMessageAt).getTime();
+            const bTime = new Date(b.lastMessageAt).getTime();
+            return bTime - aTime;
+          });
+        });
+      }
 
       setNewMessage('');
       setSelectedFiles([]);
@@ -240,14 +518,74 @@ export function Messages() {
       setUploadErrors(new Map());
       setUploadingFiles(new Map());
       
+      // Reload messages and threads from server to ensure consistency
       await loadThreadMessages(selectedThread);
-      await loadThreads();
+      await loadThreads(true); // Silent reload to avoid duplicate toasts
+      
+      // Scroll to bottom to show the new message
+      setTimeout(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }, 100);
       
       showToast('Message sent', 'success');
     } catch (error: any) {
-      showToast(error.message || 'Failed to send message', 'error');
+      console.error('[Send Message] Error:', error);
+      // Extract error message - check if it's a validation error
+      let errorMessage = error.message || 'Failed to send message';
+      
+      // If error has a response with validation details, show the main message
+      if (error.response || (error.message && error.message.includes('Validation error'))) {
+        try {
+          // Try to parse if it's a JSON string
+          if (typeof error.message === 'string' && error.message.includes('Validation error')) {
+            errorMessage = error.message.replace('Validation error: ', '');
+          }
+        } catch (e) {
+          // Keep original message if parsing fails
+        }
+      }
+      
+      showToast(errorMessage, 'error');
     } finally {
       setSending(false);
+    }
+  };
+
+  // Edit message
+  const handleEditMessage = async (message: Message, newContent: string) => {
+    if (!selectedThread) return;
+    try {
+      await buyerInboxAPI.editMessage(selectedThread, message._id, newContent);
+      await loadThreadMessages(selectedThread);
+      setEditingMessage(null);
+      showToast('Message updated', 'success');
+    } catch (error: any) {
+      showToast(error.message || 'Failed to edit message', 'error');
+    }
+  };
+
+  // Delete message
+  const handleDeleteMessage = async (message: Message) => {
+    if (!selectedThread) return;
+    if (!confirm('Are you sure you want to delete this message?')) return;
+    
+    try {
+      await buyerInboxAPI.deleteMessage(selectedThread, message._id);
+      await loadThreadMessages(selectedThread);
+      showToast('Message deleted', 'success');
+    } catch (error: any) {
+      showToast(error.message || 'Failed to delete message', 'error');
+    }
+  };
+
+  // React to message
+  const handleReactToMessage = async (message: Message, emoji: string) => {
+    if (!selectedThread) return;
+    try {
+      await buyerInboxAPI.reactToMessage(selectedThread, message._id, emoji);
+      await loadThreadMessages(selectedThread);
+    } catch (error: any) {
+      showToast(error.message || 'Failed to react', 'error');
     }
   };
 
@@ -335,18 +673,135 @@ export function Messages() {
   // Voice recording
   const startRecording = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
+      console.log('[Voice Recording] Requesting microphone access...');
+      
+      // Clear previous chunks
+      recordingChunksRef.current = [];
+      
+      // A) Recording setup - Use exact getUserMedia config
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          sampleRate: 48000,
+          noiseSuppression: true,
+          echoCancellation: true,
+          autoGainControl: true
+        }
+      });
+      
+      // Store stream in ref to keep it alive until recording stops
+      recordingStreamRef.current = stream;
+      
+      console.log('[Voice Recording] Microphone access granted, stream active:', stream.active);
+      const audioTracks = stream.getAudioTracks();
+      console.log('[Voice Recording] Audio tracks:', audioTracks.map(t => ({
+        label: t.label,
+        enabled: t.enabled,
+        muted: t.muted,
+        readyState: t.readyState,
+        settings: t.getSettings()
+      })));
+      
+      // Verify track is active and not muted
+      if (audioTracks.length === 0) {
+        throw new Error('No audio tracks available');
+      }
+      
+      const audioTrack = audioTracks[0];
+      if (audioTrack.muted) {
+        console.warn('[Voice Recording] WARNING: Audio track is muted!');
+        audioTrack.enabled = true;
+      }
+      
+      // Ensure track is active
+      if (audioTrack.readyState !== 'live') {
+        console.warn('[Voice Recording] WARNING: Audio track is not live!');
+      }
+      
+      // A) MediaRecorder MUST use a supported codec
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+        ? "audio/webm;codecs=opus"
+        : "audio/ogg;codecs=opus";
+      
+      console.log('[Voice Recording] Using mime type:', mimeType);
+      
+      // Store mime type in ref
+      recordingMimeTypeRef.current = mimeType;
+      
+      // Create MediaRecorder with supported codec
+      const mediaRecorder = new MediaRecorder(stream, { mimeType });
+      
+      console.log('[Voice Recording] MediaRecorder created with mimeType:', mimeType);
+      console.log('[Voice Recording] MediaRecorder state:', mediaRecorder.state);
+      
       mediaRecorderRef.current = mediaRecorder;
       
-      const chunks: Blob[] = [];
-      mediaRecorder.ondataavailable = (e) => chunks.push(e.data);
+      // Collect data chunks - use timeslice to ensure regular data collection
+      // CRITICAL: Store chunks in ref to ensure they persist across function calls
+      mediaRecorder.ondataavailable = (e) => {
+        console.log('[Voice Recording] Data available, chunk size:', e.data.size, 'bytes');
+        if (e.data && e.data.size > 0) {
+          recordingChunksRef.current.push(e.data);
+          const totalSize = recordingChunksRef.current.reduce((sum, chunk) => sum + chunk.size, 0);
+          console.log('[Voice Recording] Chunk added. Total chunks:', recordingChunksRef.current.length, 'Total size:', totalSize, 'bytes');
+        } else {
+          console.warn('[Voice Recording] WARNING: Received empty chunk!');
+        }
+      };
+      
+      mediaRecorder.onerror = (e) => {
+        console.error('[Voice Recording] MediaRecorder error:', e);
+        console.error('[Voice Recording] Error event:', e);
+        showToast('Recording error occurred', 'error');
+      };
       
       mediaRecorder.onstop = () => {
-        const blob = new Blob(chunks, { type: 'audio/webm' });
-        const file = new File([blob], `voice-${Date.now()}.webm`, { type: 'audio/webm' });
+        console.log('[Voice Recording] Recording stopped');
+        console.log('[Voice Recording] Total chunks collected:', recordingChunksRef.current.length);
+        console.log('[Voice Recording] Chunks sizes:', recordingChunksRef.current.map(c => c.size));
+        
+        const totalSize = recordingChunksRef.current.reduce((sum, chunk) => sum + chunk.size, 0);
+        console.log('[Voice Recording] Total chunks size:', totalSize, 'bytes');
+        
+        // A) On stop, properly build blob and file
+        const mimeType = recordingMimeTypeRef.current;
+        const blob = new Blob(recordingChunksRef.current, { type: mimeType });
+        console.log('[Voice Recording] Final blob size:', blob.size, 'bytes');
+        console.log('[Voice Recording] Blob type:', blob.type);
+        
+        // Verify blob is not empty
+        if (blob.size === 0) {
+          console.error('[Voice Recording] ERROR: Blob is empty! No audio data captured.');
+          showToast('Recording failed: No audio data captured', 'error');
+          
+          // A) Ensure stream tracks stop after recording ends
+          if (recordingStreamRef.current) {
+            recordingStreamRef.current.getTracks().forEach(track => track.stop());
+            recordingStreamRef.current = null;
+          }
+          
+          recordingChunksRef.current = [];
+          return;
+        }
+        
+        // Determine file extension based on mime type
+        const extension = mimeType.includes('ogg') ? 'ogg' : 'webm';
+        
+        // A) Properly build file with correct name and type
+        const file = new File([blob], `voicenote-${Date.now()}.${extension}`, { type: mimeType });
+        console.log('[Voice Recording] File created:', file.name, 'size:', file.size, 'bytes', 'type:', file.type);
+        
+        // Add file to selected files
         setSelectedFiles((prev) => [...prev, file]);
-        stream.getTracks().forEach(track => track.stop());
+        
+        // A) Ensure stream tracks stop after recording ends
+        if (recordingStreamRef.current) {
+          recordingStreamRef.current.getTracks().forEach(track => track.stop());
+          recordingStreamRef.current = null;
+        }
+        
+        // Clear chunks after use
+        recordingChunksRef.current = [];
         
         // Call the completion callback if set
         if (recordingCompleteRef.current) {
@@ -355,15 +810,57 @@ export function Messages() {
         }
       };
       
-      mediaRecorder.start();
+      // Start recording with timeslice to ensure regular data collection
+      // CRITICAL: Use timeslice (100ms) to ensure chunks are collected regularly
+      mediaRecorder.start(100);
+      console.log('[Voice Recording] MediaRecorder started, state:', mediaRecorder.state);
+      console.log('[Voice Recording] Recording started with 100ms timeslice');
+      
+      // Verify MediaRecorder is in recording state
+      if (mediaRecorder.state !== 'recording') {
+        console.error('[Voice Recording] ERROR: MediaRecorder not in recording state! State:', mediaRecorder.state);
+        throw new Error('Failed to start recording');
+      }
+      
       setIsRecording(true);
       setRecordingDuration(0);
       
+      // Send recording indicator to other users
+      if (selectedThread) {
+        websocketService.sendRecording(selectedThread, true, 0);
+      }
+      
+      // Update recording duration and send updates to WebSocket
       recordingIntervalRef.current = setInterval(() => {
-        setRecordingDuration((prev) => prev + 1);
+        setRecordingDuration((prev) => {
+          const newDuration = prev + 1;
+          // Send duration update to WebSocket every second
+          if (selectedThread) {
+            websocketService.sendRecording(selectedThread, true, newDuration);
+          }
+          return newDuration;
+        });
       }, 1000);
     } catch (error: any) {
-      showToast('Failed to start recording', 'error');
+      console.error('[Voice Recording] getUserMedia error:', error);
+      console.error('[Voice Recording] Error name:', error.name);
+      console.error('[Voice Recording] Error message:', error.message);
+      console.error('[Voice Recording] Error stack:', error.stack);
+      
+      // Clear chunks and stop stream on error
+      recordingChunksRef.current = [];
+      if (recordingStreamRef.current) {
+        recordingStreamRef.current.getTracks().forEach(track => track.stop());
+        recordingStreamRef.current = null;
+      }
+      
+      if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
+        showToast('Microphone permission denied. Please allow microphone access.', 'error');
+      } else if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') {
+        showToast('No microphone found. Please connect a microphone.', 'error');
+      } else {
+        showToast(`Failed to start recording: ${error.message}`, 'error');
+      }
     }
   };
 
@@ -372,10 +869,30 @@ export function Messages() {
       const currentDuration = recordingDuration;
       const hasText = newMessage.trim().length > 0;
       
-      mediaRecorderRef.current.stop();
+      console.log('[Voice Recording] Stopping recording, duration:', currentDuration, 'seconds');
+      console.log('[Voice Recording] MediaRecorder state before stop:', mediaRecorderRef.current.state);
+      console.log('[Voice Recording] Total chunks before stop:', recordingChunksRef.current.length);
+      
+      // CRITICAL: Request final data chunk before stopping to ensure all audio is captured
+      try {
+        if (mediaRecorderRef.current.state === 'recording') {
+          mediaRecorderRef.current.requestData();
+          // Small delay to ensure final data chunk is collected
+          await new Promise(resolve => setTimeout(resolve, 150));
+        }
+      } catch (error) {
+        console.warn('[Voice Recording] Warning: Could not request final data:', error);
+      }
+      
+      // Stop the MediaRecorder - onstop handler will process chunks
+      if (mediaRecorderRef.current.state === 'recording') {
+        mediaRecorderRef.current.stop();
+      }
+      
       setIsRecording(false);
       if (recordingIntervalRef.current) {
         clearInterval(recordingIntervalRef.current);
+        recordingIntervalRef.current = null;
       }
       
       // Auto-send voice note if no text content (WhatsApp style)
@@ -398,10 +915,39 @@ export function Messages() {
             
             // Send message with voice note only
             if (uploaded.length > 0) {
-              await buyerInboxAPI.sendMessage(selectedThread, {
+              const response = await buyerInboxAPI.sendMessage(selectedThread, {
                 content: '',
                 attachments: uploaded,
               });
+              
+              // Optimistically add the sent voice note to the messages array immediately
+              if (response.message) {
+                setMessages((prev) => {
+                  if (prev.some(m => m._id === response.message._id)) {
+                    return prev;
+                  }
+                  return [...prev, response.message];
+                });
+                
+                // Update thread list immediately
+                setThreads((prevThreads) => {
+                  return prevThreads.map((thread) => {
+                    if (thread._id === selectedThread) {
+        return {
+                        ...thread,
+                        lastMessageAt: new Date().toISOString(),
+                        lastMessagePreview: '🎤 Voice note',
+                        buyerUnreadCount: 0,
+                      };
+                    }
+                    return thread;
+                  }).sort((a, b) => {
+                    const aTime = new Date(a.lastMessageAt).getTime();
+                    const bTime = new Date(b.lastMessageAt).getTime();
+                    return bTime - aTime;
+                  });
+                });
+              }
               
               // Clear voice note files
               setSelectedFiles(prev => prev.filter(f => f !== recordedFile));
@@ -409,9 +955,18 @@ export function Messages() {
               setRecordingDuration(0);
               setUploadProgress(new Map());
               
-              // Reload messages
+              // Reload messages and threads from server to ensure consistency
               await loadThreadMessages(selectedThread);
-              await loadThreads();
+              await loadThreads(true); // Silent reload
+              
+              // Scroll to bottom
+              setTimeout(() => {
+                if (messagesContainerRef.current) {
+                  messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
+                } else {
+                  messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                }
+              }, 100);
               
               showToast('Voice note sent', 'success');
             }
@@ -555,6 +1110,24 @@ export function Messages() {
     return threads.reduce((sum, t) => sum + t.buyerUnreadCount, 0);
   }, [threads]);
 
+  // Update global notification count when unread count changes
+  useEffect(() => {
+    setUnreadCount(totalUnread);
+  }, [totalUnread, setUnreadCount]);
+
+  // Update document title with unread count
+  useEffect(() => {
+    const baseTitle = 'Messages';
+    if (totalUnread > 0) {
+      document.title = `(${totalUnread}) ${baseTitle}`;
+    } else {
+      document.title = baseTitle;
+    }
+    return () => {
+      document.title = baseTitle; // Reset on unmount
+    };
+  }, [totalUnread]);
+
   // WebSocket setup - FIXED to handle real-time messages properly
   useEffect(() => {
     websocketService.connect();
@@ -580,26 +1153,86 @@ export function Messages() {
         }, 100);
       }
       
-      // Reload threads to update unread counts (without showing loading state)
-      loadThreads(false);
+      // Update thread list immediately to show the new message preview
+      setThreads((prevThreads) => {
+        const updatedThreads = prevThreads.map((thread) => {
+          if (thread._id === threadId) {
+            // Generate preview from message content or attachments
+            let preview = message.content || '';
+            if (!preview && message.attachments && message.attachments.length > 0) {
+              const firstAtt = message.attachments[0];
+              if (firstAtt.type === 'voice') {
+                preview = '🎤 Voice note';
+              } else if (firstAtt.type === 'image') {
+                preview = '📷 Image';
+              } else {
+                preview = `📎 ${firstAtt.originalName || 'File'}`;
+              }
+              if (message.attachments.length > 1) {
+                preview += ` (+${message.attachments.length - 1} more)`;
+              }
+            }
+            preview = preview.length > 200 ? preview.substring(0, 200) + '...' : preview;
+            
+            return {
+              ...thread,
+              lastMessageAt: new Date().toISOString(),
+              lastMessagePreview: preview,
+              // Update unread count based on sender
+              ...(message.senderType === 'seller' ? { buyerUnreadCount: (thread.buyerUnreadCount || 0) + 1 } : { buyerUnreadCount: 0 }),
+            };
+          }
+          return thread;
+        });
+        
+        // Sort by lastMessageAt descending (most recent first)
+        return updatedThreads.sort((a, b) => {
+          const aTime = new Date(a.lastMessageAt).getTime();
+          const bTime = new Date(b.lastMessageAt).getTime();
+          return bTime - aTime;
+        });
+      });
       
-      // Show notification if message is from seller and not in active thread
-      if (message.senderType === 'seller' && selectedThread !== threadId) {
+      // Reload threads from server to ensure consistency (silent reload)
+      loadThreads(true);
+      
+      // Show notification if message is from seller
+      // Show notification if: (1) not in active thread OR (2) page is not focused (user is on another tab/window)
+      if (message.senderType === 'seller') {
         const thread = threads.find(t => t._id === threadId);
         const sellerName = typeof thread?.sellerId === 'object' 
           ? (thread.sellerId.storeName || thread.sellerId.fullName || 'Seller')
           : 'Seller';
-        showNotification(
-          sellerName,
-          message.content.substring(0, 50) + (message.content.length > 50 ? '...' : ''),
-          typeof thread?.sellerId === 'object' ? resolveAvatarUrl(thread.sellerId.avatarUrl) : undefined
-        );
-        showToast(`New message from ${sellerName}`, 'info');
+        
+        // Show notification if not in active thread OR if page is not focused
+        const shouldNotify = selectedThread !== threadId || !document.hasFocus();
+        
+        if (shouldNotify) {
+          const messagePreview = message.content || (message.attachments && message.attachments.length > 0 
+            ? (message.attachments[0].type === 'voice' ? '🎤 Voice note' 
+               : message.attachments[0].type === 'image' ? '📷 Image' 
+               : `📎 ${message.attachments[0].originalName || 'File'}`)
+            : 'New message');
+          
+          showNotification(
+            sellerName,
+            messagePreview.substring(0, 50) + (messagePreview.length > 50 ? '...' : ''),
+            typeof thread?.sellerId === 'object' ? (resolveAvatarUrl(thread.sellerId.avatarUrl) || undefined) : undefined,
+            threadId,
+            3000 // 3 second timeout (Instagram-style)
+          );
+        }
+        
+        // Only show toast if not in active thread
+        if (selectedThread !== threadId) {
+          showToast(`New message from ${sellerName}`, 'info');
+        }
       }
     };
 
     // Handle thread updates
-    websocketService.onThreadUpdate = (threadId: string, _update?: any, lastMessage?: any) => {
+    websocketService.onThreadUpdate = (threadId: string, update?: any, lastMessage?: any) => {
+      // Update messages if this is the active thread
       if (selectedThread === threadId && lastMessage) {
         // If we have a lastMessage, add it to messages
         setMessages((prev) => {
@@ -618,25 +1251,89 @@ export function Messages() {
           return newMessages;
         });
       }
-      loadThreads();
+      
+      // Update thread list immediately
+      if (update) {
+        setThreads((prevThreads) => {
+          const updatedThreads = prevThreads.map((thread) => {
+            if (thread._id === threadId) {
+              return {
+                ...thread,
+                ...update,
+                lastMessageAt: update.lastMessageAt || thread.lastMessageAt,
+              };
+            }
+            return thread;
+          });
+          
+          // Sort by lastMessageAt descending (most recent first)
+          return updatedThreads.sort((a, b) => {
+            const aTime = new Date(a.lastMessageAt).getTime();
+            const bTime = new Date(b.lastMessageAt).getTime();
+            return bTime - aTime;
+          });
+        });
+      }
+      
+      // Reload threads from server to ensure consistency (silent reload)
+      loadThreads(true);
     };
 
     // Handle typing indicators
-    websocketService.onUserTyping = (threadId: string, userId: string, _userName: string, isTyping: boolean) => {
+    websocketService.onUserTyping = (threadId: string, userId: string, userName: string, isTyping: boolean) => {
       if (selectedThread === threadId && userId !== user?.id) {
         setIsTyping(isTyping);
         setTypingUserId(userId);
+        setTypingUserName(userName || null);
         if (!isTyping) {
           setTimeout(() => {
             setIsTyping(false);
             setTypingUserId(null);
+            setTypingUserName(null);
           }, 2000);
         }
       }
     };
 
+    // Handle recording indicators
+    websocketService.onUserRecording = (threadId: string, userId: string, isRecording: boolean, duration?: number) => {
+      if (selectedThread === threadId && userId !== user?.id) {
+        if (isRecording) {
+          setIsRecordingIndicator(true);
+          setRecordingUserId(userId);
+          // Get user name from thread
+          const thread = threads.find(t => t._id === threadId);
+          const userName = typeof thread?.sellerId === 'object' 
+            ? (thread.sellerId.storeName || thread.sellerId.fullName || 'Someone')
+            : 'Someone';
+          setRecordingUserName(userName);
+          // Update duration if provided
+          if (duration !== undefined) {
+            setRecordingDurationIndicator(duration);
+          }
+        } else {
+          // Stop recording indicator immediately
+          setIsRecordingIndicator(false);
+          setRecordingUserId(null);
+          setRecordingUserName(null);
+          setRecordingDurationIndicator(0);
+        }
+      }
+    };
+
     return () => {
+      // Reset typing indicator when leaving conversation
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+        typingTimeoutRef.current = null;
+      }
+      setIsTyping(false);
+      setTypingUserId(null);
+      setTypingUserName(null);
+      
       if (selectedThread) {
+        // Send stop typing before leaving thread
+        websocketService.sendTyping(selectedThread, false);
         websocketService.leaveThread(selectedThread);
       }
     };
@@ -644,23 +1341,147 @@ export function Messages() {
 
   // Join thread when selected
   useEffect(() => {
-    if (selectedThread) {
-      websocketService.joinThread(selectedThread);
-      loadThreadMessages(selectedThread);
+    // Reset typing indicator when switching conversations
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = null;
     }
-  }, [selectedThread, loadThreadMessages]);
+    setIsTyping(false);
+    setTypingUserId(null);
+    setTypingUserName(null);
+    
+    if (selectedThread) {
+      console.log('[useEffect] Selected thread changed to:', selectedThread);
+      // Load messages for the selected thread
+      loadThreadMessages(selectedThread).catch((error) => {
+        console.error('[useEffect] Failed to load thread messages:', error);
+      });
+    } else {
+      // Clear messages when no thread is selected
+      setMessages([]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedThread]); // Only depend on selectedThread to avoid infinite loops (loadThreadMessages is stable)
 
-  // Initial load
+  // Initial load - only if user is logged in
   useEffect(() => {
-    loadThreads();
-  }, [loadThreads]);
+  if (!user) {
+      console.log('[Initial Load] User not logged in, skipping thread load');
+      return;
+    }
+    
+    console.log('[Initial Load] User is logged in, loading threads...', { 
+      userId: user?.id, 
+      userEmail: user?.email 
+    });
+    
+    const loadInitialThreads = async () => {
+      try {
+        console.log('[Initial Load] Calling loadThreads...');
+        await loadThreads();
+        console.log('[Initial Load] loadThreads completed successfully');
+      } catch (error: any) {
+        console.error('[Initial Load] Failed to load threads on mount:', error);
+        console.error('[Initial Load] Error details:', {
+          message: error.message,
+          stack: error.stack,
+          name: error.name,
+        });
+        
+        // Retry once after a short delay if it's a network error
+        if (error.message?.includes('network') || error.message?.includes('fetch') || error.message?.includes('connection')) {
+          console.log('[Initial Load] Network error detected, retrying in 2 seconds...');
+          setTimeout(async () => {
+            try {
+              console.log('[Initial Load] Retrying loadThreads...');
+              await loadThreads(true); // Silent retry
+              console.log('[Initial Load] Retry successful');
+            } catch (retryError: any) {
+              console.error('[Initial Load] Retry also failed:', retryError);
+            }
+          }, 2000);
+        }
+      }
+    };
+    
+    // Small delay to ensure auth token is available
+    const timer = setTimeout(() => {
+      loadInitialThreads();
+    }, 100);
+    
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]); // Run when user changes (login/logout)
 
-  // Auto-select first thread
+  // Detect when internet connection is restored and retry loading threads
   useEffect(() => {
-    if (!selectedThread && filteredThreads.length > 0) {
+    const handleOnline = () => {
+      console.log('[Network] Internet connection restored, retrying to load threads...');
+      // Retry loading threads when internet comes back (silently to avoid duplicate toasts)
+      loadThreads(true).then(() => {
+        console.log('[Network] Successfully loaded threads after connection restored');
+        showToast('Connection restored', 'success');
+      }).catch((error) => {
+        console.error('[Network] Retry failed:', error);
+        // Only show error if it's not a network error (to avoid duplicate messages)
+        if (!error.message?.includes('internet') && !error.message?.includes('connection')) {
+          showToast(error.message || 'Failed to load threads', 'error');
+        }
+      });
+    };
+
+    const handleOffline = () => {
+      console.log('[Network] Internet connection lost');
+      showToast('No internet connection', 'error');
+    };
+
+    // Add event listeners
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    // Check if already online and threads failed to load
+    if (navigator.onLine && threads.length === 0 && !loading) {
+      // Small delay to ensure page is fully loaded
+      const timer = setTimeout(() => {
+        console.log('[Network] Already online, checking if threads need to be loaded...');
+        loadThreads(true).catch((error) => {
+          console.error('[Network] Initial load failed:', error);
+        });
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+
+    // Cleanup
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [loadThreads, threads.length, loading, showToast]);
+
+  // Auto-select thread from URL parameter or first thread
+  useEffect(() => {
+    const threadIdFromUrl = searchParams.get('threadId');
+    
+    if (threadIdFromUrl) {
+      // Check if the thread exists in the loaded threads
+      const threadExists = threads.some(t => t._id === threadIdFromUrl);
+      if (threadExists) {
+        console.log('[Auto-select] Selecting thread from URL:', threadIdFromUrl);
+        setSelectedThread(threadIdFromUrl);
+        // Remove threadId from URL after selecting
+        searchParams.delete('threadId');
+        setSearchParams(searchParams, { replace: true });
+      } else if (threads.length > 0) {
+        // Thread not found, clear the URL parameter
+        console.warn('[Auto-select] Thread not found in loaded threads:', threadIdFromUrl);
+        searchParams.delete('threadId');
+        setSearchParams(searchParams, { replace: true });
+      }
+    } else if (!selectedThread && filteredThreads.length > 0) {
+      // No thread ID in URL, select first thread
       setSelectedThread(filteredThreads[0]._id);
     }
-  }, [selectedThread, filteredThreads]);
+  }, [selectedThread, filteredThreads, threads, searchParams, setSearchParams]);
 
   // Scroll to bottom (only when thread changes or messages are loaded initially)
   useEffect(() => {
@@ -675,23 +1496,48 @@ export function Messages() {
   }, [selectedThread]); // Only scroll when thread changes, not on every message update
 
   // Typing indicator
+  /**
+   * Handle typing indicator with proper debounce
+   * - Emits typing event when user starts typing (input not empty)
+   * - Uses 400ms debounce before sending "stop typing" event
+   * - Prevents flickering with proper state management
+   */
   const handleTyping = () => {
     if (!selectedThread) return;
     
+    const hasContent = newMessage.trim().length > 0;
+    
+    // Clear existing timeout
     if (typingTimeoutRef.current) {
       clearTimeout(typingTimeoutRef.current);
     }
     
-    websocketService.sendTyping(selectedThread, true);
-    
-    typingTimeoutRef.current = setTimeout(() => {
+    // If input has content, emit typing started event
+    if (hasContent) {
+      // Emit typing event: { senderId, receiverId, isTyping: true }
+      websocketService.sendTyping(selectedThread, true);
+      
+      // Set timeout to emit stop typing after 400ms of no typing (debounce)
+      typingTimeoutRef.current = setTimeout(() => {
+        // Emit typing event: { senderId, receiverId, isTyping: false }
+        websocketService.sendTyping(selectedThread, false);
+      }, 400); // 400ms debounce to prevent flickering
+    } else {
+      // Input is empty, immediately emit stop typing
       websocketService.sendTyping(selectedThread, false);
-    }, 1000);
+    }
   };
 
-  if (!user) {
+  // Redirect to login if not authenticated
+  useEffect(() => {
+    if (!user) {
+      console.log('[Messages] No user found, redirecting to login...');
     navigate('/login');
-    return null;
+    }
+  }, [user, navigate]);
+  
+  if (!user) {
+    return null; // Don't render anything while redirecting
   }
 
   return (
@@ -704,7 +1550,14 @@ export function Messages() {
         <div className="mb-3 sm:mb-4 lg:mb-6">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4 mb-3 sm:mb-4">
             <div className="min-w-0 flex-1">
-              <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold text-gray-900 dark:text-white mb-1 sm:mb-2">Messages</h1>
+              <div className="flex items-center gap-2 sm:gap-3 mb-1 sm:mb-2">
+                <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold text-gray-900 dark:text-white">Messages</h1>
+                {totalUnread > 0 && (
+                  <span className="inline-flex items-center justify-center min-w-[24px] h-6 px-2 rounded-full bg-orange-500 text-white text-xs sm:text-sm font-bold">
+                    {totalUnread > 99 ? '99+' : totalUnread}
+                  </span>
+                )}
+              </div>
               <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-400">
                 {totalUnread > 0 ? `${totalUnread} unread message${totalUnread > 1 ? 's' : ''}` : 'All caught up!'}
               </p>
@@ -727,8 +1580,8 @@ export function Messages() {
                   <ShoppingBag className="h-3 w-3 sm:h-4 sm:w-4" />
                   <span className="hidden md:inline">Continue Shopping</span>
                   <span className="md:hidden">Shop</span>
-                </Button>
-              </Link>
+              </Button>
+            </Link>
             </div>
           </div>
 
@@ -781,7 +1634,7 @@ export function Messages() {
               <div className="flex items-center justify-between mb-2 sm:mb-3">
                 <h2 className="font-semibold text-gray-900 dark:text-white text-base sm:text-lg">
                   Chats
-                </h2>
+              </h2>
                 <button
                   onClick={() => {
                     loadAvailableSellers();
@@ -831,65 +1684,78 @@ export function Messages() {
                     const seller = typeof thread.sellerId === 'object' ? thread.sellerId : null;
                     const isActive = selectedThread === thread._id;
                     return (
-                      <button
+                    <button
                         key={thread._id}
-                        type="button"
+                      type="button"
                         onClick={() => {
+                          // Set selected thread - useEffect will handle loading messages
+                          console.log('[Thread Click] Selecting thread:', thread._id);
                           setSelectedThread(thread._id);
                         }}
                         className={`w-full p-2.5 sm:p-3 text-left hover:bg-gray-50 dark:hover:bg-gray-700/50 active:bg-gray-100 dark:active:bg-gray-700 transition-colors ${
                           isActive ? 'bg-orange-50 dark:bg-orange-900/10 border-l-4 border-orange-500' : ''
-                        }`}
-                      >
-                        <div className="flex items-start gap-3">
-                          <div className="relative flex-shrink-0">
-                            <div className="w-12 h-12 rounded-full bg-gradient-to-br from-orange-400 to-teal-500 overflow-hidden">
-                              {seller?.avatarUrl ? (
-                                <img
-                                  src={resolveAvatarUrl(seller.avatarUrl) || ''}
-                                  alt={seller.fullName || 'Seller'}
-                                  className="w-full h-full object-cover"
-                                />
-                              ) : (
+                      }`}
+                    >
+                      <div className="flex items-start gap-3">
+                        <div className="relative flex-shrink-0">
+                          <div className="w-12 h-12 rounded-full bg-gradient-to-br from-orange-400 to-teal-500 overflow-hidden">
+                              {seller?.avatarUrl && seller.avatarUrl.trim() ? (
+                              <img
+                                  src={resolveAvatarUrl(seller.avatarUrl) || seller.avatarUrl}
+                                  alt={seller.fullName || seller.storeName || 'Seller'}
+                                className="w-full h-full object-cover"
+                                  onError={(e) => {
+                                    // If profile image fails to load, show first letter (avatar)
+                                    const target = e.target as HTMLImageElement;
+                                    target.style.display = 'none';
+                                    const parent = target.parentElement;
+                                    if (parent) {
+                                      const name = seller?.fullName || seller?.storeName || 'S';
+                                      parent.innerHTML = `<div class="w-full h-full flex items-center justify-center text-white font-bold text-lg">${name[0].toUpperCase()}</div>`;
+                                    }
+                                  }}
+                              />
+                            ) : (
+                                // No profile image, use first letter (avatar)
                                 <div className="w-full h-full flex items-center justify-center text-white font-bold text-lg">
                                   {(seller?.fullName || seller?.storeName || 'S')[0].toUpperCase()}
-                                </div>
-                              )}
-                            </div>
-                            {thread.type === 'order' && (
-                              <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-blue-500 rounded-full border-2 border-white dark:border-gray-800 flex items-center justify-center">
-                                <Package className="h-3 w-3 text-white" />
                               </div>
                             )}
                           </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center justify-between mb-1">
-                              <h3 className="font-semibold text-sm text-gray-900 dark:text-white truncate">
-                                {seller?.storeName || seller?.fullName || thread.subject}
-                              </h3>
-                              <span className="text-xs text-gray-500 dark:text-gray-400 flex-shrink-0 ml-2">
-                                {formatMessageTime(thread.lastMessageAt)}
-                              </span>
+                            {thread.type === 'order' && (
+                            <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-blue-500 rounded-full border-2 border-white dark:border-gray-800 flex items-center justify-center">
+                              <Package className="h-3 w-3 text-white" />
                             </div>
-                            <div className="flex items-center gap-2 mb-1">
-                              <p className="text-xs text-gray-600 dark:text-gray-400 truncate flex-1">
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between mb-1">
+                            <h3 className="font-semibold text-sm text-gray-900 dark:text-white truncate">
+                                {seller?.storeName || seller?.fullName || thread.subject}
+                            </h3>
+                            <span className="text-xs text-gray-500 dark:text-gray-400 flex-shrink-0 ml-2">
+                                {formatMessageTime(thread.lastMessageAt)}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2 mb-1">
+                            <p className="text-xs text-gray-600 dark:text-gray-400 truncate flex-1">
                                 {thread.lastMessagePreview || 'No messages yet'}
                               </p>
                               {thread.buyerUnreadCount > 0 && (
                                 <span className="bg-orange-600 text-white text-xs font-bold rounded-full h-5 w-5 flex items-center justify-center flex-shrink-0 min-w-[20px]">
                                   {thread.buyerUnreadCount > 9 ? '9+' : thread.buyerUnreadCount}
-                                </span>
-                              )}
-                            </div>
-                            {thread.type === 'order' && (
-                              <div className="flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400">
-                                <Package className="h-3 w-3" />
-                                <span>Order</span>
-                              </div>
+                              </span>
                             )}
                           </div>
+                            {thread.type === 'order' && (
+                            <div className="flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400">
+                              <Package className="h-3 w-3" />
+                                <span>Order</span>
+                            </div>
+                          )}
                         </div>
-                      </button>
+                      </div>
+                    </button>
                     );
                   })}
                 </div>
@@ -914,13 +1780,26 @@ export function Messages() {
                     </button>
                     <div className="relative flex-shrink-0">
                       <div className="w-10 h-10 rounded-full bg-gradient-to-br from-orange-400 to-teal-500 overflow-hidden">
-                        {typeof activeThread.sellerId === 'object' && activeThread.sellerId.avatarUrl ? (
+                        {typeof activeThread.sellerId === 'object' && activeThread.sellerId.avatarUrl && activeThread.sellerId.avatarUrl.trim() ? (
                           <img
-                            src={resolveAvatarUrl(activeThread.sellerId.avatarUrl) || ''}
-                            alt={activeThread.sellerId.fullName || 'Seller'}
+                            src={resolveAvatarUrl(activeThread.sellerId.avatarUrl) || activeThread.sellerId.avatarUrl}
+                            alt={activeThread.sellerId.storeName || activeThread.sellerId.fullName || 'Seller'}
                             className="w-full h-full object-cover"
+                            onError={(e) => {
+                              // If profile image fails to load, show first letter (avatar)
+                              const target = e.target as HTMLImageElement;
+                              target.style.display = 'none';
+                              const parent = target.parentElement;
+                              if (parent) {
+                                const name = typeof activeThread.sellerId === 'object' 
+                                  ? (activeThread.sellerId.storeName || activeThread.sellerId.fullName || 'S')
+                                  : 'S';
+                                parent.innerHTML = `<div class="w-full h-full flex items-center justify-center text-white font-bold">${name[0].toUpperCase()}</div>`;
+                              }
+                            }}
                           />
                         ) : (
+                          // No profile image, use first letter (avatar)
                           <div className="w-full h-full flex items-center justify-center text-white font-bold">
                             {(typeof activeThread.sellerId === 'object' ? (activeThread.sellerId.storeName || activeThread.sellerId.fullName || 'S') : 'S')[0].toUpperCase()}
                           </div>
@@ -943,7 +1822,21 @@ export function Messages() {
                         </h3>
                         <span className="text-[10px] text-green-500">●</span>
                       </div>
-                      <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{activeThread.subject}</p>
+                      {/* Typing Indicator - Show under receiver's name in header (WhatsApp style) */}
+                      {isTyping && typingUserId ? (
+                        <div className="flex items-center gap-1.5 mt-0.5 animate-fadeIn transition-opacity duration-200">
+                          <div className="flex gap-0.5">
+                            <div className="w-1 h-1 bg-gray-500 dark:bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                            <div className="w-1 h-1 bg-gray-500 dark:bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                            <div className="w-1 h-1 bg-gray-500 dark:bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                          </div>
+                          <span className="text-[11px] text-gray-500 dark:text-gray-400 italic">
+                            {typingUserName || (typeof activeThread.sellerId === 'object' ? (activeThread.sellerId.storeName || activeThread.sellerId.fullName) : 'Someone')} is typing...
+                          </span>
+                        </div>
+                      ) : (
+                        <p className="text-xs text-gray-500 dark:text-gray-400 truncate animate-fadeIn transition-opacity duration-200">{activeThread.subject}</p>
+                      )}
                     </div>
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
@@ -981,20 +1874,75 @@ export function Messages() {
                         <div className={`flex gap-2 ${isOwnMessage ? 'justify-end' : 'justify-start'}`}>
                           {!isOwnMessage && (
                             <div className="w-8 h-8 rounded-full bg-gradient-to-br from-orange-400 to-teal-500 overflow-hidden flex-shrink-0">
-                              {sender?.avatarUrl ? (
+                              {sender?.avatarUrl && sender.avatarUrl.trim() ? (
                                 <img
                                   src={resolveAvatarUrl(sender.avatarUrl) || ''}
                                   alt={sender.fullName || 'Seller'}
                                   className="w-full h-full object-cover"
+                                  onError={(e) => {
+                                    // If profile image fails to load, show first letter (avatar)
+                                    const target = e.target as HTMLImageElement;
+                                    target.style.display = 'none';
+                                    const parent = target.parentElement;
+                                    if (parent) {
+                                      const name = sender?.fullName || 'S';
+                                      parent.innerHTML = `<div class="w-full h-full flex items-center justify-center text-white text-xs font-bold">${name[0].toUpperCase()}</div>`;
+                                    }
+                                  }}
                                 />
                               ) : (
+                                // No profile image, use first letter (avatar)
                                 <div className="w-full h-full flex items-center justify-center text-white text-xs font-bold">
                                   {(sender?.fullName || 'S')[0].toUpperCase()}
                                 </div>
                               )}
                             </div>
-                          )}
-                          <div className={`flex flex-col gap-1 max-w-[85%] sm:max-w-[75%] md:max-w-[65%] ${isOwnMessage ? 'items-end' : 'items-start'}`}>
+                            )}
+                            <div
+                            className={`flex flex-col gap-1 max-w-[85%] sm:max-w-[75%] md:max-w-[65%] ${isOwnMessage ? 'items-end' : 'items-start'}`}
+                            onTouchStart={(e) => {
+                              const touch = e.touches[0];
+                              const target = e.currentTarget;
+                              const startX = touch.clientX;
+                              const startY = touch.clientY;
+                              let moved = false;
+                              
+                              const onTouchMove = (moveEvent: TouchEvent) => {
+                                const currentTouch = moveEvent.touches[0];
+                                const deltaX = currentTouch.clientX - startX;
+                                const deltaY = Math.abs(currentTouch.clientY - startY);
+                                
+                                // Only allow horizontal swipe (not vertical scroll)
+                                if (Math.abs(deltaX) > 10 && deltaY < 50) {
+                                  moved = true;
+                                  // Visual feedback - slight shift
+                                  target.style.transform = `translateX(${Math.min(deltaX, 50)}px)`;
+                                  target.style.transition = 'transform 0.1s';
+                                }
+                              };
+                              
+                              const onTouchEnd = () => {
+                                const finalTouch = (e.nativeEvent as TouchEvent).changedTouches[0];
+                                const deltaX = finalTouch.clientX - startX;
+                                
+                                if (moved && deltaX > 50 && !isOwnMessage) {
+                                  // Swipe right to reply (only for received messages)
+                                  setReplyTo(message);
+                                  showToast('Replying to message', 'info');
+                                }
+                                
+                                // Reset transform
+                                target.style.transform = '';
+                                target.style.transition = '';
+                                
+                                document.removeEventListener('touchmove', onTouchMove);
+                                document.removeEventListener('touchend', onTouchEnd);
+                              };
+                              
+                              document.addEventListener('touchmove', onTouchMove);
+                              document.addEventListener('touchend', onTouchEnd);
+                            }}
+                          >
                             <div
                               className={`rounded-2xl px-3 py-2 shadow-sm ${
                                 isOwnMessage
@@ -1007,13 +1955,88 @@ export function Messages() {
                                   : '0 1px 2px rgba(0,0,0,0.1)'
                               }}
                             >
+                              {/* Sender name with avatar for received messages */}
+                              {!isOwnMessage && sender && (
+                                <div className="flex items-center gap-1.5 mb-1.5 pb-1 border-b border-gray-200 dark:border-gray-700">
+                                  <div className="w-4 h-4 rounded-full bg-gradient-to-br from-orange-400 to-teal-500 flex items-center justify-center text-[9px] font-semibold text-white flex-shrink-0 overflow-hidden">
+                                    {sender.avatarUrl && sender.avatarUrl.trim() ? (
+                                      <img
+                                        src={sender.avatarUrl}
+                                        alt={sender.fullName || 'Seller'}
+                                        className="w-full h-full object-cover"
+                                        onError={(e) => {
+                                          // If profile image fails to load, show first letter (avatar)
+                                          const target = e.target as HTMLImageElement;
+                                          target.style.display = 'none';
+                                          const parent = target.parentElement;
+                                          if (parent) {
+                                            const name = sender.fullName || 'S';
+                                            parent.textContent = name[0].toUpperCase();
+                                          }
+                                        }}
+                                      />
+                                    ) : (
+                                      // No profile image, use first letter (avatar)
+                                      (sender.fullName || 'S')[0].toUpperCase()
+                                    )}
+                                  </div>
+                                  <span className="text-[10px] font-semibold text-gray-700 dark:text-gray-300">
+                                    {sender.fullName || 'Seller'}
+                                  </span>
+                                </div>
+                              )}
                               {isDeleted ? (
                                 <span className="italic text-gray-500 dark:text-gray-400 text-sm">This message was deleted</span>
+                              ) : editingMessage?._id === message._id ? (
+                                <input
+                                  type="text"
+                                  defaultValue={message.content}
+                                  onBlur={(e) => {
+                                    if (e.target.value !== message.content) {
+                                      handleEditMessage(message, e.target.value);
+                                    }
+                                    setEditingMessage(null);
+                                  }}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                      handleEditMessage(message, e.currentTarget.value);
+                                      setEditingMessage(null);
+                                    }
+                                    if (e.key === 'Escape') {
+                                      setEditingMessage(null);
+                                    }
+                                  }}
+                                  className="w-full bg-transparent border-none outline-none text-sm"
+                                  autoFocus
+                                />
                               ) : (
                                 <>
+                                  {message.replyTo && (
+                                    <div className={`mb-2 px-2 py-1.5 rounded-lg border-l-4 ${
+                                      isOwnMessage 
+                                        ? 'bg-white/30 dark:bg-white/10 border-white/50' 
+                                        : 'bg-gray-100 dark:bg-gray-700/50 border-orange-500'
+                                    }`}>
+                                      <div className="flex items-center gap-1.5 mb-0.5">
+                                        <Reply className={`w-3 h-3 ${isOwnMessage ? 'text-white/80' : 'text-orange-500'}`} />
+                                        <span className={`text-[10px] font-semibold ${isOwnMessage ? 'text-white/90' : 'text-gray-700 dark:text-gray-300'}`}>
+                                          {typeof message.replyTo === 'object' && message.replyTo.senderId 
+                                            ? (typeof message.replyTo.senderId === 'object' 
+                                                ? message.replyTo.senderId.fullName || 'User'
+                                                : 'User')
+                                            : 'You'}
+                                        </span>
+                                      </div>
+                                      <p className={`text-[11px] line-clamp-2 ${isOwnMessage ? 'text-white/80' : 'text-gray-600 dark:text-gray-400'}`}>
+                                        {typeof message.replyTo === 'object' 
+                                          ? (message.replyTo.content || ((message.replyTo as any).attachments && (message.replyTo as any).attachments.length > 0 ? '📎 Attachment' : 'Message'))
+                                          : 'Message'}
+                                      </p>
+                                    </div>
+                                  )}
                                   <p className="text-sm whitespace-pre-wrap break-words leading-relaxed">{message.content}</p>
-                                  {message.attachments && message.attachments.length > 0 && (
-                                    <div className="mt-2 space-y-2">
+                              {message.attachments && message.attachments.length > 0 && (
+                                <div className="mt-2 space-y-2">
                                       {message.attachments.map((attachment, idx) => (
                                         <div key={idx}>
                                           {attachment.type === 'voice' ? (
@@ -1034,23 +2057,55 @@ export function Messages() {
                                                           a.currentTime = 0;
                                                         });
                                                         
-                                                        // Ensure audio is ready and has volume
-                                                        audio.volume = 1.0;
+                                                        // C) Audio element MUST NOT be muted
                                                         audio.muted = false;
+                                                        audio.volume = 1;
                                                         
-                                                        // Load the audio if not loaded
-                                                        if (audio.readyState < 2) {
-                                                          audio.load();
-                                                          await new Promise((resolve, reject) => {
-                                                            audio.oncanplay = resolve;
-                                                            audio.onerror = reject;
-                                                            setTimeout(reject, 5000); // Timeout after 5 seconds
-                                                          });
+                                                        console.log('[Audio Playback] Audio element state:', {
+                                                          src: audio.src,
+                                                          volume: audio.volume,
+                                                          muted: audio.muted,
+                                                          readyState: audio.readyState,
+                                                          paused: audio.paused
+                                                        });
+                                                        
+                                                        // C) Before playing: load and play
+                                                        audio.load();
+                                                        
+                                                        // Wait for audio to be ready
+                                                        await new Promise((resolve, reject) => {
+                                                          const timeout = setTimeout(() => {
+                                                            reject(new Error('Audio load timeout'));
+                                                          }, 5000);
+                                                          
+                                                          audio.oncanplay = () => {
+                                                            clearTimeout(timeout);
+                                                            console.log('[Audio Playback] Audio can play');
+                                                            resolve(null);
+                                                          };
+                                                          
+                                                          audio.onerror = (e) => {
+                                                            clearTimeout(timeout);
+                                                            console.error('[Audio Playback] Load error:', e, audio.error);
+                                                            reject(new Error('Failed to load audio'));
+                                                          };
+                                                        });
+                                                        
+                                                        // C) Play the audio with error handling
+                                                        console.log('[Audio Playback] Attempting to play audio...');
+                                                        try {
+                                                          await audio.play();
+                                                          console.log('[Audio Playback] Audio playing successfully');
+                                                          setPlayingAudioId(audioId);
+                                                        } catch (playError: any) {
+                                                          console.error('[Audio Playback] Play error:', playError);
+                                                          // D) Mobile support: Safari requires user gesture
+                                                          if (playError.name === 'NotAllowedError') {
+                                                            showToast('Please tap the play button to start audio', 'info');
+                                                          } else {
+                                                            throw playError;
+                                                          }
                                                         }
-                                                        
-                                                        // Play the audio
-                                                        await audio.play();
-                                                        setPlayingAudioId(audioId);
                                                         
                                                         // Set up event handlers
                                                         audio.onended = () => {
@@ -1079,10 +2134,18 @@ export function Messages() {
                                                     }
                                                   }
                                                 }}
-                                                className="w-8 h-8 rounded-full bg-orange-500 hover:bg-orange-600 flex items-center justify-center text-white transition-colors flex-shrink-0"
+                                                className={`w-8 h-8 rounded-full flex items-center justify-center text-white transition-all flex-shrink-0 relative ${
+                                                  playingAudioId === `audio-${message._id}-${idx}`
+                                                    ? 'bg-orange-600 hover:bg-orange-700 animate-pulse shadow-lg'
+                                                    : 'bg-orange-500 hover:bg-orange-600'
+                                                }`}
+                                                title={playingAudioId === `audio-${message._id}-${idx}` ? 'Stop playback' : 'Play voice note'}
                                               >
                                                 {playingAudioId === `audio-${message._id}-${idx}` ? (
-                                                  <X className="w-4 h-4" />
+                                                  <>
+                                                    <X className="w-4 h-4" />
+                                                    <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-orange-400 rounded-full animate-ping" />
+                                                  </>
                                                 ) : (
                                                   <Play className="w-4 h-4 ml-0.5" />
                                                 )}
@@ -1105,8 +2168,27 @@ export function Messages() {
                                                   crossOrigin="anonymous"
                                                   ref={(el) => {
                                                     if (el) {
+                                                      // CRITICAL: Ensure audio has correct volume and is not muted
                                                       el.volume = 1.0;
                                                       el.muted = false;
+                                                      
+                                                      // Log audio element state for debugging
+                                                      console.log('[Audio Element] Initialized:', {
+                                                        src: el.src,
+                                                        volume: el.volume,
+                                                        muted: el.muted,
+                                                        readyState: el.readyState
+                                                      });
+                                                      
+                                                      // Add error handler
+                                                      el.onerror = (e) => {
+                                                        console.error('[Audio Element] Error loading audio:', e, el.error);
+                                                      };
+                                                      
+                                                      // Log when audio can play
+                                                      el.oncanplay = () => {
+                                                        console.log('[Audio Element] Audio can play:', el.src);
+                                                      };
                                                     }
                                                   }}
                                                 />
@@ -1155,9 +2237,9 @@ export function Messages() {
                                               </div>
                                             </a>
                                           )}
-                                        </div>
-                                      ))}
                                     </div>
+                                  ))}
+                                </div>
                                   )}
                                 </>
                               )}
@@ -1170,40 +2252,103 @@ export function Messages() {
                                   hour12: false
                                 })}
                               </span>
+                              {message.isEdited && <span className="text-[10px] italic opacity-75 text-gray-500 dark:text-gray-400">(edited)</span>}
                               {isOwnMessage && (
-                                <span className="text-[10px]">
-                                  {message.status === 'read' ? (
+                                <>
+                                  <span className="text-[10px]">
+                                    {message.status === 'read' ? (
                                     <CheckCheck className="h-3 w-3 text-blue-500" />
-                                  ) : message.status === 'delivered' ? (
-                                    <CheckCheck className="h-3 w-3 text-gray-400" />
+                                    ) : message.status === 'delivered' ? (
+                                      <CheckCheck className="h-3 w-3 text-gray-400" />
                                   ) : (
                                     <Check className="h-3 w-3 text-gray-400" />
                                   )}
                                 </span>
+                                  <div className="flex items-center gap-1">
+                                    <button
+                                      onClick={() => handleReactToMessage(message, '👍')}
+                                      className="hover:bg-gray-200 dark:hover:bg-gray-700 p-1 rounded transition-colors"
+                                      title="React"
+                                    >
+                                      <Smile className="w-3 h-3" />
+                                    </button>
+                                    <button
+                                      onClick={() => setReplyTo(message)}
+                                      className="hover:bg-gray-200 dark:hover:bg-gray-700 p-1 rounded transition-colors"
+                                      title="Reply"
+                                    >
+                                      <Reply className="w-3 h-3" />
+                                    </button>
+                                    <button
+                                      onClick={() => setEditingMessage(message)}
+                                      className="hover:bg-gray-200 dark:hover:bg-gray-700 p-1 rounded transition-colors"
+                                      title="Edit"
+                                    >
+                                      <Edit2 className="w-3 h-3" />
+                                    </button>
+                                    <button
+                                      onClick={() => handleDeleteMessage(message)}
+                                      className="hover:bg-gray-200 dark:hover:bg-gray-700 p-1 rounded text-red-500 transition-colors"
+                                      title="Delete"
+                                    >
+                                      <Trash2 className="w-3 h-3" />
+                                    </button>
+                                  </div>
+                                </>
+                              )}
+                              {!isOwnMessage && message.reactions && message.reactions.length > 0 && (
+                                <div className="flex gap-1 flex-wrap">
+                                  {message.reactions.map((reaction, idx) => (
+                                    <span
+                                      key={idx}
+                                      className="text-[10px] bg-black/20 dark:bg-white/20 px-1.5 py-0.5 rounded"
+                                    >
+                                      {reaction.emoji}
+                                    </span>
+                                  ))}
+                                </div>
                               )}
                             </div>
                           </div>
                           {isOwnMessage && (
-                            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-orange-400 to-teal-500 overflow-hidden flex-shrink-0">
+                            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-green-400 to-teal-500 overflow-hidden flex-shrink-0">
+                              {user.avatar_url && user.avatar_url.trim() ? (
+                                <img
+                                  src={user.avatar_url}
+                                  alt={user.full_name || user.email || 'You'}
+                                  className="w-full h-full object-cover"
+                                  onError={(e) => {
+                                    // If profile image fails to load, show first letter (avatar)
+                                    const target = e.target as HTMLImageElement;
+                                    target.style.display = 'none';
+                                    const parent = target.parentElement;
+                                    if (parent) {
+                                      const name = user.full_name || user.email || 'U';
+                                      parent.innerHTML = `<div class="w-full h-full flex items-center justify-center text-white text-xs font-bold">${name.charAt(0).toUpperCase()}</div>`;
+                                    }
+                                  }}
+                                />
+                              ) : (
+                                // No profile image, use first letter (avatar)
                               <div className="w-full h-full flex items-center justify-center text-white text-xs font-bold">
-                                {(user.full_name || user.email).charAt(0).toUpperCase()}
+                                  {(user.full_name || user.email || 'U').charAt(0).toUpperCase()}
                               </div>
+                              )}
                             </div>
                           )}
                         </div>
                       </div>
                     );
                   })}
+                  {/* Typing Indicator in messages area */}
                   {isTyping && typingUserId && (
-                    <div className="flex gap-2 justify-start">
-                      <div className="w-8 h-8 rounded-full bg-gray-300 dark:bg-gray-700 flex-shrink-0" />
-                      <div className="bg-white dark:bg-gray-800 rounded-lg px-3 py-2 shadow-sm">
-                        <div className="flex gap-1">
-                          <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                          <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                          <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                        </div>
-                      </div>
+                    <div className="flex gap-2 justify-start py-2">
+                      <ChatIndicator 
+                        status="typing" 
+                        userName={typingUserName || (typeof activeThread?.sellerId === 'object' ? (activeThread.sellerId.storeName || activeThread.sellerId.fullName) : 'Someone')}
+                        position="below"
+                        className="ml-2"
+                      />
                     </div>
                   )}
                   <div ref={messagesEndRef} />
@@ -1211,26 +2356,47 @@ export function Messages() {
 
                 {/* Message Input - WhatsApp Style - Responsive */}
                 <div className="p-2 sm:p-2.5 md:p-3 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
-                  {selectedFiles.length > 0 && (
-                    <div className="mb-2 flex flex-wrap gap-1.5 sm:gap-2">
-                      {selectedFiles.map((file, idx) => (
-                        <div key={idx} className="flex items-center gap-1 bg-white dark:bg-gray-800 px-2 py-1 rounded-lg text-[10px] sm:text-xs border border-gray-200 dark:border-gray-700">
-                          {file.type.startsWith('image/') ? (
-                            <ImageIcon className="w-3 h-3 text-blue-500" />
-                          ) : file.type.startsWith('audio/') ? (
-                            <Play className="w-3 h-3 text-green-500" />
-                          ) : (
-                            <FileText className="w-3 h-3 text-gray-500" />
-                          )}
-                          <span className="truncate max-w-[100px]">{file.name}</span>
-                          <button
-                            onClick={() => setSelectedFiles(selectedFiles.filter((_, i) => i !== idx))}
-                            className="text-red-500 hover:text-red-600"
-                          >
-                            <X className="w-3 h-3" />
-                          </button>
+                  {/* Typing Indicator - Show above input area (WhatsApp style) */}
+                  {isTyping && typingUserId && (
+                    <ChatIndicator 
+                      status="typing" 
+                      userName={typingUserName || (typeof activeThread?.sellerId === 'object' ? (activeThread.sellerId.storeName || activeThread.sellerId.fullName) : 'Someone')}
+                      position="above"
+                      className="mb-2"
+                    />
+                  )}
+                  {/* Recording Indicator - Show above input area (WhatsApp style) */}
+                  {isRecordingIndicator && recordingUserId && (
+                    <ChatIndicator 
+                      status="recording" 
+                      userName={recordingUserName || (typeof activeThread?.sellerId === 'object' ? (activeThread.sellerId.storeName || activeThread.sellerId.fullName) : 'Someone')}
+                      duration={recordingDurationIndicator}
+                      position="above"
+                      className="mb-2"
+                    />
+                  )}
+                  {replyTo && (
+                    <div className="mb-2 p-2.5 bg-gray-100 dark:bg-gray-800 rounded-lg border-l-4 border-orange-500 flex items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5 mb-1">
+                          <Reply className="w-3.5 h-3.5 text-orange-500 flex-shrink-0" />
+                          <span className="text-[11px] font-semibold text-gray-700 dark:text-gray-300">
+                            {typeof replyTo.senderId === 'object' 
+                              ? (replyTo.senderId.fullName || 'User')
+                              : 'User'}
+                          </span>
                         </div>
-                      ))}
+                        <p className="text-[11px] text-gray-600 dark:text-gray-400 line-clamp-2">
+                          {replyTo.content || (replyTo.attachments && replyTo.attachments.length > 0 ? '📎 Attachment' : 'Message')}
+                        </p>
+                      </div>
+                      <button 
+                        onClick={() => setReplyTo(null)} 
+                        className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 flex-shrink-0 p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+                        aria-label="Cancel reply"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
                     </div>
                   )}
                   <div className="flex items-end gap-2">
@@ -1251,7 +2417,7 @@ export function Messages() {
                       className="hidden"
                     />
                     
-                    {/* Recording Mode UI */}
+                    {/* Recording Mode UI - Show SEND button for voice note */}
                     {isRecording ? (
                       <>
                         <button
@@ -1268,9 +2434,101 @@ export function Messages() {
                               Recording: {formatRecordingDuration(recordingDuration)}
                             </span>
                           </div>
+                          {/* SEND button for voice note - always visible when recording */}
                           <button
-                            onClick={handleSendMessage}
-                            disabled={sending}
+                            onClick={async () => {
+                              // Stop recording first, then send
+                              if (mediaRecorderRef.current && isRecording) {
+                                const currentDuration = recordingDuration;
+                                mediaRecorderRef.current.stop();
+                                setIsRecording(false);
+                                if (recordingIntervalRef.current) {
+                                  clearInterval(recordingIntervalRef.current);
+                                }
+                                
+                                // Wait for recording to finish and get the file
+                                const recordedFile = await new Promise<File>((resolve) => {
+                                  recordingCompleteRef.current = resolve;
+                                });
+                                
+                                if (recordedFile && selectedThread) {
+                                  // Auto-upload and send the voice note
+                                  try {
+                                    setSending(true);
+                                    const uploaded = await buyerInboxAPI.uploadFiles(
+                                      [recordedFile],
+                                      currentDuration,
+                                      (progress) => {
+                                        setUploadProgress(prev => new Map(prev).set('voice-sending', progress));
+                                      }
+                                    );
+                                    
+                                    // Send message with voice note only
+                                    if (uploaded.length > 0) {
+                                      const response = await buyerInboxAPI.sendMessage(selectedThread, {
+                                        content: '',
+                                        attachments: uploaded,
+                                      });
+                                      
+                                      // Optimistically add the sent voice note to the messages array immediately
+                                      if (response.message) {
+                                        setMessages((prev) => {
+                                          if (prev.some(m => m._id === response.message._id)) {
+                                            return prev;
+                                          }
+                                          return [...prev, response.message];
+                                        });
+                                        
+                                        // Update thread list immediately
+                                        setThreads((prevThreads) => {
+                                          return prevThreads.map((thread) => {
+                                            if (thread._id === selectedThread) {
+                                              return {
+                                                ...thread,
+                                                lastMessageAt: new Date().toISOString(),
+                                                lastMessagePreview: '🎤 Voice note',
+                                                buyerUnreadCount: 0,
+                                              };
+                                            }
+                                            return thread;
+                                          }).sort((a, b) => {
+                                            const aTime = new Date(a.lastMessageAt).getTime();
+                                            const bTime = new Date(b.lastMessageAt).getTime();
+                                            return bTime - aTime;
+                                          });
+                                        });
+                                      }
+                                      
+                                      // Clear voice note files and reset UI
+                                      setSelectedFiles(prev => prev.filter(f => f !== recordedFile));
+                                      setUploadedAttachments([]);
+                                      setRecordingDuration(0);
+                                      setUploadProgress(new Map());
+                                      
+                                      // Reload messages and threads from server to ensure consistency
+                                      await loadThreadMessages(selectedThread);
+                                      await loadThreads(true); // Silent reload
+                                      
+                                      // Scroll to bottom
+                                      setTimeout(() => {
+                                        if (messagesContainerRef.current) {
+                                          messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
+                                        } else {
+                                          messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                                        }
+                                      }, 100);
+                                      
+                                      showToast('Voice note sent', 'success');
+                                    }
+                                  } catch (error: any) {
+                                    showToast(error.message || 'Failed to send voice note', 'error');
+                                  } finally {
+                                    setSending(false);
+                                  }
+                                }
+                              }
+                            }}
+                            disabled={sending || recordingDuration === 0}
                             className="inline-flex items-center justify-center w-9 h-9 rounded-full bg-orange-500 hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed text-white flex-shrink-0 transition-colors"
                             title="Send voice note"
                           >
@@ -1280,59 +2538,240 @@ export function Messages() {
                       </>
                     ) : (
                       <>
-                        {/* Normal Mode UI - WhatsApp Style */}
-                        <div className="flex-1 relative bg-white dark:bg-gray-800 rounded-full border border-gray-300 dark:border-gray-600">
-                          <textarea
-                            value={newMessage}
-                            onChange={(e) => {
-                              setNewMessage(e.target.value);
-                              handleTyping();
-                            }}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter' && !e.shiftKey) {
-                                e.preventDefault();
-                                handleSendMessage();
-                              }
-                            }}
-                            placeholder="Type a message"
-                            rows={1}
-                            className="w-full px-4 py-2.5 pr-20 rounded-full bg-transparent text-gray-900 dark:text-white text-sm focus:outline-none resize-none max-h-32 overflow-y-auto"
-                            style={{ minHeight: '44px' }}
-                          />
-                          {/* Icons inside input - WhatsApp Style - Responsive */}
-                          {!newMessage.trim() && (
-                            <div className="absolute right-2 bottom-2 flex items-center gap-0.5 sm:gap-1">
-                              <button
-                                onClick={() => fileInputRef.current?.click()}
-                                className="p-1.5 sm:p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors active:scale-95"
-                                title="Attach file"
-                              >
-                                <Paperclip className="w-4 h-4 sm:w-5 sm:h-5" />
-                              </button>
-                              <button
-                                onClick={() => imageInputRef.current?.click()}
-                                className="p-1.5 sm:p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors active:scale-95"
-                                title="Attach image"
-                              >
-                                <ImageIcon className="w-4 h-4 sm:w-5 sm:h-5" />
-                              </button>
-                              <button
-                                onMouseDown={startRecording}
-                                onMouseUp={stopRecording}
-                                onTouchStart={startRecording}
-                                onTouchEnd={stopRecording}
-                                className="p-1.5 sm:p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full text-gray-600 dark:text-gray-400 hover:text-orange-500 transition-colors active:scale-95"
-                                title="Hold to record voice note"
-                              >
-                                <Mic className="w-4 h-4 sm:w-5 sm:h-5" />
-                              </button>
+                        {/* Normal Mode UI - WhatsApp Style with Media Preview Inside */}
+                        <div className="flex-1 relative bg-white dark:bg-gray-800 rounded-2xl border border-gray-300 dark:border-gray-600 overflow-hidden">
+                          {/* Media Preview - WhatsApp Style: Show inside text field area */}
+                          {(selectedFiles.length > 0 || uploadedAttachments.length > 0) && (
+                            <div className="px-3 pt-2 pb-1 border-b border-gray-200 dark:border-gray-700">
+                              <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto">
+                                {/* Show uploaded attachments (images/files) */}
+                                {uploadedAttachments.map((attachment, idx) => (
+                                  <div key={`uploaded-${idx}`} className="relative group">
+                                    {attachment.type === 'image' ? (
+                                      <div className="relative w-16 h-16 sm:w-20 sm:h-20 rounded-lg overflow-hidden border border-gray-300 dark:border-gray-600">
+                                        <img
+                                          src={getFileUrl(attachment.path)}
+                                          alt={attachment.originalName}
+                                          className="w-full h-full object-cover"
+                                          onError={(e) => {
+                                            (e.target as HTMLImageElement).style.display = 'none';
+                                          }}
+                                        />
+                                        <button
+                                          onClick={() => {
+                                            setUploadedAttachments(prev => prev.filter((_, i) => i !== idx));
+                                            setSelectedFiles(prev => prev.filter(f => f.name !== attachment.originalName));
+                                          }}
+                                          className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 hover:bg-red-600 rounded-full flex items-center justify-center text-white shadow-md"
+                                          title="Remove"
+                                        >
+                                          <X className="w-3 h-3" />
+                                        </button>
+                                      </div>
+                                    ) : attachment.type === 'voice' ? (
+                                      <div className="relative w-16 h-16 sm:w-20 sm:h-20 rounded-lg bg-gradient-to-br from-green-400 to-teal-500 flex items-center justify-center border border-gray-300 dark:border-gray-600">
+                                        <Play className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
+                                        <div className="absolute bottom-0.5 left-0.5 right-0.5 text-[8px] text-white font-medium text-center">
+                                          {attachment.duration ? `${Math.floor(attachment.duration)}s` : 'Voice'}
+                                        </div>
+                                        <button
+                                          onClick={() => {
+                                            setUploadedAttachments(prev => prev.filter((_, i) => i !== idx));
+                                            setSelectedFiles(prev => prev.filter(f => !f.name.startsWith('voice-')));
+                                          }}
+                                          className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 hover:bg-red-600 rounded-full flex items-center justify-center text-white shadow-md"
+                                          title="Remove"
+                                        >
+                                          <X className="w-3 h-3" />
+                                        </button>
+                                      </div>
+                                    ) : (
+                                      <div className="relative w-16 h-16 sm:w-20 sm:h-20 rounded-lg bg-gray-100 dark:bg-gray-700 flex flex-col items-center justify-center border border-gray-300 dark:border-gray-600">
+                                        <FileText className="w-5 h-5 sm:w-6 sm:h-6 text-gray-500 dark:text-gray-400" />
+                                        <span className="text-[7px] text-gray-600 dark:text-gray-300 text-center px-1 truncate w-full mt-0.5">
+                                          {attachment.originalName}
+                                        </span>
+                                        <button
+                                          onClick={() => {
+                                            setUploadedAttachments(prev => prev.filter((_, i) => i !== idx));
+                                            setSelectedFiles(prev => prev.filter(f => f.name !== attachment.originalName));
+                                          }}
+                                          className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 hover:bg-red-600 rounded-full flex items-center justify-center text-white shadow-md"
+                                          title="Remove"
+                                        >
+                                          <X className="w-3 h-3" />
+                                        </button>
+                                      </div>
+                                    )}
+                                  </div>
+                                ))}
+                                {/* Show selected files (not yet uploaded) */}
+                                {selectedFiles.filter(f => !uploadedAttachments.some(a => a.originalName === f.name)).map((file, idx) => (
+                                  <div key={`selected-${idx}`} className="relative group">
+                                    {file.type.startsWith('image/') ? (
+                                      <div className="relative w-16 h-16 sm:w-20 sm:h-20 rounded-lg overflow-hidden border border-gray-300 dark:border-gray-600">
+                                        <img
+                                          src={URL.createObjectURL(file)}
+                                          alt={file.name}
+                                          className="w-full h-full object-cover"
+                                          onError={(e) => {
+                                            (e.target as HTMLImageElement).style.display = 'none';
+                                          }}
+                                        />
+                                        <button
+                                          onClick={() => {
+                                            const fileIndex = selectedFiles.findIndex(f => f === file);
+                                            setSelectedFiles(prev => prev.filter((_, i) => i !== fileIndex));
+                                          }}
+                                          className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 hover:bg-red-600 rounded-full flex items-center justify-center text-white shadow-md"
+                                          title="Remove"
+                                        >
+                                          <X className="w-3 h-3" />
+                                        </button>
+                                      </div>
+                                    ) : file.name.startsWith('voice-') || file.type.startsWith('audio/') ? (
+                                      <div className="relative w-16 h-16 sm:w-20 sm:h-20 rounded-lg bg-gradient-to-br from-green-400 to-teal-500 flex items-center justify-center border border-gray-300 dark:border-gray-600">
+                                        <Play className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
+                                        <div className="absolute bottom-0.5 left-0.5 right-0.5 text-[8px] text-white font-medium text-center">
+                                          {recordingDuration > 0 ? `${recordingDuration}s` : 'Voice'}
+                                        </div>
+                                        <button
+                                          onClick={() => {
+                                            const fileIndex = selectedFiles.findIndex(f => f === file);
+                                            setSelectedFiles(prev => prev.filter((_, i) => i !== fileIndex));
+                                          }}
+                                          className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 hover:bg-red-600 rounded-full flex items-center justify-center text-white shadow-md"
+                                          title="Remove"
+                                        >
+                                          <X className="w-3 h-3" />
+                                        </button>
+                                      </div>
+                                    ) : (
+                                      <div className="relative w-16 h-16 sm:w-20 sm:h-20 rounded-lg bg-gray-100 dark:bg-gray-700 flex flex-col items-center justify-center border border-gray-300 dark:border-gray-600">
+                                        <FileText className="w-5 h-5 sm:w-6 sm:h-6 text-gray-500 dark:text-gray-400" />
+                                        <span className="text-[7px] text-gray-600 dark:text-gray-300 text-center px-1 truncate w-full mt-0.5">
+                                          {file.name}
+                                        </span>
+                                        <button
+                                          onClick={() => {
+                                            const fileIndex = selectedFiles.findIndex(f => f === file);
+                                            setSelectedFiles(prev => prev.filter((_, i) => i !== fileIndex));
+                                          }}
+                                          className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 hover:bg-red-600 rounded-full flex items-center justify-center text-white shadow-md"
+                                          title="Remove"
+                                        >
+                                          <X className="w-3 h-3" />
+                                        </button>
+                                      </div>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
                             </div>
                           )}
+                          {/* Recording Indicator - Show above input when recording */}
+                          {isRecording && (
+                            <div className="mb-2 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg flex items-center gap-2">
+                              <div className="relative flex items-center justify-center">
+                                <Mic className="w-4 h-4 text-red-500" />
+                                <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-red-500 rounded-full animate-ping" />
+                              </div>
+                              <span className="text-sm font-medium text-red-600 dark:text-red-400">
+                                Recording: {formatRecordingDuration(recordingDuration)}
+                              </span>
+                              <div className="ml-auto flex items-center gap-1">
+                                <div className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse" style={{ animationDelay: '0ms' }} />
+                                <div className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse" style={{ animationDelay: '200ms' }} />
+                                <div className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse" style={{ animationDelay: '400ms' }} />
+                              </div>
+                            </div>
+                          )}
+                          {/* Text Input Area */}
+                          <div className="relative flex items-center">
+                      <textarea
+                        value={newMessage}
+                              onChange={(e) => {
+                                setNewMessage(e.target.value);
+                                handleTyping();
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' && !e.shiftKey) {
+                                  e.preventDefault();
+                                  handleSendMessage();
+                                }
+                              }}
+                              placeholder={
+                                isRecording 
+                                  ? `Recording... ${formatRecordingDuration(recordingDuration)}` 
+                                  : selectedFiles.length > 0 || uploadedAttachments.length > 0 
+                                    ? "Add a caption (optional)" 
+                                    : "Type a message"
+                              }
+                        rows={1}
+                              className={`w-full px-4 py-2.5 pr-20 rounded-lg bg-transparent text-sm focus:outline-none resize-none max-h-32 overflow-y-auto transition-colors ${
+                                isRecording
+                                  ? 'text-red-600 dark:text-red-400 placeholder-red-400 dark:placeholder-red-500 border-2 border-red-300 dark:border-red-600 bg-red-50 dark:bg-red-900/10'
+                                  : (selectedFiles.length > 0 || uploadedAttachments.length > 0) && !newMessage.trim()
+                                    ? 'text-red-500 dark:text-red-400 placeholder-red-400 dark:placeholder-red-500 border-red-300 dark:border-red-600'
+                                    : 'text-gray-900 dark:text-white'
+                              }`}
+                              style={{ minHeight: '44px' }}
+                              disabled={isRecording}
+                            />
+                            {/* Icons inside input - WhatsApp Style - Show when no media or show alongside media */}
+                            {!newMessage.trim() && uploadedAttachments.length === 0 && selectedFiles.length === 0 && (
+                              <div className="absolute right-2 bottom-2 flex items-center gap-0.5 sm:gap-1">
+                                <button
+                                  onClick={() => fileInputRef.current?.click()}
+                                  className="p-1.5 sm:p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors active:scale-95"
+                                  title="Attach file"
+                                >
+                                  <Paperclip className="w-4 h-4 sm:w-5 sm:h-5" />
+                                </button>
+                                <button
+                                  onClick={() => imageInputRef.current?.click()}
+                                  className="p-1.5 sm:p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors active:scale-95"
+                                  title="Attach image"
+                                >
+                                  <ImageIcon className="w-4 h-4 sm:w-5 sm:h-5" />
+                                </button>
+                                <button
+                                  onMouseDown={startRecording}
+                                  onMouseUp={stopRecording}
+                                  onTouchStart={startRecording}
+                                  onTouchEnd={stopRecording}
+                                  className={`p-1.5 sm:p-2 rounded-full transition-all active:scale-95 ${
+                                    isRecording 
+                                      ? 'bg-red-500 hover:bg-red-600 text-white animate-pulse' 
+                                      : 'hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400 hover:text-orange-500'
+                                  }`}
+                                  title={isRecording ? `Recording... ${formatRecordingDuration(recordingDuration)}` : "Hold to record voice note"}
+                                >
+                                  <Mic className={`w-4 h-4 sm:w-5 sm:h-5 ${isRecording ? 'animate-pulse' : ''}`} />
+                                  {isRecording && (
+                                    <span className="absolute -top-1 -right-1 w-3 h-3 bg-red-600 rounded-full border-2 border-white dark:border-gray-800 animate-ping" />
+                                  )}
+                                </button>
+                    </div>
+                            )}
+                            {/* Show attachment icons when media is selected (for adding more) */}
+                            {(selectedFiles.length > 0 || uploadedAttachments.length > 0) && (
+                              <div className="absolute right-2 bottom-2 flex items-center gap-0.5 sm:gap-1">
+                                <button
+                                  onClick={() => fileInputRef.current?.click()}
+                                  className="p-1.5 sm:p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors active:scale-95"
+                                  title="Add more files"
+                                >
+                                  <Plus className="w-4 h-4 sm:w-5 sm:h-5" />
+                                </button>
+                              </div>
+                            )}
+                          </div>
                         </div>
-                        {/* Send button - WhatsApp Style - Responsive */}
+                        {/* Send button - Show when typing OR when media is selected (WhatsApp style: can send media without text) */}
                         {(newMessage.trim() || uploadedAttachments.length > 0 || selectedFiles.length > 0) && (
                           <button
-                            onClick={handleSendMessage}
+                      onClick={handleSendMessage}
                             disabled={sending}
                             className="inline-flex items-center justify-center w-10 h-10 sm:w-11 sm:h-11 rounded-full bg-orange-500 hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed text-white flex-shrink-0 transition-colors shadow-md active:scale-95"
                             title="Send message"

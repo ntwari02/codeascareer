@@ -3,6 +3,7 @@ import { Server as SocketIOServer, Socket } from 'socket.io';
 import jwt from 'jsonwebtoken';
 import { AuthTokenPayload } from '../utils/generateToken';
 import { MessageThread, Message } from '../models/MessageThread';
+import { User } from '../models/User';
 import mongoose from 'mongoose';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret';
@@ -126,7 +127,14 @@ class WebSocketService {
       socket.emit('left_thread', { threadId: data.threadId });
     });
 
-    // Typing indicator
+    /**
+     * Handle typing indicator events
+     * - Listens for "typing" event from client: { threadId, isTyping }
+     * - Verifies user has access to the thread
+     * - Gets user name from database
+     * - Broadcasts to the other user in that specific conversation
+     * - Emits: { threadId, userId, userName, isTyping }
+     */
     socket.on('typing', async (data: { threadId: string; isTyping: boolean }) => {
       try {
         const { threadId, isTyping } = data;
@@ -135,7 +143,7 @@ class WebSocketService {
           return;
         }
 
-        // Verify access
+        // Verify access to thread
         const thread = await MessageThread.findOne({
           _id: threadId,
           $or: [{ sellerId: userId }, { buyerId: userId }],
@@ -145,11 +153,37 @@ class WebSocketService {
           return;
         }
 
-        // Emit to other users in the thread
+        // Get user name from database
+        let userName = 'User';
+        try {
+          const userDoc = await User.findById(userId).select('fullName email storeName').lean();
+          if (userDoc) {
+            // Use storeName for sellers, fullName for buyers, fallback to email
+            userName = (userDoc as any).storeName || userDoc.fullName || userDoc.email || 'User';
+          }
+        } catch (userError) {
+          console.error('Error fetching user name for typing indicator:', userError);
+        }
+
+        // Determine receiver ID (the other user in the conversation)
+        const receiverId = thread.sellerId.toString() === userId 
+          ? thread.buyerId.toString() 
+          : thread.sellerId.toString();
+
+        // Broadcast to the other user in that specific conversation
+        // Emit to receiver's personal room and thread room
+        socket.to(`user:${receiverId}`).emit('user_typing', {
+          threadId,
+          userId,
+          userName,
+          isTyping,
+        });
+        
+        // Also emit to thread room for real-time updates
         socket.to(`thread:${threadId}`).emit('user_typing', {
           threadId,
           userId,
-          userName: 'User', // Could be populated from user data
+          userName,
           isTyping,
         });
       } catch (error: any) {

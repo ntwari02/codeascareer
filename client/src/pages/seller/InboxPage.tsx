@@ -28,6 +28,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { AudioWave } from '@/components/AudioWave';
 import { ImageLightbox } from '@/components/ImageLightbox';
 import { UploadProgress } from '@/components/UploadProgress';
+import ChatIndicator from '@/components/ChatIndicator';
 
 // Get server base URL for file attachments
 const getFileUrl = (path: string): string => {
@@ -97,6 +98,7 @@ const InboxPage: React.FC = () => {
   // Real-time indicators state
   const [isTyping, setIsTyping] = useState(false);
   const [typingUserId, setTypingUserId] = useState<string | null>(null);
+  const [typingUserName, setTypingUserName] = useState<string | null>(null);
   const [isRecordingIndicator, setIsRecordingIndicator] = useState(false);
   const [recordingUserId, setRecordingUserId] = useState<string | null>(null);
   const [recordingDurationIndicator, setRecordingDurationIndicator] = useState(0);
@@ -112,9 +114,13 @@ const InboxPage: React.FC = () => {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordingIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const recordingStreamRef = useRef<MediaStream | null>(null); // Store stream to keep it alive
+  // Store chunks in ref to ensure they persist across function calls
+  const recordingChunksRef = useRef<Blob[]>([]);
+  const recordingMimeTypeRef = useRef<string>('audio/webm');
 
   // Load threads
-  const loadThreads = useCallback(async () => {
+  const loadThreads = useCallback(async (silent = false) => {
     try {
       setLoading(true);
       const response = await inboxAPI.getThreads({
@@ -125,8 +131,18 @@ const InboxPage: React.FC = () => {
         limit: 50,
       });
       setThreads(response.threads);
+      // Clear any previous errors on success
+      if (!silent) {
+        console.log('[Load Threads] Successfully loaded', response.threads.length, 'thread(s)');
+      }
     } catch (error: any) {
-      showToast(error.message || 'Failed to load threads', 'error');
+      console.error('[Load Threads] Error:', error);
+      // Only show toast if not silent retry
+      if (!silent) {
+        showToast(error.message || 'Failed to load threads', 'error');
+      }
+      // Re-throw to allow caller to handle
+      throw error;
     } finally {
       setLoading(false);
     }
@@ -161,6 +177,17 @@ const InboxPage: React.FC = () => {
     if (!activeThread) return;
     if (sending) return;
     
+    // Reset typing indicator when message is sent
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = null;
+    }
+    // Emit stop typing event when message is sent
+    websocketService.sendTyping(activeThread._id, false);
+    setIsTyping(false);
+    setTypingUserId(null);
+    setTypingUserName(null);
+    
     // If recording, stop it first
     if (isRecording) {
       stopRecording();
@@ -168,40 +195,75 @@ const InboxPage: React.FC = () => {
       await new Promise(resolve => setTimeout(resolve, 300));
     }
 
-    // Check if we have content to send
-    if (!messageContent.trim() && uploadedAttachments.length === 0 && selectedFiles.length === 0) {
-      return;
+    // Check if we have content or files to send (allow sending with just files/images/voice notes)
+    const hasContent = messageContent.trim().length > 0;
+    const hasFiles = selectedFiles.length > 0 || uploadedAttachments.length > 0;
+    
+    if (!hasContent && !hasFiles) {
+      return; // Nothing to send
     }
 
     try {
       setSending(true);
       
+      // Wait for any in-progress uploads to complete (max 10 seconds)
+      const maxWaitTime = 10000; // 10 seconds
+      const startTime = Date.now();
+      while (uploadingFiles.size > 0 && (Date.now() - startTime) < maxWaitTime) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      
       // Upload remaining files if any (voice notes or files that weren't auto-uploaded)
       let attachments = [...uploadedAttachments];
-      const remainingFiles = selectedFiles.filter(f => !uploadedAttachments.some(a => a.originalName === f.name));
       
-      if (remainingFiles.length > 0) {
+      // Get all files that need to be uploaded (not in uploadedAttachments and not currently uploading)
+      const filesToUpload = selectedFiles.filter(f => {
+        const isUploaded = uploadedAttachments.some(a => a.originalName === f.name);
+        const isUploading = Array.from(uploadingFiles.values()).some(uf => uf === f);
+        return !isUploaded && !isUploading;
+      });
+      
+      if (filesToUpload.length > 0) {
         try {
+          console.log('[Send Message] Uploading', filesToUpload.length, 'file(s) before sending');
           const uploaded = await inboxAPI.uploadFiles(
-            remainingFiles,
+            filesToUpload,
             recordingDuration > 0 ? recordingDuration : undefined,
             (progress) => {
               // Overall progress for remaining files
               setUploadProgress(prev => new Map(prev).set('sending', progress));
             }
           );
-          attachments = [...attachments, ...uploaded];
+          
+          if (uploaded && uploaded.length > 0) {
+            attachments = [...attachments, ...uploaded];
+            console.log('[Send Message] Successfully uploaded', uploaded.length, 'file(s)');
+          } else {
+            console.warn('[Send Message] Upload returned empty array');
+          }
         } catch (error: any) {
+          console.error('[Send Message] Upload error:', error);
           showToast('Failed to upload some files', 'error');
           throw error;
         }
       }
 
-      // Send message - WhatsApp style: allow empty content if attachments exist
+      // Validate: Must have either content OR attachments after upload
       const messageText = messageContent.trim();
+      console.log('[Send Message] Validation - Content:', messageText.length > 0, 'Attachments:', attachments.length);
+      
+      if (!messageText && (!attachments || attachments.length === 0)) {
+        console.error('[Send Message] Validation failed - no content and no attachments');
+        showToast('Please add a message or attachment', 'error');
+        setSending(false);
+        return;
+      }
+
+      // Send message - WhatsApp style: allow empty content if attachments exist
+      console.log('[Send Message] Sending message with', attachments.length, 'attachment(s)');
       await inboxAPI.sendMessage(activeThread._id, {
         content: messageText || '', // Empty string is allowed if attachments exist
-        attachments,
+        attachments: attachments || [],
         replyTo: replyTo?._id,
       });
 
@@ -222,7 +284,23 @@ const InboxPage: React.FC = () => {
       
       showToast('Message sent', 'success');
     } catch (error: any) {
-      showToast(error.message || 'Failed to send message', 'error');
+      console.error('[Send Message] Error:', error);
+      // Extract error message - check if it's a validation error
+      let errorMessage = error.message || 'Failed to send message';
+      
+      // If error has a response with validation details, show the main message
+      if (error.response || (error.message && error.message.includes('Validation error'))) {
+        try {
+          // Try to parse if it's a JSON string
+          if (typeof error.message === 'string' && error.message.includes('Validation error')) {
+            errorMessage = error.message.replace('Validation error: ', '');
+          }
+        } catch (e) {
+          // Keep original message if parsing fails
+        }
+      }
+      
+      showToast(errorMessage, 'error');
     } finally {
       setSending(false);
     }
@@ -314,19 +392,155 @@ const InboxPage: React.FC = () => {
   
   const startRecording = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
+      console.log('[Voice Recording] Requesting microphone access...');
+      
+      // Clear previous chunks
+      recordingChunksRef.current = [];
+      
+      // A) Recording setup - Use exact getUserMedia config
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          sampleRate: 48000,
+          noiseSuppression: true,
+          echoCancellation: true,
+          autoGainControl: true
+        }
+      });
+      
+      // Store stream in ref to keep it alive until recording stops
+      recordingStreamRef.current = stream;
+      
+      console.log('[Voice Recording] Microphone access granted, stream active:', stream.active);
+      const audioTracks = stream.getAudioTracks();
+      console.log('[Voice Recording] Audio tracks:', audioTracks.map(t => ({
+        label: t.label,
+        enabled: t.enabled,
+        muted: t.muted,
+        readyState: t.readyState,
+        settings: t.getSettings()
+      })));
+      
+      // Verify track is active and not muted
+      if (audioTracks.length === 0) {
+        throw new Error('No audio tracks available');
+      }
+      
+      const audioTrack = audioTracks[0];
+      if (audioTrack.muted) {
+        console.warn('[Voice Recording] WARNING: Audio track is muted!');
+        audioTrack.enabled = true;
+      }
+      
+      // Ensure track is active
+      if (audioTrack.readyState !== 'live') {
+        console.warn('[Voice Recording] WARNING: Audio track is not live!');
+      }
+      
+      // A) MediaRecorder MUST use a supported codec
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+        ? "audio/webm;codecs=opus"
+        : "audio/ogg;codecs=opus";
+      
+      console.log('[Voice Recording] Using mime type:', mimeType);
+      
+      // Store mime type in ref
+      recordingMimeTypeRef.current = mimeType;
+      
+      // Create MediaRecorder with supported codec
+      const mediaRecorder = new MediaRecorder(stream, { mimeType });
+      
+      console.log('[Voice Recording] MediaRecorder created with mimeType:', mimeType);
+      console.log('[Voice Recording] MediaRecorder state:', mediaRecorder.state);
+      
       mediaRecorderRef.current = mediaRecorder;
       
-      const chunks: Blob[] = [];
-      mediaRecorder.ondataavailable = (e) => chunks.push(e.data);
+      // Collect data chunks - use timeslice to ensure regular data collection
+      // CRITICAL: Store chunks in ref to ensure they persist across function calls
+      mediaRecorder.ondataavailable = (e) => {
+        console.log('[Voice Recording] Data available, chunk size:', e.data.size, 'bytes');
+        if (e.data && e.data.size > 0) {
+          recordingChunksRef.current.push(e.data);
+          const totalSize = recordingChunksRef.current.reduce((sum, chunk) => sum + chunk.size, 0);
+          console.log('[Voice Recording] Chunk added. Total chunks:', recordingChunksRef.current.length, 'Total size:', totalSize, 'bytes');
+        } else {
+          console.warn('[Voice Recording] WARNING: Received empty chunk!');
+        }
+      };
+      
+      mediaRecorder.onerror = (e) => {
+        console.error('[Voice Recording] MediaRecorder error:', e);
+        console.error('[Voice Recording] Error event:', e);
+        showToast('Recording error occurred', 'error');
+      };
       
       mediaRecorder.onstop = () => {
-        const blob = new Blob(chunks, { type: 'audio/webm' });
-        const file = new File([blob], `voice-${Date.now()}.webm`, { type: 'audio/webm' });
-        // Use functional update to ensure we get the latest selectedFiles
+        console.log('[Voice Recording] Recording stopped');
+        console.log('[Voice Recording] Total chunks collected:', recordingChunksRef.current.length);
+        console.log('[Voice Recording] Chunks sizes:', recordingChunksRef.current.map(c => c.size));
+        
+        const totalSize = recordingChunksRef.current.reduce((sum, chunk) => sum + chunk.size, 0);
+        console.log('[Voice Recording] Total chunks size:', totalSize, 'bytes');
+        
+        // Create blob from all chunks (FIXED: Use ref chunks and stored mime type)
+        const mimeType = recordingMimeTypeRef.current;
+        const blob = new Blob(recordingChunksRef.current, { type: mimeType });
+        console.log('[Voice Recording] Final blob size:', blob.size, 'bytes');
+        console.log('[Voice Recording] Blob type:', blob.type);
+        console.log('[Voice Recording] Blob size validation:', blob.size > 0 ? 'PASS' : 'FAIL');
+        
+        // CRITICAL: Verify blob is not empty - strong validation
+        if (blob.size === 0) {
+          console.error('[Voice Recording] ERROR: Blob is empty! No audio data captured.');
+          console.error('[Voice Recording] Chunks count:', recordingChunksRef.current.length);
+          console.error('[Voice Recording] Total chunks size:', totalSize);
+          showToast('Recording failed: No audio data captured', 'error');
+          
+          // Stop stream tracks
+          if (recordingStreamRef.current) {
+            recordingStreamRef.current.getTracks().forEach(track => track.stop());
+            recordingStreamRef.current = null;
+          }
+          
+          recordingChunksRef.current = [];
+          return;
+        }
+        
+        // Additional validation: blob should be at least 1KB for a meaningful recording
+        if (blob.size < 1024) {
+          console.warn('[Voice Recording] WARNING: Blob size is very small:', blob.size, 'bytes. This might indicate a problem.');
+        }
+        
+        // Determine file extension based on mime type
+        let extension = 'webm';
+        if (mimeType.includes('ogg')) extension = 'ogg';
+        else if (mimeType.includes('mp4')) extension = 'm4a';
+        else if (mimeType.includes('wav')) extension = 'wav';
+        
+        // Create File from blob with correct type for multipart/form-data upload
+        const file = new File([blob], `voice-${Date.now()}.${extension}`, { type: mimeType });
+        console.log('[Voice Recording] File created:', file.name, 'size:', file.size, 'bytes', 'type:', file.type);
+        
+        // Verify file size matches blob size
+        if (file.size !== blob.size) {
+          console.error('[Voice Recording] ERROR: File size mismatch! Blob:', blob.size, 'File:', file.size);
+        }
+        
+        // Add file to selected files - waveform UI will appear after blob exists
         setSelectedFiles((prev) => [...prev, file]);
-        stream.getTracks().forEach(track => track.stop());
+        
+        // Stop stream tracks AFTER blob is created and file is ready
+        // CRITICAL: Don't stop stream until after blob is created
+        if (recordingStreamRef.current) {
+          recordingStreamRef.current.getTracks().forEach(track => {
+            track.stop();
+            console.log('[Voice Recording] Audio track stopped:', track.label);
+          });
+          recordingStreamRef.current = null;
+        }
+        
+        // Clear chunks after use
+        recordingChunksRef.current = [];
         
         // Call the completion callback if set
         if (recordingCompleteRef.current) {
@@ -335,7 +549,18 @@ const InboxPage: React.FC = () => {
         }
       };
       
-      mediaRecorder.start();
+      // Start recording with timeslice to ensure regular data collection
+      // CRITICAL: Use timeslice (100ms) to ensure chunks are collected regularly
+      mediaRecorder.start(100);
+      console.log('[Voice Recording] MediaRecorder started, state:', mediaRecorder.state);
+      console.log('[Voice Recording] Recording started with 100ms timeslice');
+      
+      // Verify MediaRecorder is in recording state
+      if (mediaRecorder.state !== 'recording') {
+        console.error('[Voice Recording] ERROR: MediaRecorder not in recording state! State:', mediaRecorder.state);
+        throw new Error('Failed to start recording');
+      }
+      
       setIsRecording(true);
       setRecordingDuration(0);
       
@@ -343,7 +568,25 @@ const InboxPage: React.FC = () => {
         setRecordingDuration((prev) => prev + 1);
       }, 1000);
     } catch (error: any) {
-      showToast('Failed to start recording', 'error');
+      console.error('[Voice Recording] getUserMedia error:', error);
+      console.error('[Voice Recording] Error name:', error.name);
+      console.error('[Voice Recording] Error message:', error.message);
+      console.error('[Voice Recording] Error stack:', error.stack);
+      
+      // Clear chunks and stop stream on error
+      recordingChunksRef.current = [];
+      if (recordingStreamRef.current) {
+        recordingStreamRef.current.getTracks().forEach(track => track.stop());
+        recordingStreamRef.current = null;
+      }
+      
+      if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
+        showToast('Microphone permission denied. Please allow microphone access.', 'error');
+      } else if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') {
+        showToast('No microphone found. Please connect a microphone.', 'error');
+      } else {
+        showToast(`Failed to start recording: ${error.message}`, 'error');
+      }
     }
   };
 
@@ -352,11 +595,33 @@ const InboxPage: React.FC = () => {
       const currentDuration = recordingDuration;
       const hasText = messageContent.trim().length > 0;
       
-      mediaRecorderRef.current.stop();
+      console.log('[Voice Recording] Stopping recording, duration:', currentDuration, 'seconds');
+      console.log('[Voice Recording] MediaRecorder state before stop:', mediaRecorderRef.current.state);
+      console.log('[Voice Recording] Total chunks before stop:', recordingChunksRef.current.length);
+      
+      // CRITICAL: Request final data chunk before stopping to ensure all audio is captured
+      try {
+        if (mediaRecorderRef.current.state === 'recording') {
+          mediaRecorderRef.current.requestData();
+          // Small delay to ensure final data chunk is collected
+          await new Promise(resolve => setTimeout(resolve, 150));
+        }
+      } catch (error) {
+        console.warn('[Voice Recording] Warning: Could not request final data:', error);
+      }
+      
+      // Stop the MediaRecorder - onstop handler will process chunks
+      if (mediaRecorderRef.current.state === 'recording') {
+        mediaRecorderRef.current.stop();
+      }
+      
       setIsRecording(false);
       if (recordingIntervalRef.current) {
         clearInterval(recordingIntervalRef.current);
+        recordingIntervalRef.current = null;
       }
+      
+      console.log('[Voice Recording] MediaRecorder state after stop:', mediaRecorderRef.current.state);
       
       // Auto-send voice note if no text content (WhatsApp style)
       if (currentDuration > 0 && !hasText) {
@@ -514,6 +779,8 @@ const InboxPage: React.FC = () => {
   };
 
   // Create new thread
+  const [creatingThread, setCreatingThread] = useState(false);
+  
   const handleCreateThread = async (e?: React.FormEvent) => {
     if (e) {
       e.preventDefault();
@@ -532,11 +799,20 @@ const InboxPage: React.FC = () => {
     }
 
     try {
+      setCreatingThread(true);
+      console.log('[Create Thread] Creating thread with:', {
+        buyerId: newThreadBuyerId,
+        subject: newThreadSubject.trim(),
+        type: newThreadType,
+      });
+      
       const response = await inboxAPI.createThread({
         buyerId: newThreadBuyerId,
         subject: newThreadSubject.trim(),
         type: newThreadType,
       });
+
+      console.log('[Create Thread] Thread created successfully:', response.thread._id);
 
       setShowNewThreadDialog(false);
       setNewThreadSubject('');
@@ -550,15 +826,19 @@ const InboxPage: React.FC = () => {
       
       showToast('Thread created successfully', 'success');
     } catch (error: any) {
-      console.error('Create thread error:', error);
+      console.error('[Create Thread] Error:', error);
       const errorMessage = error.message || 'Failed to create thread';
       
       // Show specific error messages
       if (errorMessage.includes('validation') || errorMessage.includes('required')) {
         showToast('Please fill in all required fields correctly', 'error');
-      } else if (!errorMessage.includes('Network error') && !errorMessage.includes('Failed to fetch')) {
+      } else if (errorMessage.includes('internet') || errorMessage.includes('connection')) {
+        showToast(errorMessage, 'error');
+      } else {
         showToast(errorMessage, 'error');
       }
+    } finally {
+      setCreatingThread(false);
     }
   };
 
@@ -627,10 +907,13 @@ const InboxPage: React.FC = () => {
         const buyerName = typeof thread?.buyerId === 'object' 
           ? (thread.buyerId.fullName || 'Buyer')
           : 'Buyer';
+        const avatarUrl = typeof thread?.buyerId === 'object' && thread.buyerId.avatarUrl 
+          ? (resolveAvatarUrl(thread.buyerId.avatarUrl) ?? undefined)
+          : undefined;
         showNotification(
           buyerName,
           message.content.substring(0, 50) + (message.content.length > 50 ? '...' : ''),
-          typeof thread?.buyerId === 'object' ? resolveAvatarUrl(thread.buyerId.avatarUrl) : undefined
+          avatarUrl
         );
         showToast(`New message from ${buyerName}`, 'info');
       }
@@ -657,9 +940,45 @@ const InboxPage: React.FC = () => {
       loadThreads();
     };
 
+    /**
+     * Listen for incoming typing events from other users
+     * - Only show if senderId is current chat partner and isTyping = true
+     * - Hide typing text if isTyping = false
+     * - Prevents flickering with proper state management
+     */
+    websocketService.onUserTyping = (threadId: string, userId: string, userName: string, isTyping: boolean) => {
+      // Only show typing indicator if it's for the current thread and not from current user
+      if (activeThread?._id === threadId && userId !== user?.id) {
+        if (isTyping) {
+          // Show typing indicator with smooth fade-in
+          setIsTyping(true);
+          setTypingUserId(userId);
+          setTypingUserName(userName || null);
+        } else {
+          // Hide typing indicator with smooth fade-out (after short delay to prevent flickering)
+          setTimeout(() => {
+            setIsTyping(false);
+            setTypingUserId(null);
+            setTypingUserName(null);
+          }, 500); // Small delay to prevent flickering on fast typing
+        }
+      }
+    };
+
     // Cleanup
     return () => {
+      // Reset typing indicator when leaving conversation
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+        typingTimeoutRef.current = null;
+      }
+      setIsTyping(false);
+      setTypingUserId(null);
+      setTypingUserName(null);
+      
       if (activeThread) {
+        // Send stop typing before leaving thread
+        websocketService.sendTyping(activeThread._id, false);
         websocketService.leaveThread(activeThread._id);
       }
     };
@@ -670,19 +989,81 @@ const InboxPage: React.FC = () => {
     loadThreads();
   }, [loadThreads]);
 
-  // Typing indicator
+  // Detect when internet connection is restored and retry loading threads
+  useEffect(() => {
+    const handleOnline = () => {
+      console.log('[Network] Internet connection restored, retrying to load threads...');
+      // Retry loading threads when internet comes back (silently to avoid duplicate toasts)
+      loadThreads(true).then(() => {
+        console.log('[Network] Successfully loaded threads after connection restored');
+        showToast('Connection restored', 'success');
+      }).catch((error) => {
+        console.error('[Network] Retry failed:', error);
+        // Only show error if it's not a network error (to avoid duplicate messages)
+        if (!error.message?.includes('internet') && !error.message?.includes('connection')) {
+          showToast(error.message || 'Failed to load threads', 'error');
+        }
+      });
+    };
+
+    const handleOffline = () => {
+      console.log('[Network] Internet connection lost');
+      showToast('No internet connection', 'error');
+    };
+
+    // Add event listeners
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    // Check if already online and threads failed to load
+    if (navigator.onLine && threads.length === 0 && !loading) {
+      // Small delay to ensure page is fully loaded
+      const timer = setTimeout(() => {
+        console.log('[Network] Already online, checking if threads need to be loaded...');
+        loadThreads(true).catch((error) => {
+          console.error('[Network] Initial load failed:', error);
+        });
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+
+    // Cleanup
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [loadThreads, threads.length, loading, showToast]);
+
+  /**
+   * Handle typing indicator with proper debounce
+   * - Emits typing event when user starts typing (input not empty)
+   * - Uses 400ms debounce before sending "stop typing" event
+   * - Prevents flickering with proper state management
+   */
   const handleTyping = () => {
     if (!activeThread) return;
     
+    const hasContent = messageContent.trim().length > 0;
+    
+    // Clear existing timeout
     if (typingTimeoutRef.current) {
       clearTimeout(typingTimeoutRef.current);
     }
     
-    websocketService.sendTyping(activeThread._id, true);
-    
-    typingTimeoutRef.current = setTimeout(() => {
+    // If input has content, emit typing started event
+    if (hasContent) {
+      // Emit typing event: { senderId, receiverId, isTyping: true }
+      websocketService.sendTyping(activeThread._id, true);
+      
+      // Set timeout to emit stop typing after 400ms of no typing (debounce)
+      typingTimeoutRef.current = setTimeout(() => {
+        // Emit typing event: { senderId, receiverId, isTyping: false }
+        websocketService.sendTyping(activeThread._id, false);
+      }, 400); // 400ms debounce to prevent flickering
+    } else {
+      // Input is empty, immediately emit stop typing
       websocketService.sendTyping(activeThread._id, false);
-    }, 1000);
+    }
   };
 
   return (
@@ -807,45 +1188,61 @@ const InboxPage: React.FC = () => {
                     }`}
                   >
                     {/* Buyer Avatar */}
-                    <div className="relative flex-shrink-0">
-                      <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 overflow-hidden">
-                        {buyer?.avatarUrl ? (
-                          <img
-                            src={resolveAvatarUrl(buyer.avatarUrl) || ''}
-                            alt={buyer.fullName || 'Buyer'}
-                            className="w-full h-full object-cover"
-                          />
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center text-white font-bold text-sm sm:text-base">
-                            {(buyer?.fullName || 'B')[0].toUpperCase()}
-                          </div>
-                        )}
-                      </div>
-                      {thread.type === 'rfq' && (
-                        <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-purple-500 rounded-full border-2 border-white dark:border-gray-800 flex items-center justify-center">
-                          <Mail className="h-3 w-3 text-white" />
-                        </div>
+                    <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-xs sm:text-sm font-semibold text-white flex-shrink-0 overflow-hidden">
+                      {typeof thread.buyerId === 'object' && thread.buyerId.avatarUrl && thread.buyerId.avatarUrl.trim() ? (
+                        <img
+                          src={thread.buyerId.avatarUrl}
+                          alt={thread.buyerId.fullName || 'Buyer'}
+                          className="w-full h-full object-cover"
+                          onError={(e) => {
+                            // If profile image fails to load, show first letter (avatar)
+                            const target = e.target as HTMLImageElement;
+                            target.style.display = 'none';
+                            const parent = target.parentElement;
+                            if (parent) {
+                              const name = typeof thread.buyerId === 'object' 
+                                ? (thread.buyerId.fullName || thread.buyerId.email || 'B')
+                                : 'B';
+                              parent.innerHTML = `<span class="text-white text-xs sm:text-sm font-semibold">${name[0].toUpperCase()}</span>`;
+                            }
+                          }}
+                        />
+                      ) : (
+                        // No profile image, use first letter (avatar)
+                        <span className="text-white text-xs sm:text-sm font-semibold">
+                          {typeof thread.buyerId === 'object' 
+                            ? (thread.buyerId.fullName || thread.buyerId.email || 'B')[0].toUpperCase()
+                            : 'B'}
+                        </span>
                       )}
                     </div>
                     <div className="flex-1 min-w-0 flex flex-col gap-1">
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="text-sm font-semibold text-gray-900 dark:text-white line-clamp-1">
-                            {buyer?.fullName || 'Buyer'}
-                        </p>
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-semibold text-gray-900 dark:text-white line-clamp-1">
+                            {typeof thread.buyerId === 'object' ? thread.buyerId.fullName : 'Buyer'}
+                      </p>
+                          <span className="text-[11px] text-gray-500 dark:text-gray-400">
+                            {formatTime(thread.lastMessageAt)}
+                          </span>
+                    </div>
+                    <p className="text-xs text-gray-700 dark:text-gray-300 line-clamp-1">{thread.subject}</p>
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-[11px] text-gray-500 dark:text-gray-400 line-clamp-1">
+                            {thread.lastMessagePreview}
+                      </p>
+                      <div className="flex items-center gap-1">
+                        {thread.type === 'rfq' && (
+                          <span className="px-2 py-0.5 rounded-full bg-purple-100 dark:bg-purple-900/30 text-[10px] text-purple-700 dark:text-purple-300">
+                            RFQ
+                          </span>
+                        )}
+                            {thread.sellerUnreadCount > 0 && (
+                          <span className="w-2 h-2 rounded-full bg-red-500 dark:bg-red-400 flex-shrink-0" />
+                        )}
                           <span className="text-[11px] text-gray-500 dark:text-gray-400 flex-shrink-0">
                             {formatTime(thread.lastMessageAt)}
                           </span>
                       </div>
-                      <p className="text-xs text-gray-700 dark:text-gray-300 line-clamp-1">{thread.subject}</p>
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="text-[11px] text-gray-500 dark:text-gray-400 line-clamp-1">
-                            {thread.lastMessagePreview}
-                        </p>
-                        <div className="flex items-center gap-1">
-                          {thread.sellerUnreadCount > 0 && (
-                            <span className="w-2 h-2 rounded-full bg-red-500 dark:bg-red-400 flex-shrink-0" />
-                          )}
-                        </div>
                       </div>
                     </div>
                   </button>
@@ -874,17 +1271,34 @@ const InboxPage: React.FC = () => {
                       <X className="w-5 h-5 text-gray-600 dark:text-gray-400" />
                     </button>
                     <div className="relative flex-shrink-0">
-                      <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-red-500/10 dark:bg-red-500/20 flex items-center justify-center">
-                        {typeof activeThread.buyerId === 'object' && activeThread.buyerId.avatarUrl ? (
+                      <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center overflow-hidden">
+                        {typeof activeThread.buyerId === 'object' && activeThread.buyerId.avatarUrl && activeThread.buyerId.avatarUrl.trim() ? (
                           <img
-                            src={resolveAvatarUrl(activeThread.buyerId.avatarUrl) || ''}
-                            alt={activeThread.buyerId.fullName}
-                            className="w-8 h-8 sm:w-9 sm:h-9 rounded-full"
+                            src={resolveAvatarUrl(activeThread.buyerId.avatarUrl) || activeThread.buyerId.avatarUrl}
+                            alt={activeThread.buyerId.fullName || 'Buyer'}
+                            className="w-full h-full object-cover"
+                            onError={(e) => {
+                              // If profile image fails to load, show first letter (avatar)
+                              const target = e.target as HTMLImageElement;
+                              target.style.display = 'none';
+                              const parent = target.parentElement;
+                              if (parent) {
+                                const name = typeof activeThread.buyerId === 'object' 
+                                  ? (activeThread.buyerId.fullName || activeThread.buyerId.email || 'B')
+                                  : 'B';
+                                parent.innerHTML = `<span class="text-white text-xs sm:text-sm font-semibold">${name[0].toUpperCase()}</span>`;
+                              }
+                            }}
                           />
                         ) : (
-                          <User className="w-4 h-4 sm:w-5 sm:h-5 text-red-500" />
+                          // No profile image, use first letter (avatar)
+                          <span className="text-white text-xs sm:text-sm font-semibold">
+                            {typeof activeThread.buyerId === 'object' 
+                              ? (activeThread.buyerId.fullName || activeThread.buyerId.email || 'B')[0].toUpperCase()
+                              : 'B'}
+                          </span>
                         )}
-                      </div>
+                </div>
                       {/* Online status indicator */}
                       <div className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 rounded-full border-2 border-white dark:border-gray-900"></div>
                 </div>
@@ -895,8 +1309,22 @@ const InboxPage: React.FC = () => {
                         </p>
                         <span className="text-[10px] text-green-500 hidden sm:inline">●</span>
                       </div>
-                      <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 truncate">{activeThread.subject}</p>
-                </div>
+                      {/* Typing Indicator - Show under receiver's name in header (WhatsApp style) */}
+                      {isTyping && typingUserId ? (
+                        <div className="flex items-center gap-1.5 mt-0.5 animate-fadeIn transition-opacity duration-200">
+                          <div className="flex gap-0.5">
+                            <div className="w-1 h-1 bg-gray-500 dark:bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                            <div className="w-1 h-1 bg-gray-500 dark:bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                            <div className="w-1 h-1 bg-gray-500 dark:bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                          </div>
+                          <span className="text-[11px] text-gray-500 dark:text-gray-400 italic">
+                            {typingUserName || (typeof activeThread.buyerId === 'object' ? activeThread.buyerId.fullName : 'Buyer')} is typing...
+                          </span>
+                        </div>
+                      ) : (
+                        <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 truncate animate-fadeIn transition-opacity duration-200">{activeThread.subject}</p>
+                      )}
+                    </div>
               </div>
                   <div className="hidden sm:flex items-center gap-2 flex-shrink-0">
                     {activeThread.type === 'rfq' && (
@@ -932,23 +1360,98 @@ const InboxPage: React.FC = () => {
                         className={`flex items-start gap-1 sm:gap-2 max-w-[90%] sm:max-w-[85%] md:max-w-xl ${isSeller ? 'ml-auto justify-end' : ''}`}
                       >
                         {!isSeller && (
-                          <div className="w-7 h-7 rounded-full bg-gray-300 dark:bg-gray-700 flex items-center justify-center text-[11px] text-gray-800 dark:text-gray-100 flex-shrink-0">
-                            {typeof message.senderId === 'object' && message.senderId.avatarUrl ? (
+                          <div className="w-7 h-7 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-[11px] font-semibold text-white flex-shrink-0 overflow-hidden">
+                            {typeof message.senderId === 'object' && message.senderId.avatarUrl && message.senderId.avatarUrl.trim() ? (
                               <img
-                                src={resolveAvatarUrl(message.senderId.avatarUrl) || ''}
-                                alt={message.senderId.fullName}
-                                className="w-7 h-7 rounded-full"
+                                src={resolveAvatarUrl(message.senderId.avatarUrl) || message.senderId.avatarUrl}
+                                alt={message.senderId.fullName || 'Buyer'}
+                                className="w-full h-full object-cover"
+                                onError={(e) => {
+                                  // If profile image fails to load, show first letter (avatar)
+                                  const target = e.target as HTMLImageElement;
+                                  target.style.display = 'none';
+                                  const parent = target.parentElement;
+                                  if (parent) {
+                                    const name = typeof message.senderId === 'object' ? (message.senderId.fullName || message.senderId.email || 'U') : 'U';
+                                    parent.textContent = name[0].toUpperCase();
+                                  }
+                                }}
                               />
                             ) : (
-                              (typeof message.senderId === 'object' ? message.senderId.fullName : 'U')[0].toUpperCase()
+                              // No profile image, use first letter (avatar)
+                              (typeof message.senderId === 'object' 
+                                ? (message.senderId.fullName || message.senderId.email || 'U')[0].toUpperCase()
+                                : 'U')
                             )}
-                          </div>
+                </div>
                         )}
-                        <div className="flex flex-col gap-1">
+                        <div 
+                          className="flex flex-col gap-1"
+                          onTouchStart={(e) => {
+                            const touch = e.touches[0];
+                            const target = e.currentTarget;
+                            const startX = touch.clientX;
+                            const startY = touch.clientY;
+                            let moved = false;
+                            
+                            const onTouchMove = (moveEvent: TouchEvent) => {
+                              const currentTouch = moveEvent.touches[0];
+                              const deltaX = currentTouch.clientX - startX;
+                              const deltaY = Math.abs(currentTouch.clientY - startY);
+                              
+                              // Only allow horizontal swipe (not vertical scroll)
+                              if (Math.abs(deltaX) > 10 && deltaY < 50) {
+                                moved = true;
+                                // Visual feedback - slight shift
+                                target.style.transform = `translateX(${Math.min(deltaX, 50)}px)`;
+                                target.style.transition = 'transform 0.1s';
+                              }
+                            };
+                            
+                            const onTouchEnd = () => {
+                              const finalTouch = (e.nativeEvent as TouchEvent).changedTouches[0];
+                              const deltaX = finalTouch.clientX - startX;
+                              
+                              if (moved && deltaX > 50 && !isSeller) {
+                                // Swipe right to reply (only for received messages)
+                                setReplyTo(message);
+                                showToast('Replying to message', 'info');
+                              }
+                              
+                              // Reset transform
+                              target.style.transform = '';
+                              target.style.transition = '';
+                              
+                              document.removeEventListener('touchmove', onTouchMove);
+                              document.removeEventListener('touchend', onTouchEnd);
+                            };
+                            
+                            document.addEventListener('touchmove', onTouchMove);
+                            document.addEventListener('touchend', onTouchEnd);
+                          }}
+                        >
                           {message.replyTo && (
-                            <div className="text-[10px] text-gray-500 dark:text-gray-400 px-2 py-1 bg-gray-100 dark:bg-gray-800 rounded border-l-2 border-red-500">
-                              Replying to message
-                            </div>
+                            <div className={`mb-2 px-2 py-1.5 rounded-lg border-l-4 ${
+                              isSeller 
+                                ? 'bg-white/30 dark:bg-white/10 border-white/50' 
+                                : 'bg-gray-100 dark:bg-gray-700/50 border-red-500'
+                            }`}>
+                              <div className="flex items-center gap-1.5 mb-0.5">
+                                <Reply className={`w-3 h-3 ${isSeller ? 'text-white/80' : 'text-red-500'}`} />
+                                <span className={`text-[10px] font-semibold ${isSeller ? 'text-white/90' : 'text-gray-700 dark:text-gray-300'}`}>
+                                  {typeof message.replyTo === 'object' && (message.replyTo as any).senderId 
+                                    ? (typeof (message.replyTo as any).senderId === 'object' 
+                                        ? (message.replyTo as any).senderId.fullName || 'User'
+                                        : 'User')
+                                    : 'You'}
+                                </span>
+                </div>
+                              <p className={`text-[11px] line-clamp-2 ${isSeller ? 'text-white/80' : 'text-gray-600 dark:text-gray-400'}`}>
+                                {typeof message.replyTo === 'object' 
+                                  ? ((message.replyTo as any).content || ((message.replyTo as any).attachments && (message.replyTo as any).attachments.length > 0 ? '📎 Attachment' : 'Message'))
+                                  : 'Message'}
+                              </p>
+              </div>
                           )}
                           <div
                             className={`px-3 py-2 rounded-2xl text-xs shadow-sm ${
@@ -957,6 +1460,36 @@ const InboxPage: React.FC = () => {
                                 : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white rounded-bl-sm'
                             }`}
                           >
+                            {/* Sender name with avatar for received messages */}
+                            {!isSeller && typeof message.senderId === 'object' && (
+                              <div className="flex items-center gap-1.5 mb-1.5 pb-1 border-b border-gray-200 dark:border-gray-700">
+                                <div className="w-4 h-4 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-[9px] font-semibold text-white flex-shrink-0 overflow-hidden">
+                                  {message.senderId.avatarUrl && message.senderId.avatarUrl.trim() ? (
+                                    <img
+                                      src={message.senderId.avatarUrl}
+                                      alt={message.senderId.fullName || 'Buyer'}
+                                      className="w-full h-full object-cover"
+                                      onError={(e) => {
+                                        // If image fails to load, show first letter (avatar)
+                                        const target = e.target as HTMLImageElement;
+                                        target.style.display = 'none';
+                                        const parent = target.parentElement;
+                                        if (parent) {
+                                          const name = message.senderId.fullName || message.senderId.email || 'B';
+                                          parent.textContent = name[0].toUpperCase();
+                                        }
+                                      }}
+                                    />
+                                  ) : (
+                                    // No profile image, use first letter (avatar)
+                                    (message.senderId.fullName || message.senderId.email || 'B')[0].toUpperCase()
+                                  )}
+                </div>
+                                <span className="text-[10px] font-semibold text-gray-700 dark:text-gray-300">
+                                  {message.senderId.fullName || 'Buyer'}
+                                </span>
+              </div>
+                            )}
                             {isDeleted ? (
                               <span className="italic opacity-60">This message was deleted</span>
                             ) : editingMessage?._id === message._id ? (
@@ -1008,23 +1541,55 @@ const InboxPage: React.FC = () => {
                                                     a.currentTime = 0;
                                                   });
                                                   
-                                                  // Ensure audio is ready and has volume
-                                                  audio.volume = 1.0;
+                                                  // C) Audio element MUST NOT be muted
                                                   audio.muted = false;
+                                                  audio.volume = 1;
                                                   
-                                                  // Load the audio if not loaded
-                                                  if (audio.readyState < 2) {
-                                                    audio.load();
-                                                    await new Promise((resolve, reject) => {
-                                                      audio.oncanplay = resolve;
-                                                      audio.onerror = reject;
-                                                      setTimeout(reject, 5000); // Timeout after 5 seconds
-                                                    });
+                                                  console.log('[Audio Playback] Audio element state:', {
+                                                    src: audio.src,
+                                                    volume: audio.volume,
+                                                    muted: audio.muted,
+                                                    readyState: audio.readyState,
+                                                    paused: audio.paused
+                                                  });
+                                                  
+                                                  // C) Before playing: load and play
+                                                  audio.load();
+                                                  
+                                                  // Wait for audio to be ready
+                                                  await new Promise((resolve, reject) => {
+                                                    const timeout = setTimeout(() => {
+                                                      reject(new Error('Audio load timeout'));
+                                                    }, 5000);
+                                                  
+                                                    audio.oncanplay = () => {
+                                                      clearTimeout(timeout);
+                                                      console.log('[Audio Playback] Audio can play');
+                                                      resolve(null);
+                                                    };
+                                                    
+                                                    audio.onerror = (e) => {
+                                                      clearTimeout(timeout);
+                                                      console.error('[Audio Playback] Load error:', e, audio.error);
+                                                      reject(new Error('Failed to load audio'));
+                                                    };
+                                                  });
+                                                  
+                                                  // C) Play the audio with error handling
+                                                  console.log('[Audio Playback] Attempting to play audio...');
+                                                  try {
+                                                    await audio.play();
+                                                    console.log('[Audio Playback] Audio playing successfully');
+                                                    setPlayingAudioId(audioId);
+                                                  } catch (playError: any) {
+                                                    console.error('[Audio Playback] Play error:', playError);
+                                                    // D) Mobile support: Safari requires user gesture
+                                                    if (playError.name === 'NotAllowedError') {
+                                                      showToast('Please tap the play button to start audio', 'info');
+                                                    } else {
+                                                      throw playError;
+                                                    }
                                                   }
-                                                  
-                                                  // Play the audio
-                                                  await audio.play();
-                                                  setPlayingAudioId(audioId);
                                                   
                                                   // Set up event handlers
                                                   audio.onended = () => {
@@ -1053,10 +1618,18 @@ const InboxPage: React.FC = () => {
                                               }
                                             }
                                           }}
-                                          className="w-8 h-8 rounded-full bg-red-500 hover:bg-red-600 flex items-center justify-center text-white transition-colors flex-shrink-0"
+                                          className={`w-8 h-8 rounded-full flex items-center justify-center text-white transition-all flex-shrink-0 relative ${
+                                            playingAudioId === `audio-${message._id}-${idx}`
+                                              ? 'bg-red-600 hover:bg-red-700 animate-pulse shadow-lg'
+                                              : 'bg-red-500 hover:bg-red-600'
+                                          }`}
+                                          title={playingAudioId === `audio-${message._id}-${idx}` ? 'Stop playback' : 'Play voice note'}
                                         >
                                           {playingAudioId === `audio-${message._id}-${idx}` ? (
-                                            <X className="w-4 h-4" />
+                                            <>
+                                              <X className="w-4 h-4" />
+                                              <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-400 rounded-full animate-ping" />
+                                            </>
                                           ) : (
                                             <Play className="w-4 h-4 ml-0.5" />
                                           )}
@@ -1079,8 +1652,27 @@ const InboxPage: React.FC = () => {
                                             crossOrigin="anonymous"
                                             ref={(el) => {
                                               if (el) {
+                                                // CRITICAL: Ensure audio has correct volume and is not muted
                                                 el.volume = 1.0;
                                                 el.muted = false;
+                                                
+                                                // Log audio element state for debugging
+                                                console.log('[Audio Element] Initialized:', {
+                                                  src: el.src,
+                                                  volume: el.volume,
+                                                  muted: el.muted,
+                                                  readyState: el.readyState
+                                                });
+                                                
+                                                // Add error handler
+                                                el.onerror = (e) => {
+                                                  console.error('[Audio Element] Error loading audio:', e, el.error);
+                                                };
+                                                
+                                                // Log when audio can play
+                                                el.oncanplay = () => {
+                                                  console.log('[Audio Element] Audio can play:', el.src);
+                                                };
                                               }
                                             }}
                                           />
@@ -1099,7 +1691,7 @@ const InboxPage: React.FC = () => {
                                             (e.target as HTMLImageElement).style.display = 'none';
                                           }}
                                         />
-                                      </div>
+                </div>
                                     ) : (
                                       <a
                                         href={getFileUrl(att.path)}
@@ -1126,7 +1718,7 @@ const InboxPage: React.FC = () => {
                                               {(att.size / 1024).toFixed(1)} KB
                                             </span>
                                           )}
-                                        </div>
+              </div>
                                       </a>
                                     )}
                                   </div>
@@ -1184,23 +1776,42 @@ const InboxPage: React.FC = () => {
                             )}
                 </div>
               </div>
-                </div>
+                        {isSeller && (
+                          <div className="w-7 h-7 rounded-full bg-gradient-to-br from-red-400 to-orange-500 flex items-center justify-center text-[11px] font-semibold text-white flex-shrink-0 overflow-hidden">
+                            {user?.avatar_url && user.avatar_url.trim() ? (
+                              <img
+                                src={user.avatar_url}
+                                alt={user.full_name || user.email || 'You'}
+                                className="w-full h-full object-cover"
+                                onError={(e) => {
+                                  // If profile image fails to load, show first letter (avatar)
+                                  const target = e.target as HTMLImageElement;
+                                  target.style.display = 'none';
+                                  const parent = target.parentElement;
+                                  if (parent) {
+                                    const name = user?.full_name || user?.email || 'S';
+                                    parent.textContent = name[0].toUpperCase();
+                                  }
+                                }}
+                              />
+                            ) : (
+                              // No profile image, use first letter (avatar)
+                              (user?.full_name || user?.email || 'S')[0].toUpperCase()
+                            )}
+                          </div>
+                        )}
+                      </div>
                     );
                   })}
-                  {/* Real-time Indicators */}
+                  {/* Real-time Indicators - Typing indicator in messages area */}
                   {isTyping && typingUserId && (
                     <div className="flex items-center gap-2 justify-start py-2">
-                      <div className="w-7 h-7 rounded-full bg-gray-300 dark:bg-gray-700 flex items-center justify-center text-[11px] text-gray-800 dark:text-gray-100 flex-shrink-0">
-                        <User className="w-4 h-4" />
-                      </div>
-                      <div className="bg-white dark:bg-gray-800 rounded-lg px-3 py-2 shadow-sm">
-                        <div className="flex gap-1">
-                          <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                          <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                          <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                        </div>
-                        <span className="text-[10px] text-gray-500 dark:text-gray-400 ml-2">typing...</span>
-                      </div>
+                      <ChatIndicator 
+                        status="typing" 
+                        userName={typingUserName || (typeof activeThread?.buyerId === 'object' ? (activeThread.buyerId.fullName || 'Buyer') : 'Buyer')}
+                        position="below"
+                        className="ml-2"
+                      />
                     </div>
                   )}
                   {isRecordingIndicator && recordingUserId && (
@@ -1230,17 +1841,42 @@ const InboxPage: React.FC = () => {
                     </div>
                   )}
                   <div ref={messagesEndRef} />
-                </div>
+            </div>
 
                 {/* Composer - Responsive */}
                 <div className="border-t border-gray-200 dark:border-gray-700/60 px-2 sm:px-3 md:px-4 py-2 sm:py-3 bg-white/90 dark:bg-gray-900/90">
+                  {/* Typing Indicator - Show above input area (WhatsApp style) */}
+                  {isTyping && typingUserId && (
+                    <ChatIndicator 
+                      status="typing" 
+                      userName={typingUserName || (typeof activeThread?.buyerId === 'object' ? (activeThread.buyerId.fullName || 'Buyer') : 'Buyer')}
+                      position="above"
+                      className="mb-2"
+                    />
+                  )}
                   {replyTo && (
-                    <div className="mb-2 p-2 bg-gray-100 dark:bg-gray-800 rounded text-[11px] flex items-center justify-between">
-                      <span>Replying to: {replyTo.content.substring(0, 50)}...</span>
-                      <button onClick={() => setReplyTo(null)} className="text-gray-500">
-                        <X className="w-3 h-3" />
-                      </button>
+                    <div className="mb-2 p-2.5 bg-gray-100 dark:bg-gray-800 rounded-lg border-l-4 border-red-500 flex items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5 mb-1">
+                          <Reply className="w-3.5 h-3.5 text-red-500 flex-shrink-0" />
+                          <span className="text-[11px] font-semibold text-gray-700 dark:text-gray-300">
+                            {typeof replyTo.senderId === 'object' 
+                              ? (replyTo.senderId.fullName || 'User')
+                              : 'User'}
+                </span>
               </div>
+                        <p className="text-[11px] text-gray-600 dark:text-gray-400 line-clamp-2">
+                          {replyTo.content || (replyTo.attachments && replyTo.attachments.length > 0 ? '📎 Attachment' : 'Message')}
+                        </p>
+                      </div>
+                      <button 
+                        onClick={() => setReplyTo(null)} 
+                        className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 flex-shrink-0 p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+                        aria-label="Cancel reply"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
                   )}
                   {/* Upload Progress */}
                   {Array.from(uploadingFiles.entries()).map(([fileId, file]) => (
@@ -1261,25 +1897,7 @@ const InboxPage: React.FC = () => {
                       />
                 </div>
                   ))}
-                  {selectedFiles.filter(f => !Array.from(uploadingFiles.values()).includes(f)).length > 0 && (
-                    <div className="mb-2 flex flex-wrap gap-2">
-                      {selectedFiles.filter(f => !Array.from(uploadingFiles.values()).includes(f)).map((file, idx) => (
-                        <div key={idx} className="flex items-center gap-1 bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded-lg text-[10px] border border-gray-200 dark:border-gray-700">
-                          <span className="truncate max-w-[100px]">{file.name}</span>
-                          <button
-                            onClick={() => {
-                              setSelectedFiles(prev => prev.filter((_, i) => i !== idx));
-                              setUploadedAttachments(prev => prev.filter(a => a.originalName !== file.name));
-                            }}
-                            className="text-red-500 hover:text-red-600"
-                          >
-                            <X className="w-3 h-3" />
-                          </button>
-              </div>
-                      ))}
-            </div>
-                  )}
-                  <div className="flex items-end gap-2">
+              <div className="flex items-end gap-2">
                     <input
                       ref={fileInputRef}
                       type="file"
@@ -1304,7 +1922,7 @@ const InboxPage: React.FC = () => {
                       className="hidden"
                     />
                     
-                    {/* Recording Mode UI */}
+                    {/* Recording Mode UI - Show SEND button for voice note */}
                     {isRecording ? (
                       <>
                         <button
@@ -1319,11 +1937,65 @@ const InboxPage: React.FC = () => {
                             <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse" />
                             <span className="text-sm font-medium text-red-500">
                               Recording: {formatRecordingDuration(recordingDuration)}
-                </span>
-              </div>
+                            </span>
+                          </div>
+                          {/* SEND button for voice note - always visible when recording */}
                           <button
-                            onClick={handleSendMessage}
-                            disabled={sending}
+                            onClick={async () => {
+                              // Stop recording first, then send
+                              if (mediaRecorderRef.current && isRecording) {
+                                const currentDuration = recordingDuration;
+                                mediaRecorderRef.current.stop();
+                                setIsRecording(false);
+                                if (recordingIntervalRef.current) {
+                                  clearInterval(recordingIntervalRef.current);
+                                }
+                                
+                                // Wait for recording to finish and get the file
+                                const recordedFile = await new Promise<File>((resolve) => {
+                                  recordingCompleteRef.current = resolve;
+                                });
+                                
+                                if (recordedFile && activeThread) {
+                                  // Auto-upload and send the voice note
+                                  try {
+                                    setSending(true);
+                                    const uploaded = await inboxAPI.uploadFiles(
+                                      [recordedFile],
+                                      currentDuration,
+                                      (progress) => {
+                                        setUploadProgress(prev => new Map(prev).set('voice-sending', progress));
+                                      }
+                                    );
+                                    
+                                    // Send message with voice note only
+                                    if (uploaded.length > 0) {
+                                      await inboxAPI.sendMessage(activeThread._id, {
+                                        content: '',
+                                        attachments: uploaded,
+                                      });
+                                      
+                                      // Clear voice note files and reset UI
+                                      setSelectedFiles(prev => prev.filter(f => f !== recordedFile));
+                                      setUploadedAttachments([]);
+                                      setRecordingDuration(0);
+                                      setUploadProgress(new Map());
+                                      
+                                      // Reload messages
+                                      await loadThreadMessages(activeThread._id);
+                                      await loadThreads();
+                                      
+                                      showToast('Voice note sent', 'success');
+                                    }
+                                  } catch (error: any) {
+                                    showToast(error.message || 'Failed to send voice note', 'error');
+                                  } finally {
+                                    setSending(false);
+                                  }
+                                }
+                              }
+                            }}
+                            disabled={sending || recordingDuration === 0}
                             className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-red-500 hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed text-white flex-shrink-0"
                             title="Send voice note"
                           >
@@ -1333,56 +2005,238 @@ const InboxPage: React.FC = () => {
                       </>
                     ) : (
                       <>
-                        {/* Normal Mode UI */}
-                        <div className="flex-1 relative">
-                <textarea
-                  rows={2}
-                            placeholder="Type your reply..."
-                            value={messageContent}
-                            onChange={(e) => {
-                              setMessageContent(e.target.value);
-                              handleTyping();
-                            }}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter' && !e.shiftKey) {
-                                e.preventDefault();
-                                handleSendMessage();
-                              }
-                            }}
-                            className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg px-3 py-2 pr-20 text-xs text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500 resize-none"
-                          />
-                          {/* Icons inside textarea (shown when no text) */}
-                          {!messageContent.trim() && (
-                            <div className="absolute right-2 bottom-2 flex items-center gap-1">
-                              <button
-                                onClick={() => fileInputRef.current?.click()}
-                                className="p-2 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors active:scale-95"
-                                title="Attach file"
-                              >
-                                <Paperclip className="w-4 h-4 sm:w-5 sm:h-5" />
-                              </button>
-                              <button
-                                onClick={() => imageInputRef.current?.click()}
-                                className="p-2 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors active:scale-95"
-                                title="Attach image"
-                              >
-                                <ImageIcon className="w-4 h-4 sm:w-5 sm:h-5" />
-                              </button>
-                              <button
-                                onMouseDown={startRecording}
-                                onMouseUp={stopRecording}
-                                onTouchStart={startRecording}
-                                onTouchEnd={stopRecording}
-                                className="p-2 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg text-gray-600 dark:text-gray-400 hover:text-red-500 transition-colors active:scale-95"
-                                title="Hold to record voice note"
-                              >
-                                <Mic className="w-4 h-4 sm:w-5 sm:h-5" />
-                              </button>
+                        {/* Normal Mode UI - WhatsApp Style with Media Preview Inside */}
+                        <div className="flex-1 relative bg-white dark:bg-gray-800 rounded-2xl border border-gray-300 dark:border-gray-600 overflow-hidden">
+                          {/* Media Preview - WhatsApp Style: Show inside text field area */}
+                          {(selectedFiles.filter(f => !Array.from(uploadingFiles.values()).includes(f)).length > 0 || uploadedAttachments.length > 0) && (
+                            <div className="px-3 pt-2 pb-1 border-b border-gray-200 dark:border-gray-700">
+                              <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto">
+                                {/* Show uploaded attachments (images/files) */}
+                                {uploadedAttachments.map((attachment, idx) => (
+                                  <div key={`uploaded-${idx}`} className="relative group">
+                                    {attachment.type === 'image' ? (
+                                      <div className="relative w-16 h-16 sm:w-20 sm:h-20 rounded-lg overflow-hidden border border-gray-300 dark:border-gray-600">
+                                        <img
+                                          src={getFileUrl(attachment.path)}
+                                          alt={attachment.originalName}
+                                          className="w-full h-full object-cover"
+                                          onError={(e) => {
+                                            (e.target as HTMLImageElement).style.display = 'none';
+                                          }}
+                                        />
+                                        <button
+                                          onClick={() => {
+                                            setUploadedAttachments(prev => prev.filter((_, i) => i !== idx));
+                                            setSelectedFiles(prev => prev.filter(f => f.name !== attachment.originalName));
+                                          }}
+                                          className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 hover:bg-red-600 rounded-full flex items-center justify-center text-white shadow-md"
+                                          title="Remove"
+                                        >
+                                          <X className="w-3 h-3" />
+                                        </button>
+                                      </div>
+                                    ) : attachment.type === 'voice' ? (
+                                      <div className="relative w-16 h-16 sm:w-20 sm:h-20 rounded-lg bg-gradient-to-br from-red-400 to-orange-500 flex items-center justify-center border border-gray-300 dark:border-gray-600">
+                                        <Play className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
+                                        <div className="absolute bottom-0.5 left-0.5 right-0.5 text-[8px] text-white font-medium text-center">
+                                          {attachment.duration ? `${Math.floor(attachment.duration)}s` : 'Voice'}
+                                        </div>
+                                        <button
+                                          onClick={() => {
+                                            setUploadedAttachments(prev => prev.filter((_, i) => i !== idx));
+                                            setSelectedFiles(prev => prev.filter(f => !f.name.startsWith('voice-')));
+                                          }}
+                                          className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 hover:bg-red-600 rounded-full flex items-center justify-center text-white shadow-md"
+                                          title="Remove"
+                                        >
+                                          <X className="w-3 h-3" />
+                                        </button>
+                                      </div>
+                                    ) : (
+                                      <div className="relative w-16 h-16 sm:w-20 sm:h-20 rounded-lg bg-gray-100 dark:bg-gray-700 flex flex-col items-center justify-center border border-gray-300 dark:border-gray-600">
+                                        <FileText className="w-5 h-5 sm:w-6 sm:h-6 text-gray-500 dark:text-gray-400" />
+                                        <span className="text-[7px] text-gray-600 dark:text-gray-300 text-center px-1 truncate w-full mt-0.5">
+                                          {attachment.originalName}
+                                        </span>
+                                        <button
+                                          onClick={() => {
+                                            setUploadedAttachments(prev => prev.filter((_, i) => i !== idx));
+                                            setSelectedFiles(prev => prev.filter(f => f.name !== attachment.originalName));
+                                          }}
+                                          className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 hover:bg-red-600 rounded-full flex items-center justify-center text-white shadow-md"
+                                          title="Remove"
+                                        >
+                                          <X className="w-3 h-3" />
+                                        </button>
+                                      </div>
+                                    )}
+                                  </div>
+                                ))}
+                                {/* Show selected files (not yet uploaded) */}
+                                {selectedFiles.filter(f => !Array.from(uploadingFiles.values()).includes(f) && !uploadedAttachments.some(a => a.originalName === f.name)).map((file, idx) => (
+                                  <div key={`selected-${idx}`} className="relative group">
+                                    {file.type.startsWith('image/') ? (
+                                      <div className="relative w-16 h-16 sm:w-20 sm:h-20 rounded-lg overflow-hidden border border-gray-300 dark:border-gray-600">
+                                        <img
+                                          src={URL.createObjectURL(file)}
+                                          alt={file.name}
+                                          className="w-full h-full object-cover"
+                                          onError={(e) => {
+                                            (e.target as HTMLImageElement).style.display = 'none';
+                                          }}
+                                        />
+                                        <button
+                                          onClick={() => {
+                                            const fileIndex = selectedFiles.findIndex(f => f === file);
+                                            setSelectedFiles(prev => prev.filter((_, i) => i !== fileIndex));
+                                          }}
+                                          className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 hover:bg-red-600 rounded-full flex items-center justify-center text-white shadow-md"
+                                          title="Remove"
+                                        >
+                                          <X className="w-3 h-3" />
+                                        </button>
+                                      </div>
+                                    ) : file.name.startsWith('voice-') || file.type.startsWith('audio/') ? (
+                                      <div className="relative w-16 h-16 sm:w-20 sm:h-20 rounded-lg bg-gradient-to-br from-red-400 to-orange-500 flex items-center justify-center border border-gray-300 dark:border-gray-600">
+                                        <Play className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
+                                        <div className="absolute bottom-0.5 left-0.5 right-0.5 text-[8px] text-white font-medium text-center">
+                                          {recordingDuration > 0 ? `${recordingDuration}s` : 'Voice'}
+                                        </div>
+                                        <button
+                                          onClick={() => {
+                                            const fileIndex = selectedFiles.findIndex(f => f === file);
+                                            setSelectedFiles(prev => prev.filter((_, i) => i !== fileIndex));
+                                          }}
+                                          className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 hover:bg-red-600 rounded-full flex items-center justify-center text-white shadow-md"
+                                          title="Remove"
+                                        >
+                                          <X className="w-3 h-3" />
+                                        </button>
+                                      </div>
+                                    ) : (
+                                      <div className="relative w-16 h-16 sm:w-20 sm:h-20 rounded-lg bg-gray-100 dark:bg-gray-700 flex flex-col items-center justify-center border border-gray-300 dark:border-gray-600">
+                                        <FileText className="w-5 h-5 sm:w-6 sm:h-6 text-gray-500 dark:text-gray-400" />
+                                        <span className="text-[7px] text-gray-600 dark:text-gray-300 text-center px-1 truncate w-full mt-0.5">
+                                          {file.name}
+                                        </span>
+                                        <button
+                                          onClick={() => {
+                                            const fileIndex = selectedFiles.findIndex(f => f === file);
+                                            setSelectedFiles(prev => prev.filter((_, i) => i !== fileIndex));
+                                          }}
+                                          className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 hover:bg-red-600 rounded-full flex items-center justify-center text-white shadow-md"
+                                          title="Remove"
+                                        >
+                                          <X className="w-3 h-3" />
+                                        </button>
+                                      </div>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
                             </div>
                           )}
+                          {/* Recording Indicator - Show above input when recording */}
+                          {isRecording && (
+                            <div className="mb-2 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg flex items-center gap-2">
+                              <div className="relative flex items-center justify-center">
+                                <Mic className="w-4 h-4 text-red-500" />
+                                <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-red-500 rounded-full animate-ping" />
+                              </div>
+                              <span className="text-sm font-medium text-red-600 dark:text-red-400">
+                                Recording: {formatRecordingDuration(recordingDuration)}
+                              </span>
+                              <div className="ml-auto flex items-center gap-1">
+                                <div className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse" style={{ animationDelay: '0ms' }} />
+                                <div className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse" style={{ animationDelay: '200ms' }} />
+                                <div className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse" style={{ animationDelay: '400ms' }} />
+                              </div>
+                            </div>
+                          )}
+                          {/* Text Input Area */}
+                          <div className="relative flex items-center">
+                            <textarea
+                              rows={2}
+                              placeholder={
+                                isRecording 
+                                  ? `Recording... ${formatRecordingDuration(recordingDuration)}` 
+                                  : selectedFiles.filter(f => !Array.from(uploadingFiles.values()).includes(f)).length > 0 || uploadedAttachments.length > 0 
+                                    ? "Add a caption (optional)" 
+                                    : "Type your reply..."
+                              }
+                              value={messageContent}
+                              onChange={(e) => {
+                                setMessageContent(e.target.value);
+                                handleTyping();
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' && !e.shiftKey) {
+                                  e.preventDefault();
+                                  handleSendMessage();
+                                }
+                              }}
+                              className={`w-full px-3 py-2 pr-20 bg-transparent text-xs focus:outline-none resize-none max-h-32 overflow-y-auto transition-colors ${
+                                isRecording
+                                  ? 'text-red-600 dark:text-red-400 placeholder-red-400 dark:placeholder-red-500 border-2 border-red-300 dark:border-red-600 bg-red-50 dark:bg-red-900/10'
+                                  : (selectedFiles.filter(f => !Array.from(uploadingFiles.values()).includes(f)).length > 0 || uploadedAttachments.length > 0) && !messageContent.trim()
+                                    ? 'text-red-500 dark:text-red-400 placeholder-red-400 dark:placeholder-red-500 border-red-300 dark:border-red-600'
+                                    : 'text-gray-900 dark:text-white'
+                              }`}
+                              style={{ minHeight: '44px' }}
+                              disabled={isRecording}
+                            />
+                            {/* Icons inside textarea - Show when no media or show alongside media */}
+                            {!messageContent.trim() && uploadedAttachments.length === 0 && selectedFiles.filter(f => !Array.from(uploadingFiles.values()).includes(f)).length === 0 && (
+                              <div className="absolute right-2 bottom-2 flex items-center gap-1">
+                                <button
+                                  onClick={() => fileInputRef.current?.click()}
+                                  className="p-2 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors active:scale-95"
+                                  title="Attach file"
+                                >
+                                  <Paperclip className="w-4 h-4 sm:w-5 sm:h-5" />
+                                </button>
+                                <button
+                                  onClick={() => imageInputRef.current?.click()}
+                                  className="p-2 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors active:scale-95"
+                                  title="Attach image"
+                                >
+                                  <ImageIcon className="w-4 h-4 sm:w-5 sm:h-5" />
+                                </button>
+                                <button
+                                  onMouseDown={startRecording}
+                                  onMouseUp={stopRecording}
+                                  onTouchStart={startRecording}
+                                  onTouchEnd={stopRecording}
+                                  className={`p-2 rounded-lg transition-all active:scale-95 relative ${
+                                    isRecording 
+                                      ? 'bg-red-500 hover:bg-red-600 text-white animate-pulse' 
+                                      : 'hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400 hover:text-red-500'
+                                  }`}
+                                  title={isRecording ? `Recording... ${formatRecordingDuration(recordingDuration)}` : "Hold to record voice note"}
+                                >
+                                  <Mic className={`w-4 h-4 sm:w-5 sm:h-5 ${isRecording ? 'animate-pulse' : ''}`} />
+                                  {isRecording && (
+                                    <span className="absolute -top-1 -right-1 w-3 h-3 bg-red-600 rounded-full border-2 border-white dark:border-gray-800 animate-ping" />
+                                  )}
+                                </button>
+                              </div>
+                            )}
+                            {/* Show attachment icons when media is selected (for adding more) */}
+                            {(selectedFiles.filter(f => !Array.from(uploadingFiles.values()).includes(f)).length > 0 || uploadedAttachments.length > 0) && (
+                              <div className="absolute right-2 bottom-2 flex items-center gap-0.5 sm:gap-1">
+                                <button
+                                  onClick={() => fileInputRef.current?.click()}
+                                  className="p-1.5 sm:p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors active:scale-95"
+                                  title="Add more files"
+                                >
+                                  <Plus className="w-4 h-4 sm:w-5 sm:h-5" />
+                                </button>
+                              </div>
+                            )}
+                          </div>
                         </div>
-                        {/* Send button (shown when typing or has attachments) */}
-                        {(messageContent.trim() || uploadedAttachments.length > 0 || selectedFiles.length > 0) && (
+                        {/* Send button - Show when typing OR when media is selected (WhatsApp style: can send media without text) */}
+                        {(messageContent.trim() || uploadedAttachments.length > 0 || selectedFiles.filter(f => !Array.from(uploadingFiles.values()).includes(f)).length > 0) && (
                           <button
                             onClick={handleSendMessage}
                             disabled={sending}
@@ -1394,8 +2248,8 @@ const InboxPage: React.FC = () => {
                         )}
                       </>
                     )}
-                  </div>
-                </div>
+          </div>
+        </div>
               </>
             ) : (
               <div className="flex flex-col items-center justify-center h-full text-gray-500 dark:text-gray-400 p-6 sm:p-8">
@@ -1414,7 +2268,7 @@ const InboxPage: React.FC = () => {
                   <Plus className="w-3 h-3 sm:w-4 sm:h-4" />
                   Start New Conversation
                 </button>
-              </div>
+      </div>
             )}
           </div>
         </div>
@@ -1505,13 +2359,18 @@ const InboxPage: React.FC = () => {
               </button>
               <button
                 type="submit"
-                disabled={!newThreadSubject.trim() || !newThreadBuyerId || loadingBuyers || availableBuyers.length === 0}
+                disabled={!newThreadSubject.trim() || !newThreadBuyerId || loadingBuyers || availableBuyers.length === 0 || creatingThread}
                 className="px-4 py-2 rounded-lg bg-gradient-to-r from-red-500 to-orange-500 hover:from-red-600 hover:to-orange-600 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-semibold text-white transition-all active:scale-95"
               >
                 {loadingBuyers ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin inline mr-2" />
                     Loading...
+                  </>
+                ) : creatingThread ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin inline mr-2" />
+                    Creating...
                   </>
                 ) : availableBuyers.length === 0 ? (
                   'No Buyers Available'

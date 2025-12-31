@@ -13,6 +13,7 @@ import {
 import { useAuthStore } from '../../stores/authStore';
 import { useCartStore } from '../../stores/cartStore';
 import { useWishlistStore } from '../../stores/wishlistStore';
+import { useNotificationStore } from '../../stores/notificationStore';
 import { useTheme } from '../../contexts/ThemeContext';
 
 // Helper to resolve avatar URL (handles both full URLs and relative paths)

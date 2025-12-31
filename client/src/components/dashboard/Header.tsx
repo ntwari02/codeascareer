@@ -4,8 +4,8 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { Bell, Menu, Search, User, Sun, Moon, ChevronDown, Settings, Package, BarChart3, ShoppingBag, LogOut, Store, Layers } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useTheme } from '@/contexts/ThemeContext';
-import { ChatWidget } from '@/components/buyer/ChatWidget';
 import { useAuthStore } from '@/stores/authStore';
+import { useNotificationStore } from '@/stores/notificationStore';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 
 // Helper to resolve avatar URL (handles both full URLs and relative paths)
@@ -50,9 +50,10 @@ const Header: React.FC<HeaderProps> = ({
   userRole,
   accentVariant = 'emerald',
 }) => {
-  const notificationCount = 2; // This will be dynamic based on actual notifications
   const { theme, toggleTheme } = useTheme();
   const { user, signOut } = useAuthStore();
+  const { unreadMessageCount } = useNotificationStore();
+  const notificationCount = unreadMessageCount; // Dynamic based on unread messages
   const navigate = useNavigate();
   const location = useLocation();
   const [showUserMenu, setShowUserMenu] = useState(false);
@@ -61,7 +62,10 @@ const Header: React.FC<HeaderProps> = ({
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   
   // Force re-render when user.avatar_url changes
-  const avatarUrl = user?.avatar_url;
+  // Handle both snake_case (avatar_url) and camelCase (avatarUrl) for compatibility
+  // Ensure avatarUrl is a non-empty string
+  const avatarUrl = (user?.avatar_url || (user as any)?.avatarUrl || '').trim();
+  const hasAvatar = avatarUrl && avatarUrl.length > 0;
 
   const isSeller = location.pathname.startsWith('/seller');
   const isAdmin = location.pathname.startsWith('/admin');
@@ -69,6 +73,7 @@ const Header: React.FC<HeaderProps> = ({
   // Listen for avatar updates and user state changes
   useEffect(() => {
     const handleAvatarUpdate = () => {
+      console.log('[Header] Avatar update event received, forcing re-render');
       setAvatarKey(prev => prev + 1); // Force image re-render
     };
     window.addEventListener('avatarUpdated', handleAvatarUpdate);
@@ -77,10 +82,22 @@ const Header: React.FC<HeaderProps> = ({
 
   // Also react to user.avatar_url changes from Zustand
   useEffect(() => {
-    if (avatarUrl) {
+    console.log('[Header] Avatar URL changed:', avatarUrl, 'hasAvatar:', hasAvatar);
+    if (hasAvatar) {
       setAvatarKey(prev => prev + 1); // Force re-render when avatar URL changes
     }
-  }, [avatarUrl]);
+  }, [avatarUrl, hasAvatar]);
+  
+  // Also react to user object changes
+  useEffect(() => {
+    if (user) {
+      const currentAvatarUrl = (user.avatar_url || (user as any)?.avatarUrl || '').trim();
+      if (currentAvatarUrl && currentAvatarUrl.length > 0) {
+        console.log('[Header] User object changed, avatar URL:', currentAvatarUrl);
+        setAvatarKey(prev => prev + 1);
+      }
+    }
+  }, [user]);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -154,8 +171,6 @@ const Header: React.FC<HeaderProps> = ({
       </div>
 
       <div className="flex items-center gap-3">
-        <ChatWidget variant="header" />
-
         <motion.button
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
@@ -201,20 +216,33 @@ const Header: React.FC<HeaderProps> = ({
               aria-label="User menu"
               title="User menu"
             >
-              <div className={`w-10 h-10 ${accent.avatarBg} rounded-full flex items-center justify-center overflow-hidden cursor-pointer hover:opacity-90 hover:ring-2 hover:ring-offset-2 hover:ring-gray-300 dark:hover:ring-gray-600 transition-all`}>
-                {user?.avatar_url ? (
-                  <img
-                    key={`${user.avatar_url}-${user.updated_at || Date.now()}-${avatarKey}`} // Force re-render when avatar changes
-                    src={resolveAvatarUrl(user.avatar_url, true) || ''} // Cache-bust to ensure fresh image
-                    alt={user.full_name || user.email || userName}
-                    className="w-full h-full object-cover"
-                    loading="eager" // Load immediately, don't lazy load
-                  />
-                ) : (
-                  <User className="w-6 h-6 text-white" />
-                )}
-              </div>
-              <ChevronDown className="h-4 w-4 text-gray-400 hidden md:block" />
+              {avatarUrl ? (
+                <img
+                  key={`${avatarUrl}-${user?.updated_at || Date.now()}-${avatarKey}`} // Force re-render when avatar changes
+                  src={resolveAvatarUrl(avatarUrl, true) || ''} // Cache-bust to ensure fresh image
+                  alt={user?.full_name || user?.email || userName}
+                  className="w-7 h-7 sm:w-8 sm:h-8 rounded-full object-cover relative cursor-pointer hover:opacity-90 hover:ring-2 hover:ring-offset-2 hover:ring-gray-300 dark:hover:ring-gray-600 transition-all"
+                  loading="eager" // Load immediately, don't lazy load
+                  onError={(e) => {
+                    console.error('[Header] Failed to load avatar image:', avatarUrl);
+                    // Fallback to default icon on error
+                    const target = e.target as HTMLImageElement;
+                    target.style.display = 'none';
+                    const parent = target.parentElement;
+                    if (parent && !parent.querySelector('.fallback-icon')) {
+                      const fallback = document.createElement('div');
+                      fallback.className = 'fallback-icon w-7 h-7 sm:w-8 sm:h-8 bg-gradient-to-br from-emerald-500 via-teal-500 to-cyan-500 rounded-full flex items-center justify-center';
+                      fallback.innerHTML = '<svg class="h-4 w-4 sm:h-5 sm:w-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>';
+                      parent.appendChild(fallback);
+                    }
+                  }}
+                />
+              ) : (
+                <div className={`w-7 h-7 sm:w-8 sm:h-8 ${accent.avatarBg} rounded-full flex items-center justify-center cursor-pointer hover:opacity-90 hover:ring-2 hover:ring-offset-2 hover:ring-gray-300 dark:hover:ring-gray-600 transition-all`}>
+                  <User className="h-4 w-4 sm:h-5 sm:w-5 text-white" />
+                </div>
+              )}
+              <ChevronDown className="h-3 w-3 sm:h-4 sm:w-4 text-gray-400 hidden md:block" />
             </motion.button>
             {showUserMenu && (
               <>
