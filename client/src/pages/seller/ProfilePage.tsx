@@ -836,20 +836,49 @@ const ProfilePage: React.FC = () => {
       // Update preview with the uploaded URL
       setAvatarPreview(resolveAvatarUrl(uploadedAvatarUrl));
 
-      // Immediately update user state with new avatar URL
-      if (user) {
-        const updatedUser = {
-          ...user,
-          avatar_url: uploadedAvatarUrl,
-          updated_at: new Date().toISOString(),
+      // Refresh user data from backend to ensure we have the latest avatar URL
+      try {
+        const { authAPI } = await import('@/lib/api');
+        const currentUserData = await authAPI.getCurrentUser();
+        
+        // Map backend user to Profile format
+        const updatedUserProfile = {
+          id: currentUserData.user._id?.toString() || currentUserData.user.id?.toString() || user?.id || '',
+          email: currentUserData.user.email || user?.email || '',
+          full_name: currentUserData.user.fullName || user?.full_name || '',
+          role: currentUserData.user.role || user?.role || 'seller',
+          seller_status: currentUserData.user.sellerVerificationStatus || user?.seller_status,
+          seller_verified: currentUserData.user.isSellerVerified || user?.seller_verified || false,
+          phone: currentUserData.user.phone || user?.phone,
+          avatar_url: currentUserData.user.avatarUrl || uploadedAvatarUrl, // Use backend value or fallback to uploaded URL
+          created_at: currentUserData.user.createdAt || user?.created_at || new Date().toISOString(),
+          updated_at: currentUserData.user.updatedAt || new Date().toISOString(),
         };
-        setUser(updatedUser);
-        localStorage.setItem('user', JSON.stringify(updatedUser));
+        
+        // Update Zustand store
+        setUser(updatedUserProfile);
+        localStorage.setItem('user', JSON.stringify(updatedUserProfile));
 
-        // Trigger avatar update event immediately
+        // Trigger avatar update event immediately to force header re-render
         window.dispatchEvent(new CustomEvent('avatarUpdated', {
-          detail: { avatarUrl: uploadedAvatarUrl }
+          detail: { avatarUrl: updatedUserProfile.avatar_url }
         }));
+      } catch (refreshError) {
+        // If refresh fails, still update with the uploaded URL
+        console.warn('Failed to refresh user data, using uploaded URL:', refreshError);
+        if (user) {
+          const updatedUser = {
+            ...user,
+            avatar_url: uploadedAvatarUrl,
+            updated_at: new Date().toISOString(),
+          };
+          setUser(updatedUser);
+          localStorage.setItem('user', JSON.stringify(updatedUser));
+          
+          window.dispatchEvent(new CustomEvent('avatarUpdated', {
+            detail: { avatarUrl: uploadedAvatarUrl }
+          }));
+        }
       }
 
       showToast('Profile picture updated successfully', 'success');

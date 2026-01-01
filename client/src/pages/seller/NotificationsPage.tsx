@@ -11,7 +11,7 @@ import {
   TrendingDown,
   Settings,
 } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 
 interface Notification {
   id: number;
@@ -30,6 +30,7 @@ interface Notification {
 }
 
 const NotificationsPage: React.FC = () => {
+  const navigate = useNavigate();
   const [activeFilter, setActiveFilter] = useState<string>('all');
   const [notifications, setNotifications] = useState<Notification[]>([
     {
@@ -259,13 +260,16 @@ const NotificationsPage: React.FC = () => {
                           {notification.date}
                         </p>
                         {notification.actionLink && notification.actionLabel && (
-                          <Link
-                            to={notification.actionLink}
-                            onClick={(e) => e.stopPropagation()}
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              // Use navigate to ensure proper routing within seller dashboard
+                              navigate(notification.actionLink!);
+                            }}
                             className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-orange-600 dark:text-orange-400 hover:text-orange-700 dark:hover:text-orange-500 hover:bg-orange-50 dark:hover:bg-orange-900/20 rounded-lg transition-colors"
                           >
                             {notification.actionLabel}
-                          </Link>
+                          </button>
                         )}
                       </div>
                     </div>

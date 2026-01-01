@@ -28,6 +28,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { AudioWave } from '@/components/AudioWave';
 import { ImageLightbox } from '@/components/ImageLightbox';
 import { UploadProgress } from '@/components/UploadProgress';
+import ChatIndicator from '@/components/ChatIndicator';
 
 // Get server base URL for file attachments
 const getFileUrl = (path: string): string => {
@@ -97,6 +98,7 @@ const InboxPage: React.FC = () => {
   // Real-time indicators state
   const [isTyping, setIsTyping] = useState(false);
   const [typingUserId, setTypingUserId] = useState<string | null>(null);
+  const [typingUserName, setTypingUserName] = useState<string | null>(null);
   const [isRecordingIndicator, setIsRecordingIndicator] = useState(false);
   const [recordingUserId, setRecordingUserId] = useState<string | null>(null);
   const [recordingDurationIndicator, setRecordingDurationIndicator] = useState(0);
@@ -112,6 +114,7 @@ const InboxPage: React.FC = () => {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordingIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const recordingStreamRef = useRef<MediaStream | null>(null); // Store stream to keep it alive
   // Store chunks in ref to ensure they persist across function calls
   const recordingChunksRef = useRef<Blob[]>([]);
   const recordingMimeTypeRef = useRef<string>('audio/webm');
@@ -173,6 +176,17 @@ const InboxPage: React.FC = () => {
   const handleSendMessage = async () => {
     if (!activeThread) return;
     if (sending) return;
+    
+    // Reset typing indicator when message is sent
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = null;
+    }
+    // Emit stop typing event when message is sent
+    websocketService.sendTyping(activeThread._id, false);
+    setIsTyping(false);
+    setTypingUserId(null);
+    setTypingUserName(null);
     
     // If recording, stop it first
     if (isRecording) {
@@ -383,18 +397,19 @@ const InboxPage: React.FC = () => {
       // Clear previous chunks
       recordingChunksRef.current = [];
       
-      // Request microphone with proper audio constraints (FIXED: Ensure all constraints are set)
-      const audioConstraints: MediaTrackConstraints = {
-        channelCount: 1,
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
-        sampleRate: 44100,
-      };
-      
+      // A) Recording setup - Use exact getUserMedia config
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio: audioConstraints
+        audio: {
+          channelCount: 1,
+          sampleRate: 48000,
+          noiseSuppression: true,
+          echoCancellation: true,
+          autoGainControl: true
+        }
       });
+      
+      // Store stream in ref to keep it alive until recording stops
+      recordingStreamRef.current = stream;
       
       console.log('[Voice Recording] Microphone access granted, stream active:', stream.active);
       const audioTracks = stream.getAudioTracks();
@@ -406,56 +421,48 @@ const InboxPage: React.FC = () => {
         settings: t.getSettings()
       })));
       
-      // Verify track is not muted
-      if (audioTracks.length > 0 && audioTracks[0].muted) {
+      // Verify track is active and not muted
+      if (audioTracks.length === 0) {
+        throw new Error('No audio tracks available');
+      }
+      
+      const audioTrack = audioTracks[0];
+      if (audioTrack.muted) {
         console.warn('[Voice Recording] WARNING: Audio track is muted!');
-        audioTracks[0].enabled = true;
+        audioTrack.enabled = true;
       }
       
-      // Detect best supported mime type for MediaRecorder (FIXED: Proper fallback chain)
-      let selectedMimeType = 'audio/webm'; // Default fallback
-      const mimeTypes = [
-        'audio/webm;codecs=opus',
-        'audio/webm',
-        'audio/ogg;codecs=opus',
-        'audio/ogg',
-        'audio/mp4',
-        'audio/wav'
-      ];
-      
-      for (const mimeType of mimeTypes) {
-        if (MediaRecorder.isTypeSupported(mimeType)) {
-          selectedMimeType = mimeType;
-          console.log('[Voice Recording] Using supported mime type:', selectedMimeType);
-          break;
-        }
+      // Ensure track is active
+      if (audioTrack.readyState !== 'live') {
+        console.warn('[Voice Recording] WARNING: Audio track is not live!');
       }
       
-      if (!MediaRecorder.isTypeSupported(selectedMimeType)) {
-        console.warn('[Voice Recording] WARNING: Selected mime type not supported, using default');
-        selectedMimeType = 'audio/webm';
-      }
+      // A) MediaRecorder MUST use a supported codec
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+        ? "audio/webm;codecs=opus"
+        : "audio/ogg;codecs=opus";
+      
+      console.log('[Voice Recording] Using mime type:', mimeType);
       
       // Store mime type in ref
-      recordingMimeTypeRef.current = selectedMimeType;
+      recordingMimeTypeRef.current = mimeType;
       
-      // Create MediaRecorder with detected mime type (FIXED: Ensure proper configuration)
-      const mediaRecorder = new MediaRecorder(stream, {
-        mimeType: selectedMimeType,
-        audioBitsPerSecond: 128000, // 128 kbps for good quality
-      });
+      // Create MediaRecorder with supported codec
+      const mediaRecorder = new MediaRecorder(stream, { mimeType });
       
-      console.log('[Voice Recording] MediaRecorder created with mimeType:', selectedMimeType);
+      console.log('[Voice Recording] MediaRecorder created with mimeType:', mimeType);
       console.log('[Voice Recording] MediaRecorder state:', mediaRecorder.state);
       
       mediaRecorderRef.current = mediaRecorder;
       
-      // Collect data chunks - use timeslice to ensure regular data collection (FIXED: Use ref for chunks)
+      // Collect data chunks - use timeslice to ensure regular data collection
+      // CRITICAL: Store chunks in ref to ensure they persist across function calls
       mediaRecorder.ondataavailable = (e) => {
         console.log('[Voice Recording] Data available, chunk size:', e.data.size, 'bytes');
         if (e.data && e.data.size > 0) {
           recordingChunksRef.current.push(e.data);
-          console.log('[Voice Recording] Chunk added. Total chunks:', recordingChunksRef.current.length, 'Total size:', recordingChunksRef.current.reduce((sum, chunk) => sum + chunk.size, 0), 'bytes');
+          const totalSize = recordingChunksRef.current.reduce((sum, chunk) => sum + chunk.size, 0);
+          console.log('[Voice Recording] Chunk added. Total chunks:', recordingChunksRef.current.length, 'Total size:', totalSize, 'bytes');
         } else {
           console.warn('[Voice Recording] WARNING: Received empty chunk!');
         }
@@ -482,13 +489,19 @@ const InboxPage: React.FC = () => {
         console.log('[Voice Recording] Blob type:', blob.type);
         console.log('[Voice Recording] Blob size validation:', blob.size > 0 ? 'PASS' : 'FAIL');
         
-        // Verify blob is not empty (FIXED: Strong validation)
+        // CRITICAL: Verify blob is not empty - strong validation
         if (blob.size === 0) {
           console.error('[Voice Recording] ERROR: Blob is empty! No audio data captured.');
           console.error('[Voice Recording] Chunks count:', recordingChunksRef.current.length);
           console.error('[Voice Recording] Total chunks size:', totalSize);
           showToast('Recording failed: No audio data captured', 'error');
-          stream.getTracks().forEach(track => track.stop());
+          
+          // Stop stream tracks
+          if (recordingStreamRef.current) {
+            recordingStreamRef.current.getTracks().forEach(track => track.stop());
+            recordingStreamRef.current = null;
+          }
+          
           recordingChunksRef.current = [];
           return;
         }
@@ -504,6 +517,7 @@ const InboxPage: React.FC = () => {
         else if (mimeType.includes('mp4')) extension = 'm4a';
         else if (mimeType.includes('wav')) extension = 'wav';
         
+        // Create File from blob with correct type for multipart/form-data upload
         const file = new File([blob], `voice-${Date.now()}.${extension}`, { type: mimeType });
         console.log('[Voice Recording] File created:', file.name, 'size:', file.size, 'bytes', 'type:', file.type);
         
@@ -512,12 +526,18 @@ const InboxPage: React.FC = () => {
           console.error('[Voice Recording] ERROR: File size mismatch! Blob:', blob.size, 'File:', file.size);
         }
         
-        // Use functional update to ensure we get the latest selectedFiles
+        // Add file to selected files - waveform UI will appear after blob exists
         setSelectedFiles((prev) => [...prev, file]);
-        stream.getTracks().forEach(track => {
-          track.stop();
-          console.log('[Voice Recording] Audio track stopped:', track.label);
-        });
+        
+        // Stop stream tracks AFTER blob is created and file is ready
+        // CRITICAL: Don't stop stream until after blob is created
+        if (recordingStreamRef.current) {
+          recordingStreamRef.current.getTracks().forEach(track => {
+            track.stop();
+            console.log('[Voice Recording] Audio track stopped:', track.label);
+          });
+          recordingStreamRef.current = null;
+        }
         
         // Clear chunks after use
         recordingChunksRef.current = [];
@@ -529,10 +549,17 @@ const InboxPage: React.FC = () => {
         }
       };
       
-      // Start recording with timeslice to ensure regular data collection (every 100ms) (FIXED: Timeslice ensures data collection)
+      // Start recording with timeslice to ensure regular data collection
+      // CRITICAL: Use timeslice (100ms) to ensure chunks are collected regularly
       mediaRecorder.start(100);
       console.log('[Voice Recording] MediaRecorder started, state:', mediaRecorder.state);
       console.log('[Voice Recording] Recording started with 100ms timeslice');
+      
+      // Verify MediaRecorder is in recording state
+      if (mediaRecorder.state !== 'recording') {
+        console.error('[Voice Recording] ERROR: MediaRecorder not in recording state! State:', mediaRecorder.state);
+        throw new Error('Failed to start recording');
+      }
       
       setIsRecording(true);
       setRecordingDuration(0);
@@ -546,8 +573,12 @@ const InboxPage: React.FC = () => {
       console.error('[Voice Recording] Error message:', error.message);
       console.error('[Voice Recording] Error stack:', error.stack);
       
-      // Clear chunks on error
+      // Clear chunks and stop stream on error
       recordingChunksRef.current = [];
+      if (recordingStreamRef.current) {
+        recordingStreamRef.current.getTracks().forEach(track => track.stop());
+        recordingStreamRef.current = null;
+      }
       
       if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
         showToast('Microphone permission denied. Please allow microphone access.', 'error');
@@ -566,16 +597,28 @@ const InboxPage: React.FC = () => {
       
       console.log('[Voice Recording] Stopping recording, duration:', currentDuration, 'seconds');
       console.log('[Voice Recording] MediaRecorder state before stop:', mediaRecorderRef.current.state);
+      console.log('[Voice Recording] Total chunks before stop:', recordingChunksRef.current.length);
       
-      // Request final data before stopping
-      if (mediaRecorderRef.current.state === 'recording') {
-        mediaRecorderRef.current.requestData();
+      // CRITICAL: Request final data chunk before stopping to ensure all audio is captured
+      try {
+        if (mediaRecorderRef.current.state === 'recording') {
+          mediaRecorderRef.current.requestData();
+          // Small delay to ensure final data chunk is collected
+          await new Promise(resolve => setTimeout(resolve, 150));
+        }
+      } catch (error) {
+        console.warn('[Voice Recording] Warning: Could not request final data:', error);
       }
       
-      mediaRecorderRef.current.stop();
+      // Stop the MediaRecorder - onstop handler will process chunks
+      if (mediaRecorderRef.current.state === 'recording') {
+        mediaRecorderRef.current.stop();
+      }
+      
       setIsRecording(false);
       if (recordingIntervalRef.current) {
         clearInterval(recordingIntervalRef.current);
+        recordingIntervalRef.current = null;
       }
       
       console.log('[Voice Recording] MediaRecorder state after stop:', mediaRecorderRef.current.state);
@@ -864,10 +907,13 @@ const InboxPage: React.FC = () => {
         const buyerName = typeof thread?.buyerId === 'object' 
           ? (thread.buyerId.fullName || 'Buyer')
           : 'Buyer';
+        const avatarUrl = typeof thread?.buyerId === 'object' && thread.buyerId.avatarUrl 
+          ? (resolveAvatarUrl(thread.buyerId.avatarUrl) ?? undefined)
+          : undefined;
         showNotification(
           buyerName,
           message.content.substring(0, 50) + (message.content.length > 50 ? '...' : ''),
-          typeof thread?.buyerId === 'object' ? resolveAvatarUrl(thread.buyerId.avatarUrl) : undefined
+          avatarUrl
         );
         showToast(`New message from ${buyerName}`, 'info');
       }
@@ -894,9 +940,45 @@ const InboxPage: React.FC = () => {
       loadThreads();
     };
 
+    /**
+     * Listen for incoming typing events from other users
+     * - Only show if senderId is current chat partner and isTyping = true
+     * - Hide typing text if isTyping = false
+     * - Prevents flickering with proper state management
+     */
+    websocketService.onUserTyping = (threadId: string, userId: string, userName: string, isTyping: boolean) => {
+      // Only show typing indicator if it's for the current thread and not from current user
+      if (activeThread?._id === threadId && userId !== user?.id) {
+        if (isTyping) {
+          // Show typing indicator with smooth fade-in
+          setIsTyping(true);
+          setTypingUserId(userId);
+          setTypingUserName(userName || null);
+        } else {
+          // Hide typing indicator with smooth fade-out (after short delay to prevent flickering)
+          setTimeout(() => {
+            setIsTyping(false);
+            setTypingUserId(null);
+            setTypingUserName(null);
+          }, 500); // Small delay to prevent flickering on fast typing
+        }
+      }
+    };
+
     // Cleanup
     return () => {
+      // Reset typing indicator when leaving conversation
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+        typingTimeoutRef.current = null;
+      }
+      setIsTyping(false);
+      setTypingUserId(null);
+      setTypingUserName(null);
+      
       if (activeThread) {
+        // Send stop typing before leaving thread
+        websocketService.sendTyping(activeThread._id, false);
         websocketService.leaveThread(activeThread._id);
       }
     };
@@ -952,19 +1034,36 @@ const InboxPage: React.FC = () => {
     };
   }, [loadThreads, threads.length, loading, showToast]);
 
-  // Typing indicator
+  /**
+   * Handle typing indicator with proper debounce
+   * - Emits typing event when user starts typing (input not empty)
+   * - Uses 400ms debounce before sending "stop typing" event
+   * - Prevents flickering with proper state management
+   */
   const handleTyping = () => {
     if (!activeThread) return;
     
+    const hasContent = messageContent.trim().length > 0;
+    
+    // Clear existing timeout
     if (typingTimeoutRef.current) {
       clearTimeout(typingTimeoutRef.current);
     }
     
-    websocketService.sendTyping(activeThread._id, true);
-    
-    typingTimeoutRef.current = setTimeout(() => {
+    // If input has content, emit typing started event
+    if (hasContent) {
+      // Emit typing event: { senderId, receiverId, isTyping: true }
+      websocketService.sendTyping(activeThread._id, true);
+      
+      // Set timeout to emit stop typing after 400ms of no typing (debounce)
+      typingTimeoutRef.current = setTimeout(() => {
+        // Emit typing event: { senderId, receiverId, isTyping: false }
+        websocketService.sendTyping(activeThread._id, false);
+      }, 400); // 400ms debounce to prevent flickering
+    } else {
+      // Input is empty, immediately emit stop typing
       websocketService.sendTyping(activeThread._id, false);
-    }, 1000);
+    }
   };
 
   return (
@@ -1089,7 +1188,6 @@ const InboxPage: React.FC = () => {
                     }`}
                   >
                     {/* Buyer Avatar */}
-<<<<<<< HEAD
                     <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-xs sm:text-sm font-semibold text-white flex-shrink-0 overflow-hidden">
                       {typeof thread.buyerId === 'object' && thread.buyerId.avatarUrl && thread.buyerId.avatarUrl.trim() ? (
                         <img
@@ -1145,17 +1243,6 @@ const InboxPage: React.FC = () => {
                             {formatTime(thread.lastMessageAt)}
                           </span>
                       </div>
-                      <p className="text-xs text-gray-700 dark:text-gray-300 line-clamp-1">{thread.subject}</p>
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="text-[11px] text-gray-500 dark:text-gray-400 line-clamp-1">
-                            {thread.lastMessagePreview}
-                        </p>
-                        <div className="flex items-center gap-1">
-                          {thread.sellerUnreadCount > 0 && (
-                            <span className="w-2 h-2 rounded-full bg-red-500 dark:bg-red-400 flex-shrink-0" />
-                          )}
->>>>>>> c6abe0e33842de587eb46e6f3a68efa1ad54fa15
-                        </div>
                       </div>
                     </div>
                   </button>
@@ -1221,9 +1308,23 @@ const InboxPage: React.FC = () => {
                           {typeof activeThread.buyerId === 'object' ? activeThread.buyerId.fullName : 'Buyer'}
                         </p>
                         <span className="text-[10px] text-green-500 hidden sm:inline">●</span>
-                </div>
-                      <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 truncate">{activeThread.subject}</p>
-              </div>
+                      </div>
+                      {/* Typing Indicator - Show under receiver's name in header (WhatsApp style) */}
+                      {isTyping && typingUserId ? (
+                        <div className="flex items-center gap-1.5 mt-0.5 animate-fadeIn transition-opacity duration-200">
+                          <div className="flex gap-0.5">
+                            <div className="w-1 h-1 bg-gray-500 dark:bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                            <div className="w-1 h-1 bg-gray-500 dark:bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                            <div className="w-1 h-1 bg-gray-500 dark:bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                          </div>
+                          <span className="text-[11px] text-gray-500 dark:text-gray-400 italic">
+                            {typingUserName || (typeof activeThread.buyerId === 'object' ? activeThread.buyerId.fullName : 'Buyer')} is typing...
+                          </span>
+                        </div>
+                      ) : (
+                        <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 truncate animate-fadeIn transition-opacity duration-200">{activeThread.subject}</p>
+                      )}
+                    </div>
               </div>
                   <div className="hidden sm:flex items-center gap-2 flex-shrink-0">
                     {activeThread.type === 'rfq' && (
@@ -1440,23 +1541,55 @@ const InboxPage: React.FC = () => {
                                                     a.currentTime = 0;
                                                   });
                                                   
-                                                  // Ensure audio is ready and has volume
-                                                  audio.volume = 1.0;
+                                                  // C) Audio element MUST NOT be muted
                                                   audio.muted = false;
+                                                  audio.volume = 1;
                                                   
-                                                  // Load the audio if not loaded
-                                                  if (audio.readyState < 2) {
-                                                    audio.load();
-                                                    await new Promise((resolve, reject) => {
-                                                      audio.oncanplay = resolve;
-                                                      audio.onerror = reject;
-                                                      setTimeout(reject, 5000); // Timeout after 5 seconds
-                                                    });
+                                                  console.log('[Audio Playback] Audio element state:', {
+                                                    src: audio.src,
+                                                    volume: audio.volume,
+                                                    muted: audio.muted,
+                                                    readyState: audio.readyState,
+                                                    paused: audio.paused
+                                                  });
+                                                  
+                                                  // C) Before playing: load and play
+                                                  audio.load();
+                                                  
+                                                  // Wait for audio to be ready
+                                                  await new Promise((resolve, reject) => {
+                                                    const timeout = setTimeout(() => {
+                                                      reject(new Error('Audio load timeout'));
+                                                    }, 5000);
+                                                  
+                                                    audio.oncanplay = () => {
+                                                      clearTimeout(timeout);
+                                                      console.log('[Audio Playback] Audio can play');
+                                                      resolve(null);
+                                                    };
+                                                    
+                                                    audio.onerror = (e) => {
+                                                      clearTimeout(timeout);
+                                                      console.error('[Audio Playback] Load error:', e, audio.error);
+                                                      reject(new Error('Failed to load audio'));
+                                                    };
+                                                  });
+                                                  
+                                                  // C) Play the audio with error handling
+                                                  console.log('[Audio Playback] Attempting to play audio...');
+                                                  try {
+                                                    await audio.play();
+                                                    console.log('[Audio Playback] Audio playing successfully');
+                                                    setPlayingAudioId(audioId);
+                                                  } catch (playError: any) {
+                                                    console.error('[Audio Playback] Play error:', playError);
+                                                    // D) Mobile support: Safari requires user gesture
+                                                    if (playError.name === 'NotAllowedError') {
+                                                      showToast('Please tap the play button to start audio', 'info');
+                                                    } else {
+                                                      throw playError;
+                                                    }
                                                   }
-                                                  
-                                                  // Play the audio
-                                                  await audio.play();
-                                                  setPlayingAudioId(audioId);
                                                   
                                                   // Set up event handlers
                                                   audio.onended = () => {
@@ -1485,10 +1618,18 @@ const InboxPage: React.FC = () => {
                                               }
                                             }
                                           }}
-                                          className="w-8 h-8 rounded-full bg-red-500 hover:bg-red-600 flex items-center justify-center text-white transition-colors flex-shrink-0"
+                                          className={`w-8 h-8 rounded-full flex items-center justify-center text-white transition-all flex-shrink-0 relative ${
+                                            playingAudioId === `audio-${message._id}-${idx}`
+                                              ? 'bg-red-600 hover:bg-red-700 animate-pulse shadow-lg'
+                                              : 'bg-red-500 hover:bg-red-600'
+                                          }`}
+                                          title={playingAudioId === `audio-${message._id}-${idx}` ? 'Stop playback' : 'Play voice note'}
                                         >
                                           {playingAudioId === `audio-${message._id}-${idx}` ? (
-                                            <X className="w-4 h-4" />
+                                            <>
+                                              <X className="w-4 h-4" />
+                                              <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-400 rounded-full animate-ping" />
+                                            </>
                                           ) : (
                                             <Play className="w-4 h-4 ml-0.5" />
                                           )}
@@ -1511,8 +1652,27 @@ const InboxPage: React.FC = () => {
                                             crossOrigin="anonymous"
                                             ref={(el) => {
                                               if (el) {
+                                                // CRITICAL: Ensure audio has correct volume and is not muted
                                                 el.volume = 1.0;
                                                 el.muted = false;
+                                                
+                                                // Log audio element state for debugging
+                                                console.log('[Audio Element] Initialized:', {
+                                                  src: el.src,
+                                                  volume: el.volume,
+                                                  muted: el.muted,
+                                                  readyState: el.readyState
+                                                });
+                                                
+                                                // Add error handler
+                                                el.onerror = (e) => {
+                                                  console.error('[Audio Element] Error loading audio:', e, el.error);
+                                                };
+                                                
+                                                // Log when audio can play
+                                                el.oncanplay = () => {
+                                                  console.log('[Audio Element] Audio can play:', el.src);
+                                                };
                                               }
                                             }}
                                           />
@@ -1643,20 +1803,15 @@ const InboxPage: React.FC = () => {
                       </div>
                     );
                   })}
-                  {/* Real-time Indicators */}
+                  {/* Real-time Indicators - Typing indicator in messages area */}
                   {isTyping && typingUserId && (
                     <div className="flex items-center gap-2 justify-start py-2">
-                      <div className="w-7 h-7 rounded-full bg-gray-300 dark:bg-gray-700 flex items-center justify-center text-[11px] text-gray-800 dark:text-gray-100 flex-shrink-0">
-                        <User className="w-4 h-4" />
-                      </div>
-                      <div className="bg-white dark:bg-gray-800 rounded-lg px-3 py-2 shadow-sm">
-                        <div className="flex gap-1">
-                          <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                          <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                          <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                        </div>
-                        <span className="text-[10px] text-gray-500 dark:text-gray-400 ml-2">typing...</span>
-                      </div>
+                      <ChatIndicator 
+                        status="typing" 
+                        userName={typingUserName || (typeof activeThread?.buyerId === 'object' ? (activeThread.buyerId.fullName || 'Buyer') : 'Buyer')}
+                        position="below"
+                        className="ml-2"
+                      />
                     </div>
                   )}
                   {isRecordingIndicator && recordingUserId && (
@@ -1690,6 +1845,15 @@ const InboxPage: React.FC = () => {
 
                 {/* Composer - Responsive */}
                 <div className="border-t border-gray-200 dark:border-gray-700/60 px-2 sm:px-3 md:px-4 py-2 sm:py-3 bg-white/90 dark:bg-gray-900/90">
+                  {/* Typing Indicator - Show above input area (WhatsApp style) */}
+                  {isTyping && typingUserId && (
+                    <ChatIndicator 
+                      status="typing" 
+                      userName={typingUserName || (typeof activeThread?.buyerId === 'object' ? (activeThread.buyerId.fullName || 'Buyer') : 'Buyer')}
+                      position="above"
+                      className="mb-2"
+                    />
+                  )}
                   {replyTo && (
                     <div className="mb-2 p-2.5 bg-gray-100 dark:bg-gray-800 rounded-lg border-l-4 border-red-500 flex items-start justify-between gap-2">
                       <div className="flex-1 min-w-0">
@@ -1972,11 +2136,34 @@ const InboxPage: React.FC = () => {
                               </div>
                             </div>
                           )}
+                          {/* Recording Indicator - Show above input when recording */}
+                          {isRecording && (
+                            <div className="mb-2 px-3 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg flex items-center gap-2">
+                              <div className="relative flex items-center justify-center">
+                                <Mic className="w-4 h-4 text-red-500" />
+                                <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-red-500 rounded-full animate-ping" />
+                              </div>
+                              <span className="text-sm font-medium text-red-600 dark:text-red-400">
+                                Recording: {formatRecordingDuration(recordingDuration)}
+                              </span>
+                              <div className="ml-auto flex items-center gap-1">
+                                <div className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse" style={{ animationDelay: '0ms' }} />
+                                <div className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse" style={{ animationDelay: '200ms' }} />
+                                <div className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse" style={{ animationDelay: '400ms' }} />
+                              </div>
+                            </div>
+                          )}
                           {/* Text Input Area */}
                           <div className="relative flex items-center">
                             <textarea
                               rows={2}
-                              placeholder={selectedFiles.filter(f => !Array.from(uploadingFiles.values()).includes(f)).length > 0 || uploadedAttachments.length > 0 ? "Add a caption (optional)" : "Type your reply..."}
+                              placeholder={
+                                isRecording 
+                                  ? `Recording... ${formatRecordingDuration(recordingDuration)}` 
+                                  : selectedFiles.filter(f => !Array.from(uploadingFiles.values()).includes(f)).length > 0 || uploadedAttachments.length > 0 
+                                    ? "Add a caption (optional)" 
+                                    : "Type your reply..."
+                              }
                               value={messageContent}
                               onChange={(e) => {
                                 setMessageContent(e.target.value);
@@ -1988,12 +2175,15 @@ const InboxPage: React.FC = () => {
                                   handleSendMessage();
                                 }
                               }}
-                              className={`w-full px-3 py-2 pr-20 bg-transparent text-xs focus:outline-none resize-none max-h-32 overflow-y-auto ${
-                                (selectedFiles.filter(f => !Array.from(uploadingFiles.values()).includes(f)).length > 0 || uploadedAttachments.length > 0) && !messageContent.trim()
-                                  ? 'text-red-500 dark:text-red-400 placeholder-red-400 dark:placeholder-red-500 border-red-300 dark:border-red-600'
-                                  : 'text-gray-900 dark:text-white'
+                              className={`w-full px-3 py-2 pr-20 bg-transparent text-xs focus:outline-none resize-none max-h-32 overflow-y-auto transition-colors ${
+                                isRecording
+                                  ? 'text-red-600 dark:text-red-400 placeholder-red-400 dark:placeholder-red-500 border-2 border-red-300 dark:border-red-600 bg-red-50 dark:bg-red-900/10'
+                                  : (selectedFiles.filter(f => !Array.from(uploadingFiles.values()).includes(f)).length > 0 || uploadedAttachments.length > 0) && !messageContent.trim()
+                                    ? 'text-red-500 dark:text-red-400 placeholder-red-400 dark:placeholder-red-500 border-red-300 dark:border-red-600'
+                                    : 'text-gray-900 dark:text-white'
                               }`}
                               style={{ minHeight: '44px' }}
+                              disabled={isRecording}
                             />
                             {/* Icons inside textarea - Show when no media or show alongside media */}
                             {!messageContent.trim() && uploadedAttachments.length === 0 && selectedFiles.filter(f => !Array.from(uploadingFiles.values()).includes(f)).length === 0 && (
@@ -2017,10 +2207,17 @@ const InboxPage: React.FC = () => {
                                   onMouseUp={stopRecording}
                                   onTouchStart={startRecording}
                                   onTouchEnd={stopRecording}
-                                  className="p-2 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg text-gray-600 dark:text-gray-400 hover:text-red-500 transition-colors active:scale-95"
-                                  title="Hold to record voice note"
+                                  className={`p-2 rounded-lg transition-all active:scale-95 relative ${
+                                    isRecording 
+                                      ? 'bg-red-500 hover:bg-red-600 text-white animate-pulse' 
+                                      : 'hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400 hover:text-red-500'
+                                  }`}
+                                  title={isRecording ? `Recording... ${formatRecordingDuration(recordingDuration)}` : "Hold to record voice note"}
                                 >
-                                  <Mic className="w-4 h-4 sm:w-5 sm:h-5" />
+                                  <Mic className={`w-4 h-4 sm:w-5 sm:h-5 ${isRecording ? 'animate-pulse' : ''}`} />
+                                  {isRecording && (
+                                    <span className="absolute -top-1 -right-1 w-3 h-3 bg-red-600 rounded-full border-2 border-white dark:border-gray-800 animate-ping" />
+                                  )}
                                 </button>
                               </div>
                             )}

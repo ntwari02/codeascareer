@@ -15,7 +15,7 @@ import {
   FileText,
   X,
 } from 'lucide-react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 
 interface Notification {
   id: number;
@@ -40,6 +40,7 @@ interface NotificationsProps {
 
 const Notifications: React.FC<NotificationsProps> = ({ isOpen, onClose }) => {
   const location = useLocation();
+  const navigate = useNavigate();
   const [activeFilter, setActiveFilter] = useState<string>('all');
   const [notifications, setNotifications] = useState<Notification[]>([
     {
@@ -98,7 +99,7 @@ const Notifications: React.FC<NotificationsProps> = ({ isOpen, onClose }) => {
       iconBg: 'bg-purple-100 dark:bg-purple-900/20',
       iconColor: 'text-purple-600 dark:text-purple-400',
       priority: 'medium',
-      actionLink: '/messages',
+      actionLink: '/seller/inbox',
       actionLabel: 'View Message',
       category: 'message',
     },
@@ -395,14 +396,19 @@ const Notifications: React.FC<NotificationsProps> = ({ isOpen, onClose }) => {
                                 {notification.date}
                               </p>
                               {notification.actionLink && notification.actionLabel && (
-                                <Link
-                                  to={notification.actionLink}
-                                  onClick={(e) => e.stopPropagation()}
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    // Close notifications panel when navigating
+                                    onClose();
+                                    // Use navigate to ensure proper routing within seller dashboard
+                                    navigate(notification.actionLink!);
+                                  }}
                                   className="flex items-center gap-1 text-xs font-semibold text-orange-600 dark:text-orange-400 hover:text-orange-700 dark:hover:text-orange-500 transition-colors"
                                 >
                                   {notification.actionLabel}
                                   <ExternalLink className="h-3 w-3" />
-                                </Link>
+                                </button>
                               )}
                             </div>
                           </div>
