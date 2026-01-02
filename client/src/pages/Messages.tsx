@@ -788,15 +788,38 @@ export function Messages() {
         const totalSize = recordingChunksRef.current.reduce((sum, chunk) => sum + chunk.size, 0);
         console.log('[Voice Recording] Total chunks size:', totalSize, 'bytes');
         
+        // CRITICAL: Verify we have chunks before creating blob
+        if (recordingChunksRef.current.length === 0) {
+          console.error('[Voice Recording] ERROR: No chunks collected!');
+          showToast('Recording failed: No audio data captured', 'error');
+          
+          if (recordingStreamRef.current) {
+            recordingStreamRef.current.getTracks().forEach(track => track.stop());
+            recordingStreamRef.current = null;
+          }
+          
+          recordingChunksRef.current = [];
+          if (recordingCompleteRef.current) {
+            recordingCompleteRef.current(null as any);
+            recordingCompleteRef.current = null;
+          }
+          return;
+        }
+        
         // A) On stop, properly build blob and file
         const mimeType = recordingMimeTypeRef.current;
+        
+        // CRITICAL: Create blob from all chunks - ensure chunks array is not empty
         const blob = new Blob(recordingChunksRef.current, { type: mimeType });
         console.log('[Voice Recording] Final blob size:', blob.size, 'bytes');
         console.log('[Voice Recording] Blob type:', blob.type);
+        console.log('[Voice Recording] Blob chunks used:', recordingChunksRef.current.length);
         
         // Verify blob is not empty
         if (blob.size === 0) {
           console.error('[Voice Recording] ERROR: Blob is empty! No audio data captured.');
+          console.error('[Voice Recording] Chunks count:', recordingChunksRef.current.length);
+          console.error('[Voice Recording] Total chunks size:', totalSize);
           showToast('Recording failed: No audio data captured', 'error');
           
           // A) Ensure stream tracks stop after recording ends
@@ -806,7 +829,16 @@ export function Messages() {
           }
           
           recordingChunksRef.current = [];
+          if (recordingCompleteRef.current) {
+            recordingCompleteRef.current(null as any);
+            recordingCompleteRef.current = null;
+          }
           return;
+        }
+        
+        // Additional validation: blob should be at least 1KB for a meaningful recording
+        if (blob.size < 1024) {
+          console.warn('[Voice Recording] WARNING: Blob size is very small:', blob.size, 'bytes. This might indicate a problem.');
         }
         
         // Determine file extension based on mime type
@@ -816,16 +848,26 @@ export function Messages() {
         const file = new File([blob], `voicenote-${Date.now()}.${extension}`, { type: mimeType });
         console.log('[Voice Recording] File created:', file.name, 'size:', file.size, 'bytes', 'type:', file.type);
         
+        // Verify file size matches blob size
+        if (file.size !== blob.size) {
+          console.error('[Voice Recording] ERROR: File size mismatch! Blob:', blob.size, 'File:', file.size);
+        }
+        
         // Add file to selected files
         setSelectedFiles((prev) => [...prev, file]);
         
-        // A) Ensure stream tracks stop after recording ends
+        // A) Ensure stream tracks stop after recording ends (but only after blob is created)
+        // CRITICAL: Don't stop stream until blob is fully created
         if (recordingStreamRef.current) {
-          recordingStreamRef.current.getTracks().forEach(track => track.stop());
+          recordingStreamRef.current.getTracks().forEach(track => {
+            track.stop();
+            console.log('[Voice Recording] Audio track stopped:', track.label);
+          });
           recordingStreamRef.current = null;
         }
         
-        // Clear chunks after use
+        // Clear chunks after use (but keep them until file is created)
+        const chunksCopy = [...recordingChunksRef.current];
         recordingChunksRef.current = [];
         
         // Call the completion callback if set
@@ -836,16 +878,28 @@ export function Messages() {
       };
       
       // Start recording with timeslice to ensure regular data collection
-      // CRITICAL: Use timeslice (100ms) to ensure chunks are collected regularly
-      mediaRecorder.start(100);
+      // CRITICAL: Use timeslice (250ms) to ensure chunks are collected regularly
+      // Smaller timeslice (100ms) might cause issues with some browsers
+      mediaRecorder.start(250);
       console.log('[Voice Recording] MediaRecorder started, state:', mediaRecorder.state);
-      console.log('[Voice Recording] Recording started with 100ms timeslice');
+      console.log('[Voice Recording] Recording started with 250ms timeslice');
       
       // Verify MediaRecorder is in recording state
       if (mediaRecorder.state !== 'recording') {
         console.error('[Voice Recording] ERROR: MediaRecorder not in recording state! State:', mediaRecorder.state);
         throw new Error('Failed to start recording');
       }
+      
+      // Verify stream is still active
+      if (!stream.active) {
+        console.error('[Voice Recording] ERROR: Stream is not active!');
+        throw new Error('Stream is not active');
+      }
+      
+      // Log audio track settings to verify recording
+      const track = stream.getAudioTracks()[0];
+      console.log('[Voice Recording] Audio track settings:', track.getSettings());
+      console.log('[Voice Recording] Audio track constraints:', track.getConstraints());
       
       setIsRecording(true);
       setRecordingDuration(0);
@@ -901,17 +955,24 @@ export function Messages() {
       // CRITICAL: Request final data chunk before stopping to ensure all audio is captured
       try {
         if (mediaRecorderRef.current.state === 'recording') {
+          console.log('[Voice Recording] Requesting final data chunk...');
           mediaRecorderRef.current.requestData();
-          // Small delay to ensure final data chunk is collected
-          await new Promise(resolve => setTimeout(resolve, 150));
+          // Wait longer to ensure final data chunk is collected and processed
+          await new Promise(resolve => setTimeout(resolve, 300));
+          console.log('[Voice Recording] Final data requested, chunks count:', recordingChunksRef.current.length);
         }
       } catch (error) {
         console.warn('[Voice Recording] Warning: Could not request final data:', error);
       }
       
       // Stop the MediaRecorder - onstop handler will process chunks
+      // CRITICAL: Wait for onstop to complete before proceeding
       if (mediaRecorderRef.current.state === 'recording') {
+        console.log('[Voice Recording] Stopping MediaRecorder...');
         mediaRecorderRef.current.stop();
+        
+        // Wait a bit for onstop handler to process
+        await new Promise(resolve => setTimeout(resolve, 200));
       }
       
       setIsRecording(false);

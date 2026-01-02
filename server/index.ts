@@ -31,7 +31,8 @@ import trackingRoutes from './src/routes/trackingRoutes';
 import adminRoutes from './src/routes/adminRoutes';
 import { websocketService } from './src/services/websocketService';
 
-dotenv.config();
+// Load environment variables from .env file in server directory
+dotenv.config({ path: path.join(__dirname, '.env') });
 
 const app = express();
 const httpServer = createServer(app);

@@ -1187,12 +1187,12 @@ const InboxPage: React.FC = () => {
                         isActive ? 'bg-red-50 dark:bg-red-900/10 border-l-4 border-l-red-500' : ''
                     }`}
                   >
-                    {/* Buyer Avatar */}
+                    {/* Buyer Avatar - Profile image from buyer profile */}
                     <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-xs sm:text-sm font-semibold text-white flex-shrink-0 overflow-hidden">
-                      {typeof thread.buyerId === 'object' && thread.buyerId.avatarUrl && thread.buyerId.avatarUrl.trim() ? (
+                      {buyer && buyer.avatarUrl && buyer.avatarUrl.trim() ? (
                         <img
-                          src={thread.buyerId.avatarUrl}
-                          alt={thread.buyerId.fullName || 'Buyer'}
+                          src={resolveAvatarUrl(buyer.avatarUrl) || buyer.avatarUrl}
+                          alt={buyer.fullName || 'Buyer'}
                           className="w-full h-full object-cover"
                           onError={(e) => {
                             // If profile image fails to load, show first letter (avatar)
@@ -1200,19 +1200,15 @@ const InboxPage: React.FC = () => {
                             target.style.display = 'none';
                             const parent = target.parentElement;
                             if (parent) {
-                              const name = typeof thread.buyerId === 'object' 
-                                ? (thread.buyerId.fullName || thread.buyerId.email || 'B')
-                                : 'B';
+                              const name = buyer?.fullName || buyer?.email || 'B';
                               parent.innerHTML = `<span class="text-white text-xs sm:text-sm font-semibold">${name[0].toUpperCase()}</span>`;
                             }
                           }}
                         />
                       ) : (
-                        // No profile image, use first letter (avatar)
+                        // No profile image, use first letter (avatar) - stays visible even when read
                         <span className="text-white text-xs sm:text-sm font-semibold">
-                          {typeof thread.buyerId === 'object' 
-                            ? (thread.buyerId.fullName || thread.buyerId.email || 'B')[0].toUpperCase()
-                            : 'B'}
+                          {(buyer?.fullName || buyer?.email || 'B')[0].toUpperCase()}
                         </span>
                       )}
                     </div>
