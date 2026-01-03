@@ -86,7 +86,7 @@ const messageSchema = new Schema<IMessage>(
     threadId: { type: Schema.Types.ObjectId, ref: 'MessageThread', required: true, index: true },
     senderId: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
     senderType: { type: String, enum: ['seller', 'buyer'], required: true },
-    content: { type: String, required: true, trim: true, default: '' }, // Allow empty for media-only messages
+    content: { type: String, required: false, trim: true, default: '' }, // Optional - allow empty for media-only messages (validated at application level)
     attachments: { type: [messageAttachmentSchema], default: [] },
     readBy: [{ type: Schema.Types.ObjectId, ref: 'User' }],
     readAt: { type: Date },

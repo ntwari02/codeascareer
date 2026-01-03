@@ -26,8 +26,15 @@ const createThreadSchema = z.object({
 
 // WhatsApp-like: Allow empty content if attachments are present
 const sendMessageSchema = z.object({
-  content: z.string().max(5000, 'Message must be less than 5000 characters').optional().default(''),
-  attachments: z.array(z.any()).optional(),
+  content: z.preprocess(
+    (val) => {
+      // Convert any value to string, default to empty string
+      if (val === null || val === undefined) return '';
+      return String(val);
+    },
+    z.string().max(5000, 'Message must be less than 5000 characters')
+  ).optional().default(''),
+  attachments: z.array(z.any()).optional().default([]),
   replyTo: z.string().optional(),
   forwardedFrom: z.object({
     threadId: z.string(),
@@ -47,17 +54,22 @@ const sendMessageSchema = z.object({
       } else if (typeof data.attachments === 'string') {
         // Try to parse if it's a JSON string
         try {
-          attachmentsArray = JSON.parse(data.attachments);
+          const parsed = JSON.parse(data.attachments);
+          attachmentsArray = Array.isArray(parsed) ? parsed : [];
         } catch (e) {
           console.error('[Schema Validation] Failed to parse attachments string:', e);
+          attachmentsArray = [];
         }
+      } else {
+        // If it's not an array or string, treat as empty
+        attachmentsArray = [];
       }
     }
     
     const hasAttachments = Array.isArray(attachmentsArray) && attachmentsArray.length > 0;
     
     console.log('[Schema Validation] hasContent:', hasContent, 'hasAttachments:', hasAttachments);
-    console.log('[Schema Validation] content length:', contentStr.length);
+    console.log('[Schema Validation] content:', contentStr.substring(0, 50), '(length:', contentStr.length, ')');
     console.log('[Schema Validation] attachments type:', typeof data.attachments, 'isArray:', Array.isArray(data.attachments), 'length:', attachmentsArray.length);
     
     return hasContent || hasAttachments;
@@ -314,8 +326,35 @@ export async function sendMessage(req: AuthenticatedRequest, res: Response) {
     const validation = sendMessageSchema.safeParse(req.body);
     if (!validation.success) {
       console.error('[Controller] Validation failed:', validation.error.issues);
-      const errorMessages = validation.error.issues.map((e: { message: string }) => e.message).filter((msg: string, idx: number, arr: string[]) => arr.indexOf(msg) === idx);
-      const mainMessage = errorMessages[0] || 'Validation error';
+      console.error('[Controller] Request body content:', req.body.content);
+      console.error('[Controller] Request body attachments:', req.body.attachments);
+      
+      // Extract clean error messages - avoid including content text in error
+      const errorMessages = validation.error.issues
+        .map((e: any) => {
+          // Only include the validation message, not the content value
+          // Remove any content value that might be included in the message
+          let msg = e.message || '';
+          // Remove any potential content value patterns from error message
+          if (msg.includes('content:') && msg.length > 100) {
+            // Likely contains content value, extract just the validation message
+            const parts = msg.split('content:');
+            if (parts.length > 1) {
+              // Take only the first part (the validation message)
+              msg = parts[0].trim() || e.message;
+            }
+          }
+          return msg;
+        })
+        .filter((msg: string, idx: number, arr: string[]) => arr.indexOf(msg) === idx);
+      
+      // Use a clean, user-friendly message
+      const mainMessage = errorMessages.length > 0 
+        ? (errorMessages[0].includes('Please add') 
+            ? errorMessages[0] 
+            : `Message validation failed: ${errorMessages[0]}`)
+        : 'Please add a message text or attach a file/image/voice note. You cannot send an empty message.';
+      
       return res.status(400).json({
         message: mainMessage,
         errors: validation.error.issues,
@@ -359,7 +398,7 @@ export async function sendMessage(req: AuthenticatedRequest, res: Response) {
     console.log('[Controller] Processed', processedAttachments.length, 'attachment(s)');
 
     // Create message - WhatsApp style: allow empty content if attachments exist
-    const messageContent = content ? String(content).trim() : '';
+    const messageContent = (content ? String(content).trim() : '') || ''; // Always ensure it's a string, default to empty
     console.log('[Controller] Creating message with content length:', messageContent.length, 'and', processedAttachments.length, 'attachment(s)');
     
     if (!messageContent && processedAttachments.length === 0) {
@@ -373,7 +412,7 @@ export async function sendMessage(req: AuthenticatedRequest, res: Response) {
       threadId: thread._id,
       senderId: buyerId,
       senderType: 'buyer',
-      content: messageContent, // Can be empty string if attachments exist
+      content: messageContent, // Can be empty string if attachments exist - always explicitly set
       attachments: processedAttachments,
       readBy: [buyerId],
       status: 'sent',
