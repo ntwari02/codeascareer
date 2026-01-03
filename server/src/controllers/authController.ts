@@ -327,11 +327,12 @@ export async function googleCallback(req: Request, res: Response) {
         return res.redirect(`${CLIENT_URL}/login?error=account_deactivated`);
       }
 
-      // User exists - update Google ID if not set, and login
+      // User exists - update Google ID and profile picture
       if (!user.googleId && googleId) {
         user.googleId = googleId;
       }
-      if (picture && !user.avatarUrl) {
+      // Always update avatar with latest Google profile picture
+      if (picture) {
         user.avatarUrl = picture;
       }
       await user.save();
@@ -395,7 +396,7 @@ export async function googleCallback(req: Request, res: Response) {
 
     await user.save();
 
-    // Existing user - redirect to frontend with token in URL
+    // Existing user - redirect to frontend with token in URL (avatarUrl is already updated above)
     const redirectUrl = new URL(`${CLIENT_URL}/auth/google/callback`);
     redirectUrl.searchParams.set('token', token);
     redirectUrl.searchParams.set('success', 'true');
@@ -451,7 +452,11 @@ export async function completeGoogleRegistration(req: Request, res: Response) {
         });
       }
 
-      // User already exists - generate token and login
+      // User already exists - update profile picture and login
+      if (picture) {
+        user.avatarUrl = picture;
+        await user.save();
+      }
       const token = generateAuthToken(user);
       return res.json({
         success: true,
@@ -463,6 +468,7 @@ export async function completeGoogleRegistration(req: Request, res: Response) {
           role: user.role,
           sellerVerificationStatus: user.sellerVerificationStatus,
           isSellerVerified: user.isSellerVerified,
+          avatarUrl: user.avatarUrl,
         },
       });
     }
