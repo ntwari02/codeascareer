@@ -162,6 +162,7 @@ export async function login(req: Request, res: Response) {
           role: user.role,
           sellerVerificationStatus: user.sellerVerificationStatus,
           isSellerVerified: user.isSellerVerified,
+          avatarUrl: user.avatarUrl,
         },
         token,
       });
@@ -314,6 +315,9 @@ export async function googleCallback(req: Request, res: Response) {
     const userInfo = await userInfoResponse.json();
     const { id: googleId, email, name, picture } = userInfo;
 
+    // Debug: Log Google user info to verify picture is received
+    console.log('Google user info:', { googleId, email, name, picture });
+
     if (!email) {
       return res.redirect(`${CLIENT_URL}/login?error=no_email`);
     }
@@ -334,6 +338,9 @@ export async function googleCallback(req: Request, res: Response) {
       // Always update avatar with latest Google profile picture
       if (picture) {
         user.avatarUrl = picture;
+        console.log('Updated user avatarUrl:', picture);
+      } else {
+        console.log('No picture received from Google for user:', user.email);
       }
       await user.save();
     } else {
@@ -440,6 +447,9 @@ export async function completeGoogleRegistration(req: Request, res: Response) {
     }
 
     const { googleId, email, name, picture } = googleInfo;
+    
+    // Debug: Log Google info from temp token
+    console.log('Google info from temp token:', { googleId, email, name, picture });
 
     // Check if user was created in the meantime
     let user = await User.findOne({ $or: [{ email }, { googleId }] });
@@ -455,7 +465,11 @@ export async function completeGoogleRegistration(req: Request, res: Response) {
       // User already exists - update profile picture and login
       if (picture) {
         user.avatarUrl = picture;
+        console.log('Updating existing user avatarUrl to:', picture);
         await user.save();
+        console.log('User saved with avatarUrl:', user.avatarUrl);
+      } else {
+        console.log('Warning: No picture in temp token for existing user');
       }
       const token = generateAuthToken(user);
       return res.json({
@@ -475,16 +489,18 @@ export async function completeGoogleRegistration(req: Request, res: Response) {
 
     // Create new user with selected role
     const isSeller = role === 'seller';
+    console.log('Creating new user with Google picture:', picture);
     user = await User.create({
       fullName: name || email.split('@')[0],
       email,
       googleId,
       passwordHash: '', // OAuth users don't need password
       role,
-      avatarUrl: picture,
+      avatarUrl: picture || undefined, // Save picture if available
       sellerVerificationStatus: isSeller ? 'pending' : undefined,
       isSellerVerified: isSeller ? false : undefined,
     });
+    console.log('User created with avatarUrl:', user.avatarUrl);
 
     // Generate JWT token
     const token = generateAuthToken(user);

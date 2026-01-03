@@ -65,6 +65,10 @@ export function SelectRole() {
       // Store token and user info
       localStorage.setItem('auth_token', data.token);
       
+      // Debug: Log the user data received from backend
+      console.log('[SelectRole] User data from /auth/google/complete:', data.user);
+      console.log('[SelectRole] Avatar URL:', data.user.avatarUrl);
+      
       const userProfile = {
         id: data.user.id?.toString() || data.user._id?.toString() || '',
         email: data.user.email,
@@ -73,10 +77,13 @@ export function SelectRole() {
         seller_status: data.user.sellerVerificationStatus,
         seller_verified: data.user.isSellerVerified,
         phone: data.user.phone,
-        avatar_url: data.user.avatarUrl,
+        avatar_url: data.user.avatarUrl || data.user.avatar_url || null, // Try both camelCase and snake_case
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       };
+
+      console.log('[SelectRole] Mapped user profile:', userProfile);
+      console.log('[SelectRole] Avatar URL in profile:', userProfile.avatar_url);
 
       localStorage.setItem('user', JSON.stringify(userProfile));
       setUser(userProfile);

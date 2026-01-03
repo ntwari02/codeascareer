@@ -15,7 +15,12 @@ const resolveAvatarUrl = (url: string | null | undefined, cacheBust?: boolean): 
   if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) {
     // For data URLs, return as-is
     if (url.startsWith('data:')) return url;
-    // For HTTP URLs, add cache-busting if needed
+    // For Google profile images, they already have cache-busting parameters, so don't add another
+    // Just return the URL as-is to preserve Google's cache-busting
+    if (url.includes('googleusercontent.com')) {
+      return url;
+    }
+    // For other HTTP URLs, add cache-busting if needed
     if (cacheBust) {
       const separator = url.includes('?') ? '&' : '?';
       return `${url}${separator}t=${Date.now()}`;
@@ -66,6 +71,13 @@ const Header: React.FC<HeaderProps> = ({
   // Ensure avatarUrl is a non-empty string
   const avatarUrl = (user?.avatar_url || (user as any)?.avatarUrl || '').trim();
   const hasAvatar = avatarUrl && avatarUrl.length > 0;
+  
+  // Debug: Log avatar URL for troubleshooting
+  useEffect(() => {
+    console.log('[Header] User object:', user);
+    console.log('[Header] Avatar URL:', avatarUrl);
+    console.log('[Header] Has avatar:', hasAvatar);
+  }, [user, avatarUrl, hasAvatar]);
 
   const isSeller = location.pathname.startsWith('/seller');
   const isAdmin = location.pathname.startsWith('/admin');
@@ -219,12 +231,15 @@ const Header: React.FC<HeaderProps> = ({
               {avatarUrl ? (
                 <img
                   key={`${avatarUrl}-${user?.updated_at || Date.now()}-${avatarKey}`} // Force re-render when avatar changes
-                  src={resolveAvatarUrl(avatarUrl, true) || ''} // Cache-bust to ensure fresh image
+                  src={resolveAvatarUrl(avatarUrl, !avatarUrl.includes('googleusercontent.com')) || ''} // Don't cache-bust Google URLs
                   alt={user?.full_name || user?.email || userName}
                   className="w-7 h-7 sm:w-8 sm:h-8 rounded-full object-cover relative cursor-pointer hover:opacity-90 hover:ring-2 hover:ring-offset-2 hover:ring-gray-300 dark:hover:ring-gray-600 transition-all"
                   loading="eager" // Load immediately, don't lazy load
+                  // Don't use crossOrigin for Google images - they don't support CORS and will cause errors
+                  referrerPolicy="no-referrer" // Don't send referrer for privacy
                   onError={(e) => {
                     console.error('[Header] Failed to load avatar image:', avatarUrl);
+                    console.error('[Header] Image error details:', e);
                     // Fallback to default icon on error
                     const target = e.target as HTMLImageElement;
                     target.style.display = 'none';
@@ -235,6 +250,9 @@ const Header: React.FC<HeaderProps> = ({
                       fallback.innerHTML = '<svg class="h-4 w-4 sm:h-5 sm:w-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>';
                       parent.appendChild(fallback);
                     }
+                  }}
+                  onLoad={() => {
+                    console.log('[Header] Avatar image loaded successfully:', avatarUrl);
                   }}
                 />
               ) : (

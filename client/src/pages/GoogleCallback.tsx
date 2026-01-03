@@ -65,6 +65,10 @@ export function GoogleCallback() {
 
           const data = await response.json();
           
+          // Debug: Log the user data received from backend
+          console.log('[GoogleCallback] User data from /auth/me:', data.user);
+          console.log('[GoogleCallback] Avatar URL:', data.user.avatarUrl);
+          
           // Map backend user to Profile format
           const userProfile = {
             id: data.user.id?.toString() || data.user._id?.toString() || '',
@@ -74,10 +78,13 @@ export function GoogleCallback() {
             seller_status: data.user.sellerVerificationStatus,
             seller_verified: data.user.isSellerVerified,
             phone: data.user.phone,
-            avatar_url: data.user.avatarUrl,
+            avatar_url: data.user.avatarUrl || data.user.avatar_url || null, // Try both camelCase and snake_case
             created_at: data.user.createdAt || new Date().toISOString(),
             updated_at: data.user.updatedAt || new Date().toISOString(),
           };
+
+          console.log('[GoogleCallback] Mapped user profile:', userProfile);
+          console.log('[GoogleCallback] Avatar URL in profile:', userProfile.avatar_url);
 
           localStorage.setItem('user', JSON.stringify(userProfile));
           setUser(userProfile);

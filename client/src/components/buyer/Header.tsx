@@ -23,7 +23,12 @@ const resolveAvatarUrl = (url: string | null | undefined, cacheBust?: boolean): 
   if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) {
     // For data URLs, return as-is
     if (url.startsWith('data:')) return url;
-    // For HTTP URLs, add cache-busting if needed
+    // For Google profile images, they already have cache-busting parameters, so don't add another
+    // Just return the URL as-is to preserve Google's cache-busting
+    if (url.includes('googleusercontent.com')) {
+      return url;
+    }
+    // For other HTTP URLs, add cache-busting if needed
     if (cacheBust) {
       const separator = url.includes('?') ? '&' : '?';
       return `${url}${separator}t=${Date.now()}`;
@@ -1345,10 +1350,19 @@ export function Header() {
                     {user.avatar_url ? (
                       <img
                         key={`${user.avatar_url}-${user.updated_at || Date.now()}-${avatarKey}`} // Force re-render when avatar changes
-                        src={resolveAvatarUrl(user.avatar_url, true) || ''} // Cache-bust to ensure fresh image
+                        src={resolveAvatarUrl(user.avatar_url, !user.avatar_url.includes('googleusercontent.com')) || ''} // Don't cache-bust Google URLs
                         alt={user.full_name || user.email}
                         className="w-7 h-7 sm:w-8 sm:h-8 rounded-full object-cover relative"
                         loading="eager" // Load immediately, don't lazy load
+                        // Don't use crossOrigin for Google images - they don't support CORS and will cause errors
+                        referrerPolicy="no-referrer" // Don't send referrer for privacy
+                        onError={(e) => {
+                          console.error('[BuyerHeader] Failed to load avatar image:', user.avatar_url);
+                          console.error('[BuyerHeader] Image error details:', e);
+                        }}
+                        onLoad={() => {
+                          console.log('[BuyerHeader] Avatar image loaded successfully:', user.avatar_url);
+                        }}
                       />
                     ) : (
                       <div className="w-7 h-7 sm:w-8 sm:h-8 bg-gradient-to-br from-orange-400 to-teal-500 rounded-full flex items-center justify-center text-white relative">
