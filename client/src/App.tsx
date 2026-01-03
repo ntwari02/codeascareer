@@ -8,6 +8,8 @@ import { Signup } from './pages/Signup';
 import { ForgotPassword } from './pages/ForgotPassword';
 import { ResetPassword } from './pages/ResetPassword';
 import { VerifyOTP } from './pages/VerifyOTP';
+import { GoogleCallback } from './pages/GoogleCallback';
+import { SelectRole } from './pages/SelectRole';
 import { Cart } from './pages/Cart';
 import { Wishlist } from './pages/Wishlist';
 import { Products } from './pages/Products';
@@ -90,6 +92,8 @@ function App() {
           <Route path="/forgot-password" element={<ForgotPassword />} />
           <Route path="/reset-password" element={<ResetPassword />} />
           <Route path="/verify-otp" element={<VerifyOTP />} />
+          <Route path="/auth/google/callback" element={<GoogleCallback />} />
+          <Route path="/auth/google/select-role" element={<SelectRole />} />
           
           {/* Dashboard Routes */}
           <Route path="/seller/*" element={<SellerDashboard />} />

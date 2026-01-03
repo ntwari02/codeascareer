@@ -115,6 +115,15 @@
   }
 }
 
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%) skewX(-12deg);
+  }
+  100% {
+    transform: translateX(200%) skewX(-12deg);
+  }
+}
+
 .animate-slideDown {
   animation: slideDown 0.3s ease-out;
 }
@@ -137,6 +146,10 @@
 
 .animate-pulse {
   animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.animate-shimmer {
+  animation: shimmer 2s infinite;
 }
 
 .scrollbar-hide::-webkit-scrollbar {
@@ -276,4 +289,122 @@ input[type="range"].slider::-moz-range-thumb:hover {
 
 .dark input[type="range"].slider::-moz-range-thumb {
   border-color: #1a1a24;
+}
+
+/* Responsive media queries for Login/Signup pages */
+/* Mobile devices (320px - 640px) */
+@media screen and (max-width: 640px) {
+  .login-signup-container {
+    padding: 1rem 0.75rem;
+    min-height: 100vh;
+  }
+  
+  .login-signup-form {
+    padding: 1rem;
+    margin: 0.5rem 0;
+    max-width: 100%;
+  }
+  
+  .login-signup-footer {
+    padding-bottom: 1rem;
+    margin-top: 1rem;
+  }
+}
+
+/* Tablet devices (641px - 1024px) */
+@media screen and (min-width: 641px) and (max-width: 1024px) {
+  .login-signup-container {
+    padding: 1.5rem 1rem;
+    min-height: 100vh;
+  }
+  
+  .login-signup-form {
+    padding: 1.5rem;
+    margin: 1rem 0;
+  }
+  
+  .login-signup-footer {
+    padding-bottom: 1.5rem;
+    margin-top: 1.25rem;
+  }
+}
+
+/* Desktop devices (1025px and above) */
+@media screen and (min-width: 1025px) {
+  .login-signup-container {
+    padding: 2rem 1.5rem;
+    min-height: 100vh;
+  }
+  
+  .login-signup-form {
+    padding: 2rem 2.5rem;
+    margin: 1.5rem 0;
+  }
+  
+  .login-signup-footer {
+    padding-bottom: 2rem;
+    margin-top: 1.5rem;
+  }
+}
+
+/* Zoom support - ensures footer is visible when zoomed */
+@media screen and (min-resolution: 1.5dppx) {
+  .login-signup-form {
+    min-height: auto;
+    max-height: none;
+  }
+}
+
+/* High zoom levels (150% and above) */
+@media screen and (min-width: 1px) {
+  @media (min-resolution: 144dpi) {
+    .login-signup-container {
+      padding-bottom: 2rem;
+    }
+    
+    .login-signup-footer {
+      padding-bottom: 2rem;
+      position: relative;
+      z-index: 10;
+    }
+  }
+}
+
+/* Landscape orientation on mobile */
+@media screen and (max-height: 600px) and (orientation: landscape) {
+  .login-signup-container {
+    padding: 0.5rem;
+    align-items: flex-start;
+  }
+  
+  .login-signup-form {
+    margin: 0.5rem 0;
+    padding: 1rem;
+  }
+  
+  .login-signup-footer {
+    padding-bottom: 1rem;
+    margin-top: 0.75rem;
+  }
+}
+
+/* Ensure scrollable content on all devices */
+.login-signup-wrapper {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Print media query */
+@media print {
+  .login-signup-container {
+    min-height: auto;
+    padding: 1rem;
+  }
+  
+  .login-signup-footer {
+    page-break-inside: avoid;
+  }
 }

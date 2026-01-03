@@ -100,10 +100,10 @@ export function Login() {
       </div>
 
       {/* Centered form */}
-      <div className="relative z-10 min-h-screen flex items-center justify-center px-4 py-4 sm:py-8">
-        <div className="w-full max-w-md max-h-[95vh] sm:max-h-[90vh]">
+      <div className="relative z-10 min-h-screen flex items-center justify-center px-3 sm:px-4 md:px-6 py-4 sm:py-6 md:py-8 lg:py-12">
+        <div className="w-full max-w-md sm:max-w-lg md:max-w-xl lg:max-w-2xl">
           {/* Form container with semi-transparent background */}
-          <div className="bg-white/95 dark:bg-[#1a1a2e]/95 backdrop-blur-md rounded-2xl shadow-2xl shadow-black/20 dark:shadow-black/40 p-4 sm:p-6 border border-white/20 dark:border-gray-700/50 max-h-full overflow-y-auto">
+          <div className="bg-white/95 dark:bg-[#1a1a2e]/95 backdrop-blur-md rounded-xl sm:rounded-2xl shadow-2xl shadow-black/20 dark:shadow-black/40 p-4 sm:p-6 md:p-8 lg:p-10 border border-white/20 dark:border-gray-700/50 my-4 sm:my-6 md:my-8">
             {/* Header with logo and icons */}
             <div className="flex items-center justify-between mb-2 sm:mb-3">
               <Link
@@ -137,11 +137,11 @@ export function Login() {
             </div>
 
             {/* Title section - more compact */}
-            <div className="mb-4 sm:mb-6 text-center">
-              <h2 className="text-xl sm:text-2xl lg:text-3xl font-bold text-gray-900 dark:text-white mb-1 sm:mb-2">
+            <div className="mb-4 sm:mb-5 md:mb-6 lg:mb-8 text-center">
+              <h2 className="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-bold text-gray-900 dark:text-white mb-1 sm:mb-2 md:mb-3">
                 Welcome Back
               </h2>
-              <p className="text-gray-600 dark:text-gray-400 text-xs sm:text-sm">
+              <p className="text-gray-600 dark:text-gray-400 text-xs sm:text-sm md:text-base">
                 Sign in to your Reaglex account to continue.
               </p>
             </div>
@@ -231,13 +231,18 @@ export function Login() {
                 </div>
               </div>
 
-              <div className="mt-3 sm:mt-4 grid grid-cols-2 gap-2 sm:gap-3">
+              <div className="mt-3 sm:mt-4 grid grid-cols-2 gap-2 sm:gap-3 md:gap-4">
                 <button
                   type="button"
-                  className="flex items-center justify-center gap-2 px-3 py-2 sm:py-2.5 bg-white dark:bg-[#1a1a2e]/80 border border-gray-300 dark:border-gray-700/50 text-gray-900 dark:text-white rounded-xl hover:bg-gray-50 dark:hover:bg-[#1a1a2e] transition-all shadow-sm hover:shadow-md text-xs sm:text-sm"
+                  onClick={() => {
+                    const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+                    window.location.href = `${API_BASE_URL}/auth/google?role=buyer`;
+                  }}
+                  className="group flex items-center justify-center gap-2 px-3 py-2 sm:py-2.5 md:py-3 bg-white dark:bg-[#1a1a2e]/80 border border-gray-300 dark:border-gray-700/50 text-gray-900 dark:text-white rounded-xl hover:bg-gray-50 dark:hover:bg-[#1a1a2e] transition-all duration-300 shadow-sm hover:shadow-lg hover:shadow-orange-500/20 hover:scale-105 active:scale-95 text-xs sm:text-sm md:text-base relative overflow-hidden"
                 >
-                  <Chrome className="h-4 w-4" />
-                  <span className="font-medium">Google</span>
+                  <div className="absolute inset-0 bg-gradient-to-r from-orange-500/0 via-orange-500/10 to-orange-500/0 opacity-0 group-hover:opacity-100 transition-opacity duration-300 transform -skew-x-12 group-hover:translate-x-full group-hover:translate-x-0 animate-shimmer"></div>
+                  <Chrome className="h-4 w-4 sm:h-5 sm:w-5 md:h-6 md:w-6 group-hover:rotate-12 transition-transform duration-300" />
+                  <span className="font-medium relative z-10">Google</span>
                 </button>
                 <button
                   type="button"
@@ -249,9 +254,9 @@ export function Login() {
               </div>
             </div>
 
-            <p className="text-center text-gray-600 dark:text-gray-400 mt-4 sm:mt-5 text-xs sm:text-sm">
+            <p className="text-center text-gray-600 dark:text-gray-400 mt-4 sm:mt-5 md:mt-6 pb-2 sm:pb-3 md:pb-4 text-xs sm:text-sm md:text-base">
               Don't have an account?{' '}
-              <Link to="/signup" className="text-orange-600 dark:text-orange-400 hover:text-orange-700 dark:hover:text-orange-300 font-semibold transition">
+              <Link to="/signup" className="text-orange-600 dark:text-orange-400 hover:text-orange-700 dark:hover:text-orange-300 font-semibold transition-colors duration-200 hover:underline">
                 Sign Up
               </Link>
             </p>
