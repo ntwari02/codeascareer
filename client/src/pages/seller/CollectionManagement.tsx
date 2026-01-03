@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  Plus, Filter, SortAsc, SortDesc, MoreVertical, Eye, Copy, 
-  Download, Upload, Trash2, Star, Calendar, Package, Search,
-  ChevronDown, X, Check, ExternalLink, BarChart3, TrendingUp, Edit,
+  Plus, Filter, MoreVertical, Eye, Copy, 
+  Download, Upload, Trash2, Star, Package, Search,
+  X, Check, ExternalLink, Edit,
   Grid3x3, List, Image as ImageIcon, GripVertical, Home, Layout, Monitor
 } from 'lucide-react';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
 import { ProductCard } from '@/components/ProductCard';
 import { ProductDetailModal } from '@/components/ProductDetailModal';
+import { updateCollection } from '@/lib/collections';
 
 export default function CollectionManagement() {
   const { toast } = useToast();
@@ -32,7 +33,6 @@ export default function CollectionManagement() {
   const [showProductsModal, setShowProductsModal] = useState(false);
   const [selectedCollection, setSelectedCollection] = useState<Collection | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [user, setUser] = useState<any>(null);
   const [sellerRestrictions, setSellerRestrictions] = useState({
     maxCollections: 10,
     currentCollections: 6,
@@ -1140,7 +1140,7 @@ export default function CollectionManagement() {
             setShowEditModal(false);
             setSelectedCollection(null);
           }}
-          sellerId={user?.id}
+          sellerId={undefined}
         />
       )}
 
@@ -1201,7 +1201,7 @@ function CollectionFormModal({
   collection,
   onClose,
   onSuccess,
-  sellerId,
+  sellerId: _sellerId,
 }: {
   collection?: Collection | null;
   onClose: () => void;
@@ -1256,8 +1256,8 @@ function CollectionFormModal({
   const [productSearchTerm, setProductSearchTerm] = useState('');
   const [loadingProducts, setLoadingProducts] = useState(false);
   const [uploadingImages, setUploadingImages] = useState(false);
-  const [coverImageFile, setCoverImageFile] = useState<File | null>(null);
-  const [thumbnailImageFile, setThumbnailImageFile] = useState<File | null>(null);
+  const [_coverImageFile, setCoverImageFile] = useState<File | null>(null);
+  const [_thumbnailImageFile, setThumbnailImageFile] = useState<File | null>(null);
 
   // Initialize selected product IDs from formData
   useEffect(() => {
@@ -2854,7 +2854,7 @@ function CollectionProductsModal({
   const [allProducts, setAllProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
-  const [user, setUser] = useState<any>(null);
+  const [_user, setUser] = useState<any>(null);
   const [productSortBy, setProductSortBy] = useState('recently_added');
   const [currentPage, setCurrentPage] = useState(1);
   const [productsPerPage] = useState(10);
