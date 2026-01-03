@@ -2,8 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
 import { useTheme } from '../contexts/ThemeContext';
-<<<<<<< HEAD
-import { Mail, Lock, Chrome, Apple, Sun, Moon, Home, Eye, EyeOff, Loader2 } from 'lucide-react';
+import { Mail, Lock, Sun, Moon, Home, Eye, EyeOff } from 'lucide-react';
 import { useToastStore } from '../stores/toastStore';
 
 // Basic guard against obvious SQL injection-style patterns.
@@ -22,7 +21,6 @@ export function Login() {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [error, setError] = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -237,28 +235,18 @@ export function Login() {
                 <button
                   type="button"
                   onClick={() => {
-                    setIsGoogleLoading(true);
                     const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
                     window.location.href = `${API_BASE_URL}/auth/google?role=buyer`;
                   }}
-<<<<<<< HEAD
-                  disabled={isGoogleLoading}
-                  className="group flex items-center justify-center gap-2 px-3 py-2 sm:py-2.5 md:py-3 bg-white dark:bg-[#1a1a2e]/80 border border-gray-300 dark:border-gray-700/50 text-gray-900 dark:text-white rounded-xl hover:bg-gray-50 dark:hover:bg-[#1a1a2e] transition-all duration-300 shadow-sm hover:shadow-lg hover:shadow-orange-500/20 hover:scale-105 active:scale-95 text-xs sm:text-sm md:text-base relative overflow-hidden disabled:opacity-70 disabled:cursor-not-allowed disabled:hover:scale-100"
+                  className="group w-full flex items-center justify-center gap-2 px-3 py-2 sm:py-2.5 md:py-3 bg-white dark:bg-[#1a1a2e]/80 border border-gray-300 dark:border-gray-700/50 text-gray-900 dark:text-white rounded-xl hover:bg-gray-50 dark:hover:bg-[#1a1a2e] transition-all duration-300 shadow-sm hover:shadow-lg hover:shadow-orange-500/20 hover:scale-105 active:scale-95 text-xs sm:text-sm md:text-base relative overflow-hidden"
                 >
-                  <div className="absolute inset-0 bg-gradient-to-r from-orange-500/0 via-orange-500/10 to-orange-500/0 opacity-0 group-hover:opacity-100 transition-opacity duration-300 transform -skew-x-12 group-hover:translate-x-full group-hover:translate-x-0 animate-shimmer"></div>
-                  {isGoogleLoading ? (
-                    <Loader2 className="h-4 w-4 sm:h-5 sm:w-5 md:h-6 md:w-6 animate-spin relative z-10" />
-                  ) : (
-                    <Chrome className="h-4 w-4 sm:h-5 sm:w-5 md:h-6 md:w-6 group-hover:rotate-12 transition-transform duration-300 relative z-10" />
-                  )}
-                  <span className="font-medium relative z-10">{isGoogleLoading ? 'Signing in...' : 'Google'}</span>
-                </button>
-                <button
-                  type="button"
-                  className="flex items-center justify-center gap-2 px-3 py-2 sm:py-2.5 bg-white dark:bg-[#1a1a2e]/80 border border-gray-300 dark:border-gray-700/50 text-gray-900 dark:text-white rounded-xl hover:bg-gray-50 dark:hover:bg-[#1a1a2e] transition-all shadow-sm hover:shadow-md text-xs sm:text-sm"
-                >
-                  <Apple className="h-4 w-4" />
-                  <span className="font-medium">Apple</span>
+                  <svg className="h-4 w-4 sm:h-5 sm:w-5 md:h-6 md:w-6" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M44.5 20H24V28.5H35.5C34.7 32.5 32.1 35.5 28.5 37.1V43.5H35.5C40.5 39.5 43.5 33.5 44.5 28.5V20Z" fill="#4285F4"/>
+                    <path d="M24 44C30.5 44 36 41.5 39.5 37.5L32.5 31.5C30.5 33.5 27.5 35 24 35C18.5 35 13.5 31.5 11.5 26.5H4.5V33.5C7.5 39.5 15 44 24 44Z" fill="#34A853"/>
+                    <path d="M11.5 26.5C11 25 11 23.5 11 22C11 20.5 11 19 11.5 17.5V10.5H4.5C3.5 15.5 3.5 20.5 4.5 26.5H11.5Z" fill="#FBBC05"/>
+                    <path d="M24 13C27 13 29.5 14 31.5 16L38 9.5C36 7.5 33.5 6 30.5 5C21.5 5 14 9.5 11 17.5L18 22.5C19.5 18.5 21.5 13 24 13Z" fill="#EA4335"/>
+                  </svg>
+                  <span className="font-medium relative z-10">Sign in with Google</span>
                 </button>
               </div>
             </div>
