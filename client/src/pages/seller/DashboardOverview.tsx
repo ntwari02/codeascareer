@@ -257,32 +257,16 @@ const DashboardOverview: React.FC = () => {
         </div>
       </div>
 
-      {/* Sales Overview Stats */}
-      <motion.div
-        variants={containerVariants}
-        initial="hidden"
-        animate="visible"
-        className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4"
-      >
-        {salesStats.map((stat, index) => (
-          <StatCard key={index} {...stat} />
-        ))}
-      </motion.div>
-
-      {/* B2B KPIs */}
+      {/* All Stats in 3 Columns */}
       <motion.div
         variants={containerVariants}
         initial="hidden"
         animate="visible"
         className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"
       >
-        {b2bStats.map((stat, index) => (
+        {[...salesStats, ...b2bStats].map((stat, index) => (
           <StatCard key={index} {...stat} />
         ))}
-        {/* Spacer card to balance layout / future KPIs */}
-        <div className="hidden lg:block bg-gradient-to-r from-gray-50/60 to-gray-100/60 dark:from-gray-900/60 dark:to-gray-800/60 border border-dashed border-gray-300 dark:border-gray-700 rounded-xl p-4 text-sm text-gray-500 dark:text-gray-400 transition-colors duration-300">
-          Optimise for key B2B outcomes like RFQs won, contract value, and reorder cadence.
-        </div>
       </motion.div>
 
       {/* Main Content Grid */}

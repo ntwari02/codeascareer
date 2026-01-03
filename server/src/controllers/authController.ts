@@ -81,6 +81,13 @@ export async function login(req: Request, res: Response) {
       return res.status(400).json({ message: 'Invalid email or password' });
     }
 
+    // Check if user account is inactive or banned
+    if (user.accountStatus === 'inactive' || user.accountStatus === 'banned') {
+      return res.status(403).json({ 
+        message: 'Your account has been deactivated. Please contact support for assistance.' 
+      });
+    }
+
     // Check if user is OAuth-only (no password set)
     if (!user.passwordHash || user.passwordHash.trim() === '') {
       return res.status(400).json({ 
@@ -315,6 +322,11 @@ export async function googleCallback(req: Request, res: Response) {
     let user = await User.findOne({ $or: [{ email }, { googleId }] });
 
     if (user) {
+      // Check if user account is inactive or banned
+      if (user.accountStatus === 'inactive' || user.accountStatus === 'banned') {
+        return res.redirect(`${CLIENT_URL}/login?error=account_deactivated`);
+      }
+
       // User exists - update Google ID if not set, and login
       if (!user.googleId && googleId) {
         user.googleId = googleId;
@@ -432,6 +444,13 @@ export async function completeGoogleRegistration(req: Request, res: Response) {
     let user = await User.findOne({ $or: [{ email }, { googleId }] });
     
     if (user) {
+      // Check if user account is inactive or banned
+      if (user.accountStatus === 'inactive' || user.accountStatus === 'banned') {
+        return res.status(403).json({ 
+          message: 'Your account has been deactivated. Please contact support for assistance.' 
+        });
+      }
+
       // User already exists - generate token and login
       const token = generateAuthToken(user);
       return res.json({

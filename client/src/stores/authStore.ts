@@ -56,6 +56,12 @@ export const useAuthStore = create<AuthState>((set) => ({
       return { success: true };
     } catch (error: any) {
       console.error('Login error:', error);
+      // If account is deactivated, clear any existing auth data
+      if (error.message?.includes('deactivated') || error.message?.includes('403')) {
+        localStorage.removeItem('user');
+        localStorage.removeItem('auth_token');
+        set({ user: null });
+      }
       return { success: false, error: error.message || 'Network error. Please try again.' };
     }
   },
@@ -111,8 +117,9 @@ export const useAuthStore = create<AuthState>((set) => ({
               set({ user: userProfile, loading: false, initialized: true });
               return;
             } catch (e: any) {
-              // Token invalid or network error, clear storage if it's an auth error
-              if (e.message?.includes('401') || e.message?.includes('Authentication')) {
+              // Token invalid, auth error, or account deactivated - clear storage
+              if (e.message?.includes('401') || e.message?.includes('Authentication') || 
+                  e.message?.includes('403') || e.message?.includes('deactivated')) {
                 localStorage.removeItem('user');
                 localStorage.removeItem('auth_token');
                 set({ user: null, loading: false, initialized: true });

@@ -1,6 +1,15 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { adminAPI } from '../../lib/api';
+import { useToastStore } from '../../stores/toastStore';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog';
+import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import {
   Users,
   UserPlus,
@@ -18,9 +27,19 @@ import {
   ChevronDown,
   Loader2,
   X,
+  MapPin,
+  Calendar,
+  DollarSign,
+  Package,
+  Edit,
+  Trash2,
+  Power,
+  PowerOff,
+  Eye,
+  ChevronLeft,
 } from 'lucide-react';
 
-type CustomerStatus = 'active' | 'banned' | 'pending';
+type CustomerStatus = 'active' | 'banned' | 'pending' | 'warned' | 'inactive';
 type KycStatus = 'verified' | 'pending' | 'rejected';
 type StaffRole = 'Super Admin' | 'Operations' | 'Support' | 'Finance' | 'Catalog';
 
@@ -29,6 +48,7 @@ interface CustomerRecord {
   name: string;
   email: string;
   phone: string;
+  avatarUrl?: string;
   status: CustomerStatus;
   kyc: KycStatus;
   orders: number;
@@ -36,6 +56,7 @@ interface CustomerRecord {
   lastOrder: string;
   tickets: number;
   notes: string;
+  userId?: string;
 }
 
 interface StaffRecord {
@@ -140,6 +161,10 @@ export default function UserManagement() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [addUserOpen, setAddUserOpen] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalRecords, setTotalRecords] = useState(0);
+  const [pageLimit] = useState(10);
   const [newCustomer, setNewCustomer] = useState<NewCustomerForm>({
     name: '',
     email: '',
@@ -178,36 +203,294 @@ export default function UserManagement() {
   const [syncProgress, setSyncProgress] = useState(0);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [syncLogs, setSyncLogs] = useState<SyncLog[]>([
-    { timestamp: '09:20', detail: 'Last sync completed successfully (2 modules)' },
-    { timestamp: '08:05', detail: 'Flagged 3 pending KYC accounts for review' },
+    { timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), detail: 'Ready to sync from MongoDB database' },
   ]);
   const [tabMenuOpen, setTabMenuOpen] = useState(false);
   const tabMenuRef = useRef<HTMLDivElement | null>(null);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [viewUserModal, setViewUserModal] = useState<{ open: boolean; userData: any | null }>({
+    open: false,
+    userData: null,
+  });
+  const [warnConfirmModal, setWarnConfirmModal] = useState<{ open: boolean; customer: CustomerRecord | null }>({
+    open: false,
+    customer: null,
+  });
+  const [toggleActiveModal, setToggleActiveModal] = useState<{ open: boolean; customer: CustomerRecord | null; action: 'activate' | 'deactivate' }>({
+    open: false,
+    customer: null,
+    action: 'activate',
+  });
+  const [editUserModal, setEditUserModal] = useState<{ open: boolean; user: CustomerRecord | null }>({
+    open: false,
+    user: null,
+  });
+  const [deleteConfirmModal, setDeleteConfirmModal] = useState<{ open: boolean; customer: CustomerRecord | null }>({
+    open: false,
+    customer: null,
+  });
+  const [editFormData, setEditFormData] = useState<{
+    fullName: string;
+    email: string;
+    phone: string;
+    role: 'buyer' | 'seller' | 'admin';
+    location: string;
+    accountStatus: CustomerStatus;
+    password: string;
+  }>({
+    fullName: '',
+    email: '',
+    phone: '',
+    role: 'buyer',
+    location: '',
+    accountStatus: 'active',
+    password: '',
+  });
+  const [editFormErrors, setEditFormErrors] = useState<Record<string, string>>({});
+  const [userStats, setUserStats] = useState<{
+    totalCustomers: number;
+    avgOrdersPerCustomer: number;
+    riskAccounts: number;
+    verifiedKYC: number;
+    customerChange: number;
+  } | null>(null);
+  const [statsLoading, setStatsLoading] = useState(true);
+  const { showToast } = useToastStore();
+
+  // Load user statistics
+  const loadUserStats = async () => {
+    try {
+      setStatsLoading(true);
+      const stats = await adminAPI.getUserStats();
+      setUserStats(stats);
+    } catch (err: any) {
+      console.error('Failed to load user stats:', err);
+      // Set default values on error
+      setUserStats({
+        totalCustomers: 0,
+        avgOrdersPerCustomer: 0,
+        riskAccounts: 0,
+        verifiedKYC: 0,
+        customerChange: 0,
+      });
+    } finally {
+      setStatsLoading(false);
+    }
+  };
 
   // Load buyers data from API
   useEffect(() => {
     if (activeTab === 'customers') {
-      loadBuyers();
+      setCurrentPage(1);
+      loadBuyers(1);
+      loadUserStats();
     }
   }, [activeTab]);
 
-  const loadBuyers = async () => {
+  // Reload when filters or search change
+  useEffect(() => {
+    if (activeTab === 'customers') {
+      setCurrentPage(1);
+      loadBuyers(1);
+    }
+  }, [statusFilter, searchQuery]);
+
+  const loadBuyers = async (page: number = currentPage) => {
     try {
       setLoading(true);
       setError(null);
       const response = await adminAPI.getBuyers({
         status: statusFilter !== 'all' ? statusFilter : undefined,
         search: searchQuery || undefined,
-        page: 1,
-        limit: 100,
+        page: page,
+        limit: pageLimit,
       });
       setCustomerRows(response.customers);
+      setTotalPages(response.pagination.totalPages);
+      setTotalRecords(response.pagination.total);
+      setCurrentPage(response.pagination.page);
     } catch (err: any) {
       console.error('Failed to load buyers:', err);
       setError(err.message || 'Failed to load buyers');
       setCustomerRows([]);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleViewUser = async (customer: CustomerRecord) => {
+    if (!customer.userId) {
+      showToast('User ID not available. Please refresh the page.', 'error');
+      return;
+    }
+    try {
+      setActionLoading(customer.id);
+      const response = await adminAPI.getUserDetails(customer.userId);
+      setViewUserModal({ open: true, userData: response.user });
+    } catch (err: any) {
+      console.error('Failed to load user details:', err);
+      showToast(`Failed to load user details: ${err.message || 'Unknown error'}`, 'error');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleWarnUser = (customer: CustomerRecord) => {
+    if (!customer.userId) {
+      showToast('User ID not available. Please refresh the page.', 'error');
+      return;
+    }
+    setWarnConfirmModal({ open: true, customer });
+  };
+
+  const confirmWarnUser = async () => {
+    const customer = warnConfirmModal.customer;
+    if (!customer || !customer.userId) return;
+
+    try {
+      setActionLoading(customer.id);
+      await adminAPI.updateUserStatus(customer.userId, 'warned');
+      showToast(`User ${customer.name} has been warned.`, 'success');
+      setWarnConfirmModal({ open: false, customer: null });
+      loadBuyers(); // Reload to update status
+      loadUserStats(); // Refresh stats
+    } catch (err: any) {
+      console.error('Failed to warn user:', err);
+      showToast(`Failed to warn user: ${err.message || 'Unknown error'}`, 'error');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleToggleActive = (customer: CustomerRecord) => {
+    if (!customer.userId) {
+      showToast('User ID not available. Please refresh the page.', 'error');
+      return;
+    }
+    const isCurrentlyActive = customer.status === 'active';
+    setToggleActiveModal({ 
+      open: true, 
+      customer,
+      action: isCurrentlyActive ? 'deactivate' : 'activate'
+    });
+  };
+
+  const confirmToggleActive = async () => {
+    const customer = toggleActiveModal.customer;
+    if (!customer || !customer.userId) return;
+
+    try {
+      setActionLoading(customer.id);
+      const newStatus = toggleActiveModal.action === 'activate' ? 'active' : 'inactive';
+      await adminAPI.updateUserStatus(customer.userId, newStatus);
+      showToast(
+        `User ${customer.name} has been ${toggleActiveModal.action === 'activate' ? 'activated' : 'deactivated'}.`, 
+        'success'
+      );
+      setToggleActiveModal({ open: false, customer: null, action: 'activate' });
+      loadBuyers(); // Reload to update status
+      loadUserStats(); // Refresh stats
+    } catch (err: any) {
+      console.error(`Failed to ${toggleActiveModal.action} user:`, err);
+      showToast(`Failed to ${toggleActiveModal.action} user: ${err.message || 'Unknown error'}`, 'error');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleEditUser = async (customer: CustomerRecord) => {
+    if (!customer.userId) {
+      showToast('User ID not available. Please refresh the page.', 'error');
+      return;
+    }
+    try {
+      setActionLoading(customer.id);
+      const response = await adminAPI.getUserDetails(customer.userId);
+      setEditFormData({
+        fullName: response.user.name,
+        email: response.user.email,
+        phone: response.user.phone || '',
+        role: (response.user.role as 'buyer' | 'seller' | 'admin') || 'buyer',
+        location: response.user.location || '',
+        accountStatus: response.user.status as CustomerStatus,
+        password: '', // Don't pre-fill password
+      });
+      setEditUserModal({ open: true, user: customer });
+    } catch (err: any) {
+      console.error('Failed to load user details:', err);
+      showToast(`Failed to load user details: ${err.message || 'Unknown error'}`, 'error');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleSaveEdit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const user = editUserModal.user;
+    if (!user || !user.userId) return;
+
+    const errors: Record<string, string> = {};
+    if (!editFormData.fullName.trim()) errors.fullName = 'Full name is required';
+    if (!editFormData.email.trim()) errors.email = 'Email is required';
+    if (!editFormData.email.includes('@')) errors.email = 'Invalid email format';
+
+    if (Object.keys(errors).length) {
+      setEditFormErrors(errors);
+      return;
+    }
+
+    try {
+      setActionLoading(user.id);
+      const updateData: any = {
+        fullName: editFormData.fullName.trim(),
+        email: editFormData.email.trim(),
+        phone: editFormData.phone.trim() || undefined,
+        role: editFormData.role,
+        location: editFormData.location.trim() || undefined,
+        accountStatus: editFormData.accountStatus,
+      };
+      if (editFormData.password.trim()) {
+        updateData.password = editFormData.password;
+      }
+
+      await adminAPI.updateUser(user.userId, updateData);
+      showToast(`User ${editFormData.fullName} has been updated.`, 'success');
+      setEditUserModal({ open: false, user: null });
+      setEditFormErrors({});
+      loadBuyers();
+      loadUserStats(); // Refresh stats
+    } catch (err: any) {
+      console.error('Failed to update user:', err);
+      showToast(`Failed to update user: ${err.message || 'Unknown error'}`, 'error');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleDeleteUser = (customer: CustomerRecord) => {
+    if (!customer.userId) {
+      showToast('User ID not available. Please refresh the page.', 'error');
+      return;
+    }
+    setDeleteConfirmModal({ open: true, customer });
+  };
+
+  const confirmDeleteUser = async () => {
+    const customer = deleteConfirmModal.customer;
+    if (!customer || !customer.userId) return;
+
+    try {
+      setActionLoading(customer.id);
+      await adminAPI.deleteUser(customer.userId);
+      showToast(`User ${customer.name} has been deleted.`, 'success');
+      setDeleteConfirmModal({ open: false, customer: null });
+      loadBuyers();
+      loadUserStats(); // Refresh stats
+    } catch (err: any) {
+      console.error('Failed to delete user:', err);
+      showToast(`Failed to delete user: ${err.message || 'Unknown error'}`, 'error');
+    } finally {
+      setActionLoading(null);
     }
   };
 
@@ -250,7 +533,7 @@ export default function UserManagement() {
     );
   };
 
-  const handleStartSync = () => {
+  const handleStartSync = async () => {
     if (!syncScopes.some((scope) => scope.enabled)) {
       setSyncError('Select at least one module to sync');
       return;
@@ -259,13 +542,66 @@ export default function UserManagement() {
     setSyncError(null);
     setSyncProgress(0);
     setSyncing(true);
+    
+    const startTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     setSyncLogs((logs) => [
       {
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        timestamp: startTime,
         detail: `Sync started for ${enabledCount} module${enabledCount > 1 ? 's' : ''}`,
       },
       ...logs,
     ]);
+
+    try {
+      // Simulate progress updates while syncing
+      const progressInterval = setInterval(() => {
+        setSyncProgress((prev) => {
+          if (prev >= 90) {
+            clearInterval(progressInterval);
+            return 90;
+          }
+          return Math.min(prev + 10, 90);
+        });
+      }, 200);
+
+      // Sync based on enabled scopes
+      const syncPromises: Promise<void>[] = [];
+      
+      if (syncScopes.find(s => s.id === 'customers' && s.enabled)) {
+        syncPromises.push(loadBuyers());
+        syncPromises.push(loadUserStats());
+      }
+      
+      // Wait for all sync operations to complete
+      await Promise.all(syncPromises);
+      
+      clearInterval(progressInterval);
+      setSyncProgress(100);
+      
+      const endTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      setSyncLogs((logs) => [
+        {
+          timestamp: endTime,
+          detail: `Database sync completed successfully (${enabledCount} module${enabledCount > 1 ? 's' : ''})`,
+        },
+        ...logs,
+      ]);
+      
+      showToast(`Successfully synced ${enabledCount} module${enabledCount > 1 ? 's' : ''} from MongoDB`, 'success');
+    } catch (error: any) {
+      console.error('Sync error:', error);
+      setSyncError(error.message || 'Failed to sync data from MongoDB');
+      const errorTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      setSyncLogs((logs) => [
+        {
+          timestamp: errorTime,
+          detail: `Sync failed: ${error.message || 'Unknown error'}`,
+        },
+        ...logs,
+      ]);
+    } finally {
+      setSyncing(false);
+    }
   };
 
   const closeSyncModal = () => {
@@ -320,33 +656,41 @@ export default function UserManagement() {
     setFormErrors({});
   };
 
-  const handleAddUser = (event: FormEvent<HTMLFormElement>) => {
+  const handleAddUser = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const errors: Record<string, string> = {};
     if (!newCustomer.name.trim()) errors.name = 'Full name is required';
     if (!newCustomer.email.trim()) errors.email = 'Email is required';
+    if (!newCustomer.email.includes('@')) errors.email = 'Invalid email format';
     if (!newCustomer.phone.trim()) errors.phone = 'Phone is required';
     if (Object.keys(errors).length) {
       setFormErrors(errors);
       return;
     }
-    const id = `CUS-${Math.floor(1000 + Math.random() * 9000)}`;
-    const record: CustomerRecord = {
-      id,
-      name: newCustomer.name.trim(),
-      email: newCustomer.email.trim(),
-      phone: newCustomer.phone.trim(),
-      status: newCustomer.status,
-      kyc: newCustomer.kyc,
-      orders: newCustomer.orders || 0,
-      totalSpent: newCustomer.totalSpent || 0,
-      lastOrder: newCustomer.lastOrder,
-      tickets: newCustomer.tickets || 0,
-      notes: newCustomer.notes.trim() || 'New customer record',
-    };
-    setCustomerRows((prev) => [record, ...prev]);
-    setAddUserOpen(false);
-    resetForm();
+
+    try {
+      setLoading(true);
+      await adminAPI.createUser({
+        fullName: newCustomer.name.trim(),
+        email: newCustomer.email.trim(),
+        phone: newCustomer.phone.trim(),
+        role: 'buyer',
+        location: newCustomer.notes.trim() || undefined,
+      });
+      showToast(`User ${newCustomer.name} has been created successfully.`, 'success');
+      setAddUserOpen(false);
+      resetForm();
+      loadBuyers(); // Reload to show the new user
+      loadUserStats(); // Refresh stats
+    } catch (err: any) {
+      console.error('Failed to create user:', err);
+      showToast(`Failed to create user: ${err.message || 'Unknown error'}`, 'error');
+      if (err.message?.includes('email')) {
+        setFormErrors({ email: 'Email is already taken' });
+      }
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -419,10 +763,32 @@ export default function UserManagement() {
       {activeTab === 'customers' && (
         <>
           <section className="grid gap-4 lg:grid-cols-4">
-            <StatCard icon={Users} label="Total Customers" value="42,190" helper="+12.4% vs last month" />
-            <StatCard icon={ShoppingBag} label="Avg Orders / Customer" value="4.8" helper="+0.5 trend" />
-            <StatCard icon={AlertTriangle} label="Risk Accounts" value="64" helper="Need manual review" tone="warning" />
-            <StatCard icon={ShieldCheck} label="Verified KYC" value="91%" helper="+3% compliance" tone="success" />
+            <StatCard 
+              icon={Users} 
+              label="Total Customers" 
+              value={statsLoading ? '...' : userStats?.totalCustomers.toLocaleString() || '0'} 
+              helper={userStats?.customerChange !== undefined ? `${userStats.customerChange >= 0 ? '+' : ''}${userStats.customerChange.toFixed(1)}% vs last month` : 'Loading...'} 
+            />
+            <StatCard 
+              icon={ShoppingBag} 
+              label="Avg Orders / Customer" 
+              value={statsLoading ? '...' : userStats?.avgOrdersPerCustomer.toFixed(1) || '0.0'} 
+              helper="Average orders per customer" 
+            />
+            <StatCard 
+              icon={AlertTriangle} 
+              label="Risk Accounts" 
+              value={statsLoading ? '...' : userStats?.riskAccounts.toString() || '0'} 
+              helper="Need manual review" 
+              tone="warning" 
+            />
+            <StatCard 
+              icon={ShieldCheck} 
+              label="Verified KYC" 
+              value={statsLoading ? '...' : `${userStats?.verifiedKYC || 0}%`} 
+              helper="Active accounts" 
+              tone="success" 
+            />
           </section>
 
           <section className="space-y-4 rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-gray-900">
@@ -447,7 +813,7 @@ export default function UserManagement() {
                 >
                   <Filter className="h-4 w-4" /> All Status
                 </button>
-                {(['active', 'pending', 'banned'] as const).map((status) => (
+                {(['active', 'pending', 'inactive', 'warned'] as const).map((status) => (
                   <button
                     key={status}
                     className={`rounded-xl border px-3 py-2 text-xs font-semibold capitalize ${
@@ -499,9 +865,34 @@ export default function UserManagement() {
                       filteredCustomers.map((customer) => (
                     <tr key={customer.id} className="bg-white hover:bg-gray-50 dark:bg-gray-900 dark:hover:bg-gray-800/60">
                       <td className="px-4 py-4">
-                        <div className="space-y-1">
-                          <p className="font-semibold text-gray-900 dark:text-white">{customer.name}</p>
-                          <p className="text-xs text-gray-500">{customer.id}</p>
+                        <div className="flex items-center gap-3">
+                          {customer.avatarUrl ? (
+                            <img
+                              src={customer.avatarUrl.startsWith('http') ? customer.avatarUrl : `http://localhost:5000${customer.avatarUrl}`}
+                              alt={customer.name}
+                              className="h-10 w-10 rounded-full object-cover border-2 border-gray-200 dark:border-gray-700"
+                              onError={(e) => {
+                                // Fallback to initials if image fails to load
+                                const target = e.target as HTMLImageElement;
+                                target.style.display = 'none';
+                                const parent = target.parentElement;
+                                if (parent && !parent.querySelector('.avatar-fallback')) {
+                                  const fallback = document.createElement('div');
+                                  fallback.className = 'avatar-fallback h-10 w-10 rounded-full bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center text-white font-semibold text-sm border-2 border-gray-200 dark:border-gray-700';
+                                  fallback.textContent = customer.name.charAt(0).toUpperCase();
+                                  parent.insertBefore(fallback, target);
+                                }
+                              }}
+                            />
+                          ) : (
+                            <div className="h-10 w-10 rounded-full bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center text-white font-semibold text-sm border-2 border-gray-200 dark:border-gray-700">
+                              {customer.name.charAt(0).toUpperCase()}
+                            </div>
+                          )}
+                          <div className="space-y-1">
+                            <p className="font-semibold text-gray-900 dark:text-white">{customer.name}</p>
+                            <p className="text-xs text-gray-500">{customer.id}</p>
+                          </div>
                         </div>
                       </td>
                       <td className="px-4 py-4 text-sm text-gray-600 dark:text-gray-300">
@@ -526,15 +917,56 @@ export default function UserManagement() {
                       </td>
                       <td className="px-4 py-4 text-sm text-gray-500 dark:text-gray-300">{customer.lastOrder}</td>
                       <td className="px-4 py-4 text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          <button className="rounded-full border border-gray-200 p-2 text-xs text-gray-600 hover:border-emerald-400 dark:border-gray-700 dark:text-gray-400 dark:hover:border-emerald-400">
-                            View
+                        <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            onClick={() => handleViewUser(customer)}
+                            disabled={actionLoading === customer.id}
+                            className="rounded-lg border border-gray-200 p-1.5 text-gray-600 hover:border-emerald-400 hover:bg-emerald-50 hover:text-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed dark:border-gray-700 dark:text-gray-400 dark:hover:border-emerald-400 dark:hover:bg-emerald-900/20 dark:hover:text-emerald-400 transition-colors"
+                            title="View user details"
+                          >
+                            {actionLoading === customer.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Eye className="h-4 w-4" />}
                           </button>
-                          <button className="rounded-full border border-gray-200 p-2 text-xs text-gray-600 hover:border-amber-400 dark:border-gray-700 dark:text-gray-400 dark:hover:border-amber-400">
-                            Warn
+                          <button
+                            onClick={() => handleEditUser(customer)}
+                            disabled={actionLoading === customer.id}
+                            className="rounded-lg border border-gray-200 p-1.5 text-gray-600 hover:border-blue-400 hover:bg-blue-50 hover:text-blue-600 disabled:opacity-50 disabled:cursor-not-allowed dark:border-gray-700 dark:text-gray-400 dark:hover:border-blue-400 dark:hover:bg-blue-900/20 dark:hover:text-blue-400 transition-colors"
+                            title="Edit user"
+                          >
+                            {actionLoading === customer.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Edit className="h-4 w-4" />}
                           </button>
-                          <button className="rounded-full border border-gray-200 p-2 text-xs text-gray-600 hover:border-red-400 dark:border-gray-700 dark:text-gray-400 dark:hover:border-red-400">
-                            Ban
+                          <button
+                            onClick={() => handleWarnUser(customer)}
+                            disabled={actionLoading === customer.id || customer.status === 'inactive'}
+                            className="rounded-lg border border-gray-200 p-1.5 text-gray-600 hover:border-amber-400 hover:bg-amber-50 hover:text-amber-600 disabled:opacity-50 disabled:cursor-not-allowed dark:border-gray-700 dark:text-gray-400 dark:hover:border-amber-400 dark:hover:bg-amber-900/20 dark:hover:text-amber-400 transition-colors"
+                            title="Warn user"
+                          >
+                            {actionLoading === customer.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <AlertTriangle className="h-4 w-4" />}
+                          </button>
+                          <button
+                            onClick={() => handleToggleActive(customer)}
+                            disabled={actionLoading === customer.id}
+                            className={`rounded-lg border p-1.5 disabled:opacity-50 disabled:cursor-not-allowed dark:border-gray-700 transition-colors ${
+                              customer.status === 'active'
+                                ? 'border-orange-300 text-orange-600 hover:border-orange-400 hover:bg-orange-50 dark:text-orange-400 dark:hover:border-orange-500 dark:hover:bg-orange-900/20'
+                                : 'border-emerald-300 text-emerald-600 hover:border-emerald-400 hover:bg-emerald-50 dark:text-emerald-400 dark:hover:border-emerald-500 dark:hover:bg-emerald-900/20'
+                            }`}
+                            title={customer.status === 'active' ? 'Deactivate user' : 'Activate user'}
+                          >
+                            {actionLoading === customer.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : customer.status === 'active' ? (
+                              <PowerOff className="h-4 w-4" />
+                            ) : (
+                              <Power className="h-4 w-4" />
+                            )}
+                          </button>
+                          <button
+                            onClick={() => handleDeleteUser(customer)}
+                            disabled={actionLoading === customer.id}
+                            className="rounded-lg border border-gray-200 p-1.5 text-red-600 hover:border-red-500 hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed dark:border-gray-700 dark:text-red-400 dark:hover:border-red-500 dark:hover:bg-red-900/20 transition-colors"
+                            title="Delete user"
+                          >
+                            {actionLoading === customer.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
                           </button>
                         </div>
                       </td>
@@ -545,69 +977,59 @@ export default function UserManagement() {
                 </table>
               </div>
             )}
-          </section>
 
-          <section className="grid gap-6 lg:grid-cols-3">
-            <div className="space-y-3 rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900">
-              <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Support Tickets</h3>
-              <p className="text-xs text-gray-500 dark:text-gray-400">Live queue · assignable</p>
-              <div className="space-y-3 text-sm">
-                {customerRows
-                  .filter((customer) => customer.tickets > 0)
-                  .map((customer) => (
-                    <div key={customer.id} className="rounded-xl border border-gray-100 p-3 dark:border-gray-800">
-                      <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
-                        <span>{customer.name}</span>
-                        <span>{customer.tickets} open</span>
-                      </div>
-                      <p className="mt-1 text-xs text-gray-600 dark:text-gray-300">{customer.notes}</p>
-                      <button 
-                        onClick={() => navigate('/admin/support', { state: { customerId: customer.id, customerName: customer.name } })}
-                        className="mt-2 text-xs font-semibold text-emerald-500 hover:text-emerald-600 transition-colors cursor-pointer"
-                      >
-                        Open ticket
-                      </button>
+            {/* Pagination Controls */}
+            {totalPages > 1 && (
+              <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 rounded-b-xl">
+                <div className="text-sm text-gray-600 dark:text-gray-400">
+                  Showing {((currentPage - 1) * pageLimit) + 1} to {Math.min(currentPage * pageLimit, totalRecords)} of {totalRecords} results
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => loadBuyers(currentPage - 1)}
+                    disabled={currentPage === 1 || loading}
+                    className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800"
+                  >
+                    Previous
+                  </button>
+                  <div className="flex items-center gap-1">
+                    {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                      let pageNum;
+                      if (totalPages <= 5) {
+                        pageNum = i + 1;
+                      } else if (currentPage <= 3) {
+                        pageNum = i + 1;
+                      } else if (currentPage >= totalPages - 2) {
+                        pageNum = totalPages - 4 + i;
+                      } else {
+                        pageNum = currentPage - 2 + i;
+                      }
+                      return (
+                        <button
+                          key={pageNum}
+                          onClick={() => loadBuyers(pageNum)}
+                          disabled={loading}
+                          className={`rounded-lg px-3 py-1.5 text-sm font-semibold ${
+                            currentPage === pageNum
+                              ? 'bg-emerald-500 text-white'
+                              : 'border border-gray-300 text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800'
+                          } disabled:opacity-50 disabled:cursor-not-allowed`}
+                        >
+                          {pageNum}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <button
+                    onClick={() => loadBuyers(currentPage + 1)}
+                    disabled={currentPage === totalPages || loading}
+                    className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800"
+                  >
+                    Next
+                  </button>
+                </div>
               </div>
-                  ))}
-          </div>
-        </div>
-
-            <div className="space-y-3 rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900">
-              <h3 className="text-sm font-semibold text-gray-900 dark:text-white">After-Sales</h3>
-              <p className="text-xs text-gray-500 dark:text-gray-400">Refunds · returns · replacements</p>
-              <ul className="space-y-2 text-sm text-gray-600 dark:text-gray-300">
-                <li>• 12 refund requests awaiting review</li>
-                <li>• 5 return parcels in transit</li>
-                <li>• 3 replacement orders approved today</li>
-                <li>• SLA: 94% resolved under 48h</li>
-              </ul>
-              <button 
-                onClick={() => navigate('/admin/finance', { state: { section: 'refunds' } })}
-                className="text-xs font-semibold text-emerald-500 hover:text-emerald-600 transition-colors cursor-pointer"
-              >
-                Open resolution center
-              </button>
-            </div>
-
-            <div className="space-y-3 rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900">
-              <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Notes & Highlights</h3>
-              <div className="space-y-2 text-xs text-gray-600 dark:text-gray-300">
-                <p>• Segment VIP buyers for Ramadan sale campaign.</p>
-                <p>• Alert: high-risk cluster flagged for duplicate cards.</p>
-                <p>• Launch loyalty upgrade for wholesalers.</p>
-                <p>• Compliance: KYC backlog ETA 72h.</p>
-              </div>
-              <button 
-                onClick={() => {
-                  // Navigate to users page (current page) and scroll to top, or could open a CRM modal in the future
-                  window.scrollTo({ top: 0, behavior: 'smooth' });
-                  // Could also navigate to a dedicated CRM page if it exists: navigate('/admin/crm');
-                }}
-                className="text-xs font-semibold text-emerald-500 hover:text-emerald-600 transition-colors cursor-pointer"
-              >
-                View CRM workspace
-              </button>
-            </div>
+            )}
           </section>
         </>
       )}
@@ -785,10 +1207,10 @@ export default function UserManagement() {
               <X className="h-4 w-4" />
             </button>
             <div className="mb-6">
-              <p className="text-xs uppercase tracking-[0.4em] text-emerald-500">Directory Sync</p>
-              <h2 className="text-2xl font-semibold text-gray-900 dark:text-white">Supabase identity sync</h2>
+              <p className="text-xs uppercase tracking-[0.4em] text-emerald-500">Database Sync</p>
+              <h2 className="text-2xl font-semibold text-gray-900 dark:text-white">MongoDB database sync</h2>
               <p className="text-sm text-gray-500 dark:text-gray-400">
-                Align customer, staff, and authorization modules with upstream sources.
+                Refresh customer, staff, and authorization data from MongoDB database.
               </p>
             </div>
             <div className="grid gap-6 lg:grid-cols-2">
@@ -841,11 +1263,11 @@ export default function UserManagement() {
                   </div>
                   {syncing ? (
                     <p className="mt-3 flex items-center gap-2 text-xs text-emerald-500">
-                      <Loader2 className="h-4 w-4 animate-spin" /> Streaming updates from Supabase & Stripe webhooks
+                      <Loader2 className="h-4 w-4 animate-spin" /> Syncing data from MongoDB database
                     </p>
                   ) : (
                     <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">
-                      Select scopes then tap run sync to refresh data.
+                      Select scopes then tap run sync to refresh data from MongoDB.
                     </p>
                   )}
                 </div>
@@ -905,24 +1327,25 @@ export default function UserManagement() {
           role="presentation"
         >
           <div
-            className="relative w-full max-w-lg rounded-2xl border border-gray-200 bg-white p-6 shadow-2xl dark:border-gray-700 dark:bg-gray-900"
+            className="relative w-full max-w-lg max-h-[90vh] rounded-2xl border border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-900 flex flex-col"
             onClick={(event) => event.stopPropagation()}
           >
             <button
               onClick={closeAddUserModal}
-              className="absolute right-4 top-4 rounded-full border border-gray-200 p-1 text-gray-500 hover:text-gray-900 dark:border-gray-700 dark:text-gray-400 dark:hover:text-white"
+              className="absolute right-4 top-4 z-10 rounded-full border border-gray-200 p-1 text-gray-500 hover:text-gray-900 dark:border-gray-700 dark:text-gray-400 dark:hover:text-white"
               aria-label="Close add user form"
             >
               <X className="h-4 w-4" />
             </button>
-            <div className="mb-6">
+            <div className="mb-6 flex-shrink-0 px-6 pt-6">
               <p className="text-xs uppercase tracking-[0.4em] text-emerald-500">Create</p>
               <h2 className="text-2xl font-semibold text-gray-900 dark:text-white">Add customer profile</h2>
               <p className="text-sm text-gray-500 dark:text-gray-400">
                 Capture the essentials so the ops team can start onboarding immediately.
               </p>
             </div>
-            <form className="space-y-5" onSubmit={handleAddUser}>
+            <div className="flex-1 overflow-y-auto overflow-x-hidden px-6 scroll-smooth [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:dark:bg-gray-600 hover:[&::-webkit-scrollbar-thumb]:bg-gray-400 dark:hover:[&::-webkit-scrollbar-thumb]:bg-gray-500">
+              <form id="add-user-form" className="space-y-5 pb-4" onSubmit={handleAddUser}>
               <div className="grid gap-4 sm:grid-cols-2">
                 <InputField
                   label="Full name"
@@ -1011,6 +1434,9 @@ export default function UserManagement() {
                   placeholder="Risk profile, region, funnel, etc."
                 />
               </div>
+              </form>
+            </div>
+            <div className="flex-shrink-0 px-6 pb-6 pt-4 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <p className="text-xs text-gray-500 dark:text-gray-400">
                   This profile will appear immediately in the customer grid once saved.
@@ -1027,17 +1453,293 @@ export default function UserManagement() {
                     Cancel
                   </button>
                   <button
-                    type="submit"
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      const form = document.getElementById('add-user-form') as HTMLFormElement;
+                      if (form) {
+                        form.requestSubmit();
+                      }
+                    }}
                     className="rounded-xl bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 px-6 py-2 text-sm font-semibold text-white shadow-lg shadow-emerald-500/40"
                   >
                     Save customer
                   </button>
                 </div>
               </div>
-            </form>
+            </div>
           </div>
         </div>
       )}
+
+      {/* View User Details Modal */}
+      <Dialog open={viewUserModal.open} onOpenChange={(open) => setViewUserModal({ open, userData: null })}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>User Details</DialogTitle>
+            <DialogDescription>Complete information about this user account</DialogDescription>
+          </DialogHeader>
+          {viewUserModal.userData && (
+            <div className="space-y-6">
+              {/* User Header */}
+              <div className="flex items-center gap-4 pb-4 border-b border-gray-200 dark:border-gray-700">
+                {viewUserModal.userData.avatarUrl ? (
+                  <img
+                    src={viewUserModal.userData.avatarUrl.startsWith('http') ? viewUserModal.userData.avatarUrl : `http://localhost:5000${viewUserModal.userData.avatarUrl}`}
+                    alt={viewUserModal.userData.name}
+                    className="h-16 w-16 rounded-full object-cover border-2 border-gray-200 dark:border-gray-700"
+                    onError={(e) => {
+                      const target = e.target as HTMLImageElement;
+                      target.style.display = 'none';
+                      const parent = target.parentElement;
+                      if (parent && !parent.querySelector('.avatar-fallback')) {
+                        const fallback = document.createElement('div');
+                        fallback.className = 'avatar-fallback h-16 w-16 rounded-full bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center text-white font-semibold text-xl border-2 border-gray-200 dark:border-gray-700';
+                        fallback.textContent = viewUserModal.userData.name.charAt(0).toUpperCase();
+                        parent.insertBefore(fallback, target);
+                      }
+                    }}
+                  />
+                ) : (
+                  <div className="h-16 w-16 rounded-full bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center text-white font-semibold text-xl border-2 border-gray-200 dark:border-gray-700">
+                    {viewUserModal.userData.name.charAt(0).toUpperCase()}
+                  </div>
+                )}
+                <div className="flex-1">
+                  <h3 className="text-xl font-bold text-gray-900 dark:text-white">{viewUserModal.userData.name}</h3>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">{viewUserModal.userData.email}</p>
+                  <div className="mt-2 flex gap-2">
+                    <Badge tone={statusTone(viewUserModal.userData.status)}>{viewUserModal.userData.status}</Badge>
+                    <Badge tone="neutral">{viewUserModal.userData.role}</Badge>
+                  </div>
+                </div>
+              </div>
+
+              {/* User Information Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="flex items-center gap-3 p-3 rounded-lg bg-gray-50 dark:bg-gray-800">
+                  <Mail className="h-5 w-5 text-gray-400" />
+                  <div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Email</p>
+                    <p className="text-sm font-medium text-gray-900 dark:text-white">{viewUserModal.userData.email}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 p-3 rounded-lg bg-gray-50 dark:bg-gray-800">
+                  <Phone className="h-5 w-5 text-gray-400" />
+                  <div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Phone</p>
+                    <p className="text-sm font-medium text-gray-900 dark:text-white">{viewUserModal.userData.phone || 'N/A'}</p>
+                  </div>
+                </div>
+                {viewUserModal.userData.location && (
+                  <div className="flex items-center gap-3 p-3 rounded-lg bg-gray-50 dark:bg-gray-800">
+                    <MapPin className="h-5 w-5 text-gray-400" />
+                    <div>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">Location</p>
+                      <p className="text-sm font-medium text-gray-900 dark:text-white">{viewUserModal.userData.location}</p>
+                    </div>
+                  </div>
+                )}
+                <div className="flex items-center gap-3 p-3 rounded-lg bg-gray-50 dark:bg-gray-800">
+                  <Calendar className="h-5 w-5 text-gray-400" />
+                  <div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Member Since</p>
+                    <p className="text-sm font-medium text-gray-900 dark:text-white">
+                      {new Date(viewUserModal.userData.createdAt).toLocaleDateString('en-US', {
+                        month: 'long',
+                        day: 'numeric',
+                        year: 'numeric',
+                      })}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 p-3 rounded-lg bg-gray-50 dark:bg-gray-800">
+                  <Package className="h-5 w-5 text-gray-400" />
+                  <div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Total Orders</p>
+                    <p className="text-sm font-medium text-gray-900 dark:text-white">{viewUserModal.userData.orders}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 p-3 rounded-lg bg-gray-50 dark:bg-gray-800">
+                  <DollarSign className="h-5 w-5 text-gray-400" />
+                  <div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Total Spent</p>
+                    <p className="text-sm font-medium text-gray-900 dark:text-white">${viewUserModal.userData.totalSpent.toLocaleString()}</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Statistics */}
+              <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
+                <h4 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">Account Statistics</h4>
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="text-center p-3 rounded-lg bg-emerald-50 dark:bg-emerald-900/20">
+                    <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">{viewUserModal.userData.orders}</p>
+                    <p className="text-xs text-gray-600 dark:text-gray-400">Orders</p>
+                  </div>
+                  <div className="text-center p-3 rounded-lg bg-blue-50 dark:bg-blue-900/20">
+                    <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">{viewUserModal.userData.warningCount}</p>
+                    <p className="text-xs text-gray-600 dark:text-gray-400">Warnings</p>
+                  </div>
+                  <div className="text-center p-3 rounded-lg bg-purple-50 dark:bg-purple-900/20">
+                    <p className="text-2xl font-bold text-purple-600 dark:text-purple-400">
+                      ${viewUserModal.userData.totalSpent > 0 ? (viewUserModal.userData.totalSpent / viewUserModal.userData.orders).toFixed(2) : '0.00'}
+                    </p>
+                    <p className="text-xs text-gray-600 dark:text-gray-400">Avg Order</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Warn User Confirmation Modal */}
+      <ConfirmDialog
+        isOpen={warnConfirmModal.open}
+        onClose={() => setWarnConfirmModal({ open: false, customer: null })}
+        onConfirm={confirmWarnUser}
+        title="Warn User"
+        message={`Are you sure you want to warn ${warnConfirmModal.customer?.name}? This will increment their warning count.`}
+        confirmText="Warn User"
+        cancelText="Cancel"
+        variant="warning"
+      />
+
+      {/* Toggle Active/Inactive Confirmation Modal */}
+      <ConfirmDialog
+        isOpen={toggleActiveModal.open}
+        onClose={() => setToggleActiveModal({ open: false, customer: null, action: 'activate' })}
+        onConfirm={confirmToggleActive}
+        title={toggleActiveModal.action === 'activate' ? 'Activate User' : 'Deactivate User'}
+        message={
+          toggleActiveModal.action === 'activate'
+            ? `Are you sure you want to activate ${toggleActiveModal.customer?.name}? They will be able to access their account again.`
+            : `Are you sure you want to deactivate ${toggleActiveModal.customer?.name}? They will temporarily lose access to their account. You can reactivate them later.`
+        }
+        confirmText={toggleActiveModal.action === 'activate' ? 'Activate User' : 'Deactivate User'}
+        cancelText="Cancel"
+        variant={toggleActiveModal.action === 'activate' ? 'success' : 'warning'}
+      />
+
+      {/* Edit User Modal */}
+      <Dialog open={editUserModal.open} onOpenChange={(open) => !open && setEditUserModal({ open: false, user: null })}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Edit User</DialogTitle>
+            <DialogDescription>Update user information and settings</DialogDescription>
+          </DialogHeader>
+          <form className="space-y-5" onSubmit={handleSaveEdit}>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <InputField
+                label="Full name"
+                value={editFormData.fullName}
+                onChange={(value) => setEditFormData((prev) => ({ ...prev, fullName: value }))}
+                placeholder="e.g. Jane Doe"
+                error={editFormErrors.fullName}
+              />
+              <InputField
+                label="Email address"
+                value={editFormData.email}
+                onChange={(value) => setEditFormData((prev) => ({ ...prev, email: value }))}
+                placeholder="user@example.com"
+                type="email"
+                error={editFormErrors.email}
+              />
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <InputField
+                label="Phone"
+                value={editFormData.phone}
+                onChange={(value) => setEditFormData((prev) => ({ ...prev, phone: value }))}
+                placeholder="+1 555 123 4567"
+                error={editFormErrors.phone}
+              />
+              <InputField
+                label="Location"
+                value={editFormData.location}
+                onChange={(value) => setEditFormData((prev) => ({ ...prev, location: value }))}
+                placeholder="City, Country"
+              />
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <SelectField
+                label="Role"
+                value={editFormData.role}
+                onChange={(value) => setEditFormData((prev) => ({ ...prev, role: value as 'buyer' | 'seller' | 'admin' }))}
+                options={[
+                  { label: 'Buyer', value: 'buyer' },
+                  { label: 'Seller', value: 'seller' },
+                  { label: 'Admin', value: 'admin' },
+                ]}
+              />
+              <SelectField
+                label="Account status"
+                value={editFormData.accountStatus}
+                onChange={(value) => setEditFormData((prev) => ({ ...prev, accountStatus: value as CustomerStatus }))}
+                options={[
+                  { label: 'Active', value: 'active' },
+                  { label: 'Pending', value: 'pending' },
+                  { label: 'Warned', value: 'warned' },
+                  { label: 'Inactive', value: 'inactive' },
+                  { label: 'Banned', value: 'banned' },
+                ]}
+              />
+            </div>
+            <div>
+              <InputField
+                label="New Password (leave empty to keep current)"
+                value={editFormData.password}
+                onChange={(value) => setEditFormData((prev) => ({ ...prev, password: value }))}
+                type="password"
+                placeholder="Enter new password"
+                error={editFormErrors.password}
+              />
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                Only fill this if you want to change the user's password
+              </p>
+            </div>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
+              <button
+                type="button"
+                onClick={() => {
+                  setEditUserModal({ open: false, user: null });
+                  setEditFormErrors({});
+                }}
+                className="rounded-xl border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-600 dark:border-gray-700 dark:text-gray-300"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={actionLoading === editUserModal.user?.id}
+                className="rounded-xl bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 px-6 py-2 text-sm font-semibold text-white shadow-lg shadow-emerald-500/40 disabled:opacity-50"
+              >
+                {actionLoading === editUserModal.user?.id ? (
+                  <>
+                    <Loader2 className="mr-2 inline h-4 w-4 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  'Save Changes'
+                )}
+              </button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete User Confirmation Modal */}
+      <ConfirmDialog
+        isOpen={deleteConfirmModal.open}
+        onClose={() => setDeleteConfirmModal({ open: false, customer: null })}
+        onConfirm={confirmDeleteUser}
+        title="Delete User"
+        message={`Are you sure you want to DELETE ${deleteConfirmModal.customer?.name}? This action is permanent and cannot be undone. All user data will be removed from the system.`}
+        confirmText="Delete User"
+        cancelText="Cancel"
+        variant="danger"
+      />
     </div>
   );
 }
@@ -1171,6 +1873,8 @@ function statusTone(status: CustomerStatus): 'neutral' | 'success' | 'warning' |
   if (status === 'active') return 'success';
   if (status === 'pending') return 'warning';
   if (status === 'banned') return 'danger';
+  if (status === 'warned') return 'warning';
+  if (status === 'inactive') return 'neutral';
   return 'neutral';
 }
 

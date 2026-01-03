@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { AuthTokenPayload } from '../utils/generateToken';
+import { User } from '../models/User';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret';
 
@@ -8,7 +9,7 @@ export interface AuthenticatedRequest extends Request {
   user?: AuthTokenPayload;
 }
 
-export function authenticate(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+export async function authenticate(req: AuthenticatedRequest, res: Response, next: NextFunction) {
   const authHeader = req.headers.authorization;
   let token: string | null = null;
 
@@ -24,6 +25,20 @@ export function authenticate(req: AuthenticatedRequest, res: Response, next: Nex
 
   try {
     const decoded = jwt.verify(token, JWT_SECRET) as AuthTokenPayload;
+    
+    // Check if user account is still active
+    const user = await User.findById(decoded.id).select('accountStatus');
+    if (!user) {
+      return res.status(401).json({ message: 'User not found' });
+    }
+    
+    // Block inactive or banned users from accessing protected routes
+    if (user.accountStatus === 'inactive' || user.accountStatus === 'banned') {
+      return res.status(403).json({ 
+        message: 'Your account has been deactivated. Please contact support for assistance.' 
+      });
+    }
+    
     req.user = decoded;
     next();
   } catch (err) {

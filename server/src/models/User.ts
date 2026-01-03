@@ -98,6 +98,9 @@ export interface IUser extends Document {
   // Seller-specific fields
   sellerVerificationStatus?: SellerVerificationStatus;
   isSellerVerified?: boolean;
+    // Account status
+    accountStatus?: 'active' | 'pending' | 'banned' | 'warned' | 'inactive';
+  warningCount?: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -257,6 +260,16 @@ const userSchema = new Schema<IUser>(
     isSellerVerified: {
       type: Boolean,
       default: false,
+    },
+    // User account status
+    accountStatus: {
+      type: String,
+      enum: ['active', 'pending', 'banned', 'warned', 'inactive'],
+      default: 'active',
+    },
+    warningCount: {
+      type: Number,
+      default: 0,
     },
   },
   { timestamps: true }

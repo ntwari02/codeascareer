@@ -370,6 +370,24 @@ export const authAPI = {
  */
 export const adminAPI = {
   /**
+   * Get user statistics for dashboard
+   */
+  async getUserStats() {
+    const response = await fetch(`${API_BASE_URL}/admin/users/stats`, {
+      method: 'GET',
+      headers: getAuthHeaders(),
+      credentials: 'include',
+    });
+    return handleResponse<{
+      totalCustomers: number;
+      avgOrdersPerCustomer: number;
+      riskAccounts: number;
+      verifiedKYC: number;
+      customerChange: number;
+    }>(response);
+  },
+
+  /**
    * Get all buyers with statistics
    */
   async getBuyers(params?: {
@@ -398,13 +416,15 @@ export const adminAPI = {
         name: string;
         email: string;
         phone: string;
-        status: 'active' | 'pending' | 'banned';
+        avatarUrl?: string;
+        status: 'active' | 'pending' | 'banned' | 'warned' | 'inactive';
         kyc: 'verified' | 'pending' | 'rejected';
         orders: number;
         totalSpent: number;
         lastOrder: string;
         tickets: number;
         notes: string;
+        userId?: string;
       }>;
       pagination: {
         page: number;
@@ -412,6 +432,338 @@ export const adminAPI = {
         total: number;
         totalPages: number;
       };
+    }>(response);
+  },
+
+  /**
+   * Get user details by ID
+   */
+  async getUserDetails(userId: string) {
+    const response = await fetch(`${API_BASE_URL}/admin/users/${userId}`, {
+      method: 'GET',
+      headers: getAuthHeaders(),
+      credentials: 'include',
+    });
+    return handleResponse<{
+      user: {
+        id: string;
+        name: string;
+        email: string;
+        phone: string;
+        location: string;
+        avatarUrl?: string;
+        status: 'active' | 'pending' | 'banned' | 'warned' | 'inactive';
+        warningCount: number;
+        role: string;
+        createdAt: string;
+        orders: number;
+        totalSpent: number;
+        lastOrder: string;
+      };
+    }>(response);
+  },
+
+  /**
+   * Update user status
+   */
+  async updateUserStatus(userId: string, status: 'active' | 'pending' | 'banned' | 'warned' | 'inactive', reason?: string) {
+    const response = await fetch(`${API_BASE_URL}/admin/users/${userId}/status`, {
+      method: 'PATCH',
+      headers: {
+        ...getAuthHeaders(),
+        'Content-Type': 'application/json',
+      },
+      credentials: 'include',
+      body: JSON.stringify({ status, reason }),
+    });
+    return handleResponse<{
+      message: string;
+      user: {
+        id: string;
+        status: string;
+        warningCount: number;
+      };
+    }>(response);
+  },
+
+  /**
+   * Create a new user
+   */
+  async createUser(data: {
+    fullName: string;
+    email: string;
+    phone?: string;
+    role?: 'buyer' | 'seller' | 'admin';
+    password?: string;
+    location?: string;
+  }) {
+    const response = await fetch(`${API_BASE_URL}/admin/users`, {
+      method: 'POST',
+      headers: {
+        ...getAuthHeaders(),
+        'Content-Type': 'application/json',
+      },
+      credentials: 'include',
+      body: JSON.stringify(data),
+    });
+    return handleResponse<{
+      message: string;
+      user: {
+        id: string;
+        name: string;
+        email: string;
+        phone?: string;
+        role: string;
+        status: string;
+      };
+    }>(response);
+  },
+
+  /**
+   * Update user information
+   */
+  async updateUser(userId: string, data: {
+    fullName?: string;
+    email?: string;
+    phone?: string;
+    role?: 'buyer' | 'seller' | 'admin';
+    location?: string;
+    accountStatus?: 'active' | 'pending' | 'banned' | 'warned';
+    password?: string;
+  }) {
+    const response = await fetch(`${API_BASE_URL}/admin/users/${userId}`, {
+      method: 'PUT',
+      headers: {
+        ...getAuthHeaders(),
+        'Content-Type': 'application/json',
+      },
+      credentials: 'include',
+      body: JSON.stringify(data),
+    });
+    return handleResponse<{
+      message: string;
+      user: {
+        id: string;
+        name: string;
+        email: string;
+        phone?: string;
+        role: string;
+        location?: string;
+        status: string;
+        warningCount: number;
+      };
+    }>(response);
+  },
+
+  /**
+   * Delete a user
+   */
+  async deleteUser(userId: string) {
+    const response = await fetch(`${API_BASE_URL}/admin/users/${userId}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+      credentials: 'include',
+    });
+    return handleResponse<{
+      message: string;
+      deletedUser: {
+        id: string;
+        name: string;
+        email: string;
+        ordersCount: number;
+      };
+    }>(response);
+  },
+
+  /**
+   * Get seller statistics for dashboard
+   */
+  async getSellerStats() {
+    const response = await fetch(`${API_BASE_URL}/admin/sellers/stats`, {
+      method: 'GET',
+      headers: getAuthHeaders(),
+      credentials: 'include',
+    });
+    return handleResponse<{
+      totalSellers: number;
+      avgProductsPerSeller: number;
+      pendingSellers: number;
+      sellersWithIssues: number;
+      sellerChange: number;
+    }>(response);
+  },
+
+  /**
+   * Get all sellers with statistics
+   */
+  async getSellers(params?: {
+    status?: string;
+    verificationStatus?: string;
+    search?: string;
+    page?: number;
+    limit?: number;
+  }) {
+    const queryParams = new URLSearchParams();
+    if (params?.status) queryParams.append('status', params.status);
+    if (params?.verificationStatus) queryParams.append('verificationStatus', params.verificationStatus);
+    if (params?.search) queryParams.append('search', params.search);
+    if (params?.page) queryParams.append('page', params.page.toString());
+    if (params?.limit) queryParams.append('limit', params.limit.toString());
+
+    const queryString = queryParams.toString();
+    const url = `${API_BASE_URL}/admin/sellers${queryString ? `?${queryString}` : ''}`;
+
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: getAuthHeaders(),
+      credentials: 'include',
+    });
+    return handleResponse<{
+      sellers: Array<{
+        id: string;
+        sellerName: string;
+        storeName: string;
+        email: string;
+        phone: string;
+        avatarUrl?: string;
+        status: 'active' | 'pending' | 'banned' | 'warned' | 'inactive' | 'suspended';
+        kycStatus: 'verified' | 'pending' | 'rejected';
+        totalProducts: number;
+        totalOrders: number;
+        earnings: number;
+        joinDate: string;
+        country: string;
+        hasDisputes: boolean;
+        hasPayoutIssues: boolean;
+        userId?: string;
+        warningCount?: number;
+      }>;
+      pagination: {
+        page: number;
+        limit: number;
+        total: number;
+        totalPages: number;
+      };
+    }>(response);
+  },
+
+  /**
+   * Get seller details by ID
+   */
+  async getSellerDetails(sellerId: string) {
+    const url = `${API_BASE_URL}/admin/sellers/${sellerId}`;
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: getAuthHeaders(),
+      credentials: 'include',
+    });
+    return handleResponse<{
+      seller: {
+        id: string;
+        sellerName: string;
+        storeName: string;
+        email: string;
+        phone: string;
+        location: string;
+        avatarUrl?: string;
+        status: 'active' | 'pending' | 'banned' | 'warned' | 'inactive' | 'suspended';
+        warningCount: number;
+        verificationStatus: 'pending' | 'approved' | 'rejected';
+        isVerified: boolean;
+        role: string;
+        createdAt: string;
+        totalProducts: number;
+        totalOrders: number;
+        earnings: number;
+        disputes: number;
+        tickets: number;
+        lastOrder: string;
+      };
+    }>(response);
+  },
+
+  /**
+   * Update seller status
+   */
+  async updateSellerStatus(
+    sellerId: string,
+    status?: 'active' | 'pending' | 'banned' | 'warned' | 'inactive' | 'suspended',
+    verificationStatus?: 'pending' | 'approved' | 'rejected',
+    reason?: string
+  ) {
+    const url = `${API_BASE_URL}/admin/sellers/${sellerId}/status`;
+    const response = await fetch(url, {
+      method: 'PATCH',
+      headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ status, verificationStatus, reason }),
+    });
+    return handleResponse<{
+      message: string;
+      seller: { id: string; status: string; verificationStatus: string; warningCount: number };
+    }>(response);
+  },
+
+  /**
+   * Create a new seller
+   */
+  async createSeller(sellerData: {
+    fullName: string;
+    email: string;
+    phone?: string;
+    location?: string;
+    accountStatus?: 'active' | 'pending' | 'banned' | 'warned' | 'inactive' | 'suspended';
+    sellerVerificationStatus?: 'pending' | 'approved' | 'rejected';
+    password?: string;
+  }) {
+    const url = `${API_BASE_URL}/admin/sellers`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(sellerData),
+    });
+    return handleResponse<{ message: string; seller: any }>(response);
+  },
+
+  /**
+   * Update seller details
+   */
+  async updateSeller(
+    sellerId: string,
+    sellerData: {
+      fullName?: string;
+      email?: string;
+      phone?: string;
+      location?: string;
+      accountStatus?: 'active' | 'pending' | 'banned' | 'warned' | 'inactive' | 'suspended';
+      sellerVerificationStatus?: 'pending' | 'approved' | 'rejected';
+      password?: string;
+    }
+  ) {
+    const url = `${API_BASE_URL}/admin/sellers/${sellerId}`;
+    const response = await fetch(url, {
+      method: 'PUT',
+      headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(sellerData),
+    });
+    return handleResponse<{ message: string; seller: any }>(response);
+  },
+
+  /**
+   * Delete a seller
+   */
+  async deleteSeller(sellerId: string) {
+    const url = `${API_BASE_URL}/admin/sellers/${sellerId}`;
+    const response = await fetch(url, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+      credentials: 'include',
+    });
+    return handleResponse<{
+      message: string;
+      deletedSeller: { id: string; sellerName: string; email: string; productsCount: number; ordersCount: number };
     }>(response);
   },
 };

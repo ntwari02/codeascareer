@@ -34,6 +34,9 @@ export function GoogleCallback() {
           case 'oauth_failed':
             errorMessage = 'Failed to authenticate with Google';
             break;
+          case 'account_deactivated':
+            errorMessage = 'Your account has been deactivated. Please contact support for assistance.';
+            break;
           default:
             errorMessage = `Authentication error: ${error}`;
         }
