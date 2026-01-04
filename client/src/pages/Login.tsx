@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
 import { useTheme } from '../contexts/ThemeContext';
+<<<<<<< HEAD
 import { Mail, Lock, Chrome, Apple, Sun, Moon, Home, Eye, EyeOff, Loader2 } from 'lucide-react';
 import { useToastStore } from '../stores/toastStore';
 
@@ -232,7 +233,7 @@ export function Login() {
                 </div>
               </div>
 
-              <div className="mt-3 sm:mt-4 grid grid-cols-2 gap-2 sm:gap-3 md:gap-4">
+              <div className="mt-3 sm:mt-4">
                 <button
                   type="button"
                   onClick={() => {
@@ -240,6 +241,7 @@ export function Login() {
                     const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
                     window.location.href = `${API_BASE_URL}/auth/google?role=buyer`;
                   }}
+<<<<<<< HEAD
                   disabled={isGoogleLoading}
                   className="group flex items-center justify-center gap-2 px-3 py-2 sm:py-2.5 md:py-3 bg-white dark:bg-[#1a1a2e]/80 border border-gray-300 dark:border-gray-700/50 text-gray-900 dark:text-white rounded-xl hover:bg-gray-50 dark:hover:bg-[#1a1a2e] transition-all duration-300 shadow-sm hover:shadow-lg hover:shadow-orange-500/20 hover:scale-105 active:scale-95 text-xs sm:text-sm md:text-base relative overflow-hidden disabled:opacity-70 disabled:cursor-not-allowed disabled:hover:scale-100"
                 >

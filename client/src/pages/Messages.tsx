@@ -373,12 +373,20 @@ export function Messages() {
         // Don't fail the whole operation if WebSocket join fails
       }
       
-      // Scroll to bottom
+      // Scroll to bottom within the messages container (not the whole page)
       setTimeout(() => {
-        if (messagesEndRef.current) {
-          messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+        if (messagesContainerRef.current) {
+          // Scroll within the container, not the whole page
+          messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
+        } else if (messagesEndRef.current) {
+          // Fallback: use scrollIntoView with 'nearest' to prevent page scroll
+          messagesEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
-      }, 100);
+        // Focus the message input after loading messages
+        setTimeout(() => {
+          messageInputRef.current?.focus();
+        }, 50);
+      }, 150);
     } catch (error: any) {
       console.error('[Load Thread Messages] Error:', error);
       const errorMessage = error.message || 'Failed to load messages';
@@ -543,12 +551,28 @@ export function Messages() {
       await loadThreadMessages(selectedThread);
       await loadThreads(true); // Silent reload to avoid duplicate toasts
       
-      // Scroll to bottom to show the new message
+      // Scroll to bottom within the messages container (not the whole page)
       setTimeout(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        if (messagesContainerRef.current) {
+          // Scroll within the container, not the whole page
+          messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
+        } else if (messagesEndRef.current) {
+          // Fallback: use scrollIntoView with 'nearest' to prevent page scroll
+          messagesEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
       }, 100);
       
+      // Show toast first, then refocus input
       showToast('Message sent', 'success');
+      
+      // Refocus the message input field after sending (with longer delay to ensure toast doesn't interfere)
+      setTimeout(() => {
+        if (messageInputRef.current) {
+          messageInputRef.current.focus();
+          // Prevent any page-level scrolling - just focus, don't scroll
+          // The input is already visible in the viewport, so no need to scroll
+        }
+      }, 250);
     } catch (error: any) {
       console.error('[Send Message] Error:', error);
       // Extract error message - check if it's a validation error
@@ -2786,6 +2810,7 @@ export function Messages() {
                           {/* Text Input Area */}
                           <div className="relative flex items-center">
                       <textarea
+                        ref={messageInputRef}
                         value={newMessage}
                               onChange={(e) => {
                                 setNewMessage(e.target.value);

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useTheme } from '../contexts/ThemeContext';
+<<<<<<< HEAD
 import { User, Mail, Lock, RotateCw, Chrome, Apple, Sun, Moon, Home, Briefcase, Eye, EyeOff, Loader2 } from 'lucide-react';
 import { useToastStore } from '../stores/toastStore';
 
@@ -381,7 +382,7 @@ export function Signup() {
                 </div>
               </div>
 
-              <div className="mt-2.5 sm:mt-3 md:mt-4 grid grid-cols-2 gap-2 sm:gap-3 md:gap-4">
+              <div className="mt-2.5 sm:mt-3 md:mt-4">
                 <button
                   type="button"
                   onClick={() => {
@@ -390,6 +391,7 @@ export function Signup() {
                     const role = formData.role;
                     window.location.href = `${API_BASE_URL}/auth/google?role=${role}`;
                   }}
+<<<<<<< HEAD
                   disabled={isGoogleLoading}
                   className="group flex items-center justify-center gap-1.5 sm:gap-2 px-3 py-2 sm:py-2.5 md:py-3 bg-white dark:bg-[#1a1a2e]/80 border border-gray-300 dark:border-gray-700/50 text-gray-900 dark:text-white rounded-lg sm:rounded-xl hover:bg-gray-50 dark:hover:bg-[#1a1a2e] transition-all duration-300 shadow-sm hover:shadow-lg hover:shadow-orange-500/20 hover:scale-105 active:scale-95 text-xs sm:text-sm md:text-base relative overflow-hidden disabled:opacity-70 disabled:cursor-not-allowed disabled:hover:scale-100"
                 >

@@ -81,8 +81,8 @@ export interface IShipment extends Document {
 
 const trackingEventSchema = new Schema<ITrackingEvent>(
   {
-    orderId: { type: Schema.Types.ObjectId, ref: 'Order', required: true, index: true },
-    shipmentId: { type: Schema.Types.ObjectId, ref: 'Shipment', index: true },
+    orderId: { type: Schema.Types.ObjectId, ref: 'Order', required: true },
+    shipmentId: { type: Schema.Types.ObjectId, ref: 'Shipment' },
     status: {
       type: String,
       enum: [
@@ -130,9 +130,9 @@ const courierSchema = new Schema<ICourier>(
 
 const shipmentSchema = new Schema<IShipment>(
   {
-    orderId: { type: Schema.Types.ObjectId, ref: 'Order', required: true, index: true },
+    orderId: { type: Schema.Types.ObjectId, ref: 'Order', required: true },
     sellerId: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
-    trackingNumber: { type: String, required: true, unique: true, trim: true, uppercase: true, index: true },
+    trackingNumber: { type: String, required: true, unique: true, trim: true, uppercase: true },
     status: {
       type: String,
       enum: [
@@ -227,7 +227,7 @@ shipmentSchema.pre('save', async function (next: any) {
 
 // Indexes
 shipmentSchema.index({ orderId: 1, status: 1 });
-shipmentSchema.index({ trackingNumber: 1 });
+// trackingNumber already has a unique index from unique: true, no need for explicit index
 shipmentSchema.index({ sellerId: 1, status: 1 });
 
 export const TrackingEvent = mongoose.model<ITrackingEvent>('TrackingEvent', trackingEventSchema);
