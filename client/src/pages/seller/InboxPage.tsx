@@ -19,6 +19,7 @@ import {
   X,
   Loader2,
   Plus,
+  Check,
 } from 'lucide-react';
 import { inboxAPI, Message, MessageThread, MessageAttachment } from '@/services/inboxApi';
 import { websocketService } from '@/services/websocketService';
@@ -26,9 +27,11 @@ import { useToastStore } from '@/stores/toastStore';
 import { useAuthStore } from '@/stores/authStore';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { AudioWave } from '@/components/AudioWave';
+import { VoiceWaveform } from '@/components/VoiceWaveform';
 import { ImageLightbox } from '@/components/ImageLightbox';
 import { UploadProgress } from '@/components/UploadProgress';
 import ChatIndicator from '@/components/ChatIndicator';
+import { useVoiceNoteAutoplay } from '@/hooks/useVoiceNoteAutoplay';
 
 // Get server base URL for file attachments
 const getFileUrl = (path: string): string => {
@@ -73,6 +76,7 @@ const InboxPage: React.FC = () => {
   const [uploadedAttachments, setUploadedAttachments] = useState<MessageAttachment[]>([]);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
+  const [isRecordingSaved, setIsRecordingSaved] = useState(false);
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [editingMessage, setEditingMessage] = useState<Message | null>(null);
   
@@ -92,7 +96,24 @@ const InboxPage: React.FC = () => {
   // Image lightbox state
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
   
-  // Audio playing state
+  // Voice note autoplay hook
+  const { playVoiceNote, pausePlayback, stopPlayback, seekTo, isPlaying, isInSequence, playingState, isPaused } = useVoiceNoteAutoplay({
+    messages,
+    getFileUrl,
+    onScrollToMessage: (messageId: string) => {
+      // Scroll to message
+      setTimeout(() => {
+        const messageElement = document.getElementById(`message-${messageId}`);
+        if (messageElement) {
+          messageElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        } else if (messagesEndRef.current) {
+          messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+        }
+      }, 100);
+    },
+  });
+  
+  // Legacy audio playing state (for backward compatibility)
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
   
   // Real-time indicators state
@@ -107,8 +128,8 @@ const InboxPage: React.FC = () => {
   const [selectingFileName, setSelectingFileName] = useState<string | null>(null);
   
   // Refs
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const imageInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null); // For documents/files (.pdf, .docx, .webm)
+  const imageInputRef = useRef<HTMLInputElement>(null); // For images (.jpg, .jpeg, .png)
   const voiceInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -254,7 +275,7 @@ const InboxPage: React.FC = () => {
       
       if (!messageText && (!attachments || attachments.length === 0)) {
         console.error('[Send Message] Validation failed - no content and no attachments');
-        showToast('Please add a message or attachment', 'error');
+        showToast('Please add a message text, file, image, or voice note', 'error');
         setSending(false);
         return;
       }
@@ -274,6 +295,7 @@ const InboxPage: React.FC = () => {
       setReplyTo(null);
       setRecordingDuration(0);
       setIsRecording(false);
+      setIsRecordingSaved(false);
       setUploadProgress(new Map());
       setUploadErrors(new Map());
       setUploadingFiles(new Map());
@@ -397,14 +419,14 @@ const InboxPage: React.FC = () => {
       // Clear previous chunks
       recordingChunksRef.current = [];
       
-      // A) Recording setup - Use exact getUserMedia config
+      // A) Recording setup - Use compatible getUserMedia config
+      // Simplified constraints for better browser compatibility
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
-          channelCount: 1,
-          sampleRate: 48000,
-          noiseSuppression: true,
           echoCancellation: true,
-          autoGainControl: true
+          noiseSuppression: true,
+          autoGainControl: true,
+          // Don't force channelCount or sampleRate - let browser choose optimal settings
         }
       });
       
@@ -437,18 +459,46 @@ const InboxPage: React.FC = () => {
         console.warn('[Voice Recording] WARNING: Audio track is not live!');
       }
       
-      // A) MediaRecorder MUST use a supported codec
-      const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-        ? "audio/webm;codecs=opus"
-        : "audio/ogg;codecs=opus";
+      // A) MediaRecorder MUST use a supported codec with fallbacks
+      // CRITICAL: Use audio/webm;codecs=opus for best compatibility and quality
+      let mimeType = '';
+      let extension = 'webm';
       
-      console.log('[Voice Recording] Using mime type:', mimeType);
+      // Try different formats in order of preference
+      if (MediaRecorder.isTypeSupported("audio/webm;codecs=opus")) {
+        mimeType = "audio/webm;codecs=opus";
+        extension = 'webm';
+      } else if (MediaRecorder.isTypeSupported("audio/webm")) {
+        mimeType = "audio/webm";
+        extension = 'webm';
+      } else if (MediaRecorder.isTypeSupported("audio/ogg;codecs=opus")) {
+        mimeType = "audio/ogg;codecs=opus";
+        extension = 'ogg';
+      } else if (MediaRecorder.isTypeSupported("audio/mp4")) {
+        mimeType = "audio/mp4";
+        extension = 'm4a';
+      } else {
+        // Fallback - let browser choose
+        mimeType = ""; // Empty string lets browser choose best format
+        extension = 'webm';
+        console.warn('[Voice Recording] Using browser default format');
+      }
       
-      // Store mime type in ref
+      console.log('[Voice Recording] Using mime type:', mimeType || 'browser default', 'extension:', extension);
+      
+      // Store mime type and extension in ref
       recordingMimeTypeRef.current = mimeType;
       
       // Create MediaRecorder with supported codec
-      const mediaRecorder = new MediaRecorder(stream, { mimeType });
+      // If mimeType is empty, browser will choose best format
+      const mediaRecorder = mimeType 
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream);
+      
+      // CRITICAL: Get the actual mimeType used by MediaRecorder
+      const actualMimeType = mediaRecorder.mimeType || mimeType || 'audio/webm';
+      console.log('[Voice Recording] MediaRecorder actual mimeType:', actualMimeType);
+      recordingMimeTypeRef.current = actualMimeType;
       
       console.log('[Voice Recording] MediaRecorder created with mimeType:', mimeType);
       console.log('[Voice Recording] MediaRecorder state:', mediaRecorder.state);
@@ -483,7 +533,9 @@ const InboxPage: React.FC = () => {
         console.log('[Voice Recording] Total chunks size:', totalSize, 'bytes');
         
         // Create blob from all chunks (FIXED: Use ref chunks and stored mime type)
-        const mimeType = recordingMimeTypeRef.current;
+        // CRITICAL: Use MediaRecorder's actual mimeType if available, otherwise use stored ref
+        const mimeType = mediaRecorderRef.current?.mimeType || recordingMimeTypeRef.current || 'audio/webm';
+        console.log('[Voice Recording] Using mimeType for blob:', mimeType);
         const blob = new Blob(recordingChunksRef.current, { type: mimeType });
         console.log('[Voice Recording] Final blob size:', blob.size, 'bytes');
         console.log('[Voice Recording] Blob type:', blob.type);
@@ -514,7 +566,8 @@ const InboxPage: React.FC = () => {
         // Determine file extension based on mime type
         let extension = 'webm';
         if (mimeType.includes('ogg')) extension = 'ogg';
-        else if (mimeType.includes('mp4')) extension = 'm4a';
+        else if (mimeType.includes('mp4') || mimeType.includes('m4a')) extension = 'm4a';
+        else if (mimeType.includes('mpeg') || mimeType.includes('mp3')) extension = 'mp3';
         else if (mimeType.includes('wav')) extension = 'wav';
         
         // Create File from blob with correct type for multipart/form-data upload
@@ -526,34 +579,78 @@ const InboxPage: React.FC = () => {
           console.error('[Voice Recording] ERROR: File size mismatch! Blob:', blob.size, 'File:', file.size);
         }
         
-        // Add file to selected files - waveform UI will appear after blob exists
-        setSelectedFiles((prev) => [...prev, file]);
+        // CRITICAL: Test local playback before adding to files
+        // Create a temporary audio element to test playback
+        const testAudio = new Audio();
+        const testUrl = URL.createObjectURL(blob);
+        testAudio.src = testUrl;
+        testAudio.volume = 1.0;
+        testAudio.muted = false;
         
-        // Stop stream tracks AFTER blob is created and file is ready
-        // CRITICAL: Don't stop stream until after blob is created
-        if (recordingStreamRef.current) {
-          recordingStreamRef.current.getTracks().forEach(track => {
-            track.stop();
-            console.log('[Voice Recording] Audio track stopped:', track.label);
-          });
-          recordingStreamRef.current = null;
-        }
+        // Helper function to clean up and add file
+        const addFileAndCleanup = () => {
+          URL.revokeObjectURL(testUrl);
+          
+          // Add file to selected files - waveform UI will appear after blob exists
+          setSelectedFiles((prev) => [...prev, file]);
+          
+          // Show "saved" status
+          setIsRecordingSaved(true);
+          setTimeout(() => setIsRecordingSaved(false), 2000);
+          
+          // Stop stream tracks AFTER blob is created and file is ready
+          // CRITICAL: Don't stop stream until after blob is created and tested
+          if (recordingStreamRef.current) {
+            recordingStreamRef.current.getTracks().forEach(track => {
+              track.stop();
+              console.log('[Voice Recording] Audio track stopped:', track.label);
+            });
+            recordingStreamRef.current = null;
+          }
+          
+          // Clear chunks after use
+          recordingChunksRef.current = [];
+          
+          // Call the completion callback if set
+          if (recordingCompleteRef.current) {
+            recordingCompleteRef.current(file);
+            recordingCompleteRef.current = null;
+          }
+        };
         
-        // Clear chunks after use
-        recordingChunksRef.current = [];
+        // Test if audio can be loaded and played
+        testAudio.onloadedmetadata = () => {
+          console.log('[Voice Recording] Audio test - Duration:', testAudio.duration, 'seconds');
+          console.log('[Voice Recording] Audio test - Ready to play');
+          addFileAndCleanup();
+        };
         
-        // Call the completion callback if set
-        if (recordingCompleteRef.current) {
-          recordingCompleteRef.current(file);
-          recordingCompleteRef.current = null;
-        }
+        testAudio.onerror = (e) => {
+          console.error('[Voice Recording] Audio test failed:', e, testAudio.error);
+          showToast('Warning: Audio file may not play correctly', 'warning');
+          // Still add the file - it might work on other browsers
+          addFileAndCleanup();
+        };
+        
+        // Timeout after 2 seconds
+        setTimeout(() => {
+          if (testAudio.readyState === 0) {
+            console.warn('[Voice Recording] Audio test timeout - proceeding anyway');
+            addFileAndCleanup();
+          }
+        }, 2000);
+        
+        // Load the audio
+        testAudio.load();
       };
       
       // Start recording with timeslice to ensure regular data collection
-      // CRITICAL: Use timeslice (100ms) to ensure chunks are collected regularly
+      // CRITICAL: Use timeslice (100ms) for better chunk collection
+      // This ensures we capture audio data more frequently
       mediaRecorder.start(100);
       console.log('[Voice Recording] MediaRecorder started, state:', mediaRecorder.state);
       console.log('[Voice Recording] Recording started with 100ms timeslice');
+      console.log('[Voice Recording] MediaRecorder mimeType:', mediaRecorder.mimeType);
       
       // Verify MediaRecorder is in recording state
       if (mediaRecorder.state !== 'recording') {
@@ -904,10 +1001,10 @@ const InboxPage: React.FC = () => {
       // Show notification if message is from buyer and not in active thread
       if (message.senderType === 'buyer' && activeThread?._id !== threadId) {
         const thread = threads.find(t => t._id === threadId);
-        const buyerName = typeof thread?.buyerId === 'object' 
+        const buyerName = typeof thread?.buyerId === 'object' && thread.buyerId !== null
           ? (thread.buyerId.fullName || 'Buyer')
           : 'Buyer';
-        const avatarUrl = typeof thread?.buyerId === 'object' && thread.buyerId.avatarUrl 
+        const avatarUrl = typeof thread?.buyerId === 'object' && thread.buyerId !== null && thread.buyerId.avatarUrl 
           ? (resolveAvatarUrl(thread.buyerId.avatarUrl) ?? undefined)
           : undefined;
         showNotification(
@@ -1178,7 +1275,7 @@ const InboxPage: React.FC = () => {
               ) : (
                 threads.map((thread) => {
                   const isActive = thread._id === activeThread?._id;
-                  const buyer = typeof thread.buyerId === 'object' ? thread.buyerId : null;
+                  const buyer = typeof thread.buyerId === 'object' && thread.buyerId !== null ? thread.buyerId : null;
                 return (
                   <button
                       key={thread._id}
@@ -1215,7 +1312,7 @@ const InboxPage: React.FC = () => {
                     <div className="flex-1 min-w-0 flex flex-col gap-1">
                     <div className="flex items-center justify-between gap-2">
                       <p className="text-sm font-semibold text-gray-900 dark:text-white line-clamp-1">
-                            {typeof thread.buyerId === 'object' ? thread.buyerId.fullName : 'Buyer'}
+                            {buyer ? (buyer.fullName || buyer.email || 'Buyer') : 'Buyer'}
                       </p>
                           <span className="text-[11px] text-gray-500 dark:text-gray-400">
                             {formatTime(thread.lastMessageAt)}
@@ -1268,7 +1365,7 @@ const InboxPage: React.FC = () => {
                     </button>
                     <div className="relative flex-shrink-0">
                       <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center overflow-hidden">
-                        {typeof activeThread.buyerId === 'object' && activeThread.buyerId.avatarUrl && activeThread.buyerId.avatarUrl.trim() ? (
+                        {typeof activeThread.buyerId === 'object' && activeThread.buyerId !== null && activeThread.buyerId.avatarUrl && activeThread.buyerId.avatarUrl.trim() ? (
                           <img
                             src={resolveAvatarUrl(activeThread.buyerId.avatarUrl) || activeThread.buyerId.avatarUrl}
                             alt={activeThread.buyerId.fullName || 'Buyer'}
@@ -1279,7 +1376,7 @@ const InboxPage: React.FC = () => {
                               target.style.display = 'none';
                               const parent = target.parentElement;
                               if (parent) {
-                                const name = typeof activeThread.buyerId === 'object' 
+                                const name = typeof activeThread.buyerId === 'object' && activeThread.buyerId !== null
                                   ? (activeThread.buyerId.fullName || activeThread.buyerId.email || 'B')
                                   : 'B';
                                 parent.innerHTML = `<span class="text-white text-xs sm:text-sm font-semibold">${name[0].toUpperCase()}</span>`;
@@ -1289,7 +1386,7 @@ const InboxPage: React.FC = () => {
                         ) : (
                           // No profile image, use first letter (avatar)
                           <span className="text-white text-xs sm:text-sm font-semibold">
-                            {typeof activeThread.buyerId === 'object' 
+                            {typeof activeThread.buyerId === 'object' && activeThread.buyerId !== null
                               ? (activeThread.buyerId.fullName || activeThread.buyerId.email || 'B')[0].toUpperCase()
                               : 'B'}
                           </span>
@@ -1301,7 +1398,7 @@ const InboxPage: React.FC = () => {
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
                         <p className="text-sm sm:text-base font-semibold text-gray-900 dark:text-white truncate">
-                          {typeof activeThread.buyerId === 'object' ? activeThread.buyerId.fullName : 'Buyer'}
+                            {typeof activeThread.buyerId === 'object' && activeThread.buyerId !== null ? activeThread.buyerId.fullName : 'Buyer'}
                         </p>
                         <span className="text-[10px] text-green-500 hidden sm:inline">●</span>
                       </div>
@@ -1314,7 +1411,7 @@ const InboxPage: React.FC = () => {
                             <div className="w-1 h-1 bg-gray-500 dark:bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
                           </div>
                           <span className="text-[11px] text-gray-500 dark:text-gray-400 italic">
-                            {typingUserName || (typeof activeThread.buyerId === 'object' ? activeThread.buyerId.fullName : 'Buyer')} is typing...
+                            {typingUserName || (typeof activeThread.buyerId === 'object' && activeThread.buyerId !== null ? activeThread.buyerId.fullName : 'Buyer')} is typing...
                           </span>
                         </div>
                       ) : (
@@ -1520,108 +1617,37 @@ const InboxPage: React.FC = () => {
                                 {message.attachments && message.attachments.length > 0 && message.attachments.map((att, idx) => (
                                   <div key={idx} className="mt-2">
                                     {att.type === 'voice' ? (
-                                      <div className="flex items-center gap-2 p-2 bg-black/20 dark:bg-white/10 rounded-lg">
+                                      <div 
+                                        id={`message-${message._id}`}
+                                        className={`flex items-center gap-2 p-2 rounded-lg transition-all ${
+                                          isPlaying(message._id, idx)
+                                            ? 'bg-red-100 dark:bg-red-900/30 border-2 border-red-500'
+                                            : isInSequence(message._id, idx)
+                                            ? 'bg-red-50 dark:bg-red-900/10 border border-red-300 dark:border-red-700'
+                                            : 'bg-black/20 dark:bg-white/10'
+                                        }`}
+                                      >
                                         <button
                                           onClick={async () => {
-                                            const audioId = `audio-${message._id}-${idx}`;
-                                            const audio = document.getElementById(audioId) as HTMLAudioElement;
-                                            if (audio) {
-                                              if (playingAudioId === audioId) {
-                                                audio.pause();
-                                                setPlayingAudioId(null);
-                                              } else {
-                                                try {
-                                                  // Pause all other audios
-                                                  document.querySelectorAll('audio').forEach(a => {
-                                                    a.pause();
-                                                    a.currentTime = 0;
-                                                  });
-                                                  
-                                                  // C) Audio element MUST NOT be muted
-                                                  audio.muted = false;
-                                                  audio.volume = 1;
-                                                  
-                                                  console.log('[Audio Playback] Audio element state:', {
-                                                    src: audio.src,
-                                                    volume: audio.volume,
-                                                    muted: audio.muted,
-                                                    readyState: audio.readyState,
-                                                    paused: audio.paused
-                                                  });
-                                                  
-                                                  // C) Before playing: load and play
-                                                  audio.load();
-                                                  
-                                                  // Wait for audio to be ready
-                                                  await new Promise((resolve, reject) => {
-                                                    const timeout = setTimeout(() => {
-                                                      reject(new Error('Audio load timeout'));
-                                                    }, 5000);
-                                                  
-                                                    audio.oncanplay = () => {
-                                                      clearTimeout(timeout);
-                                                      console.log('[Audio Playback] Audio can play');
-                                                      resolve(null);
-                                                    };
-                                                    
-                                                    audio.onerror = (e) => {
-                                                      clearTimeout(timeout);
-                                                      console.error('[Audio Playback] Load error:', e, audio.error);
-                                                      reject(new Error('Failed to load audio'));
-                                                    };
-                                                  });
-                                                  
-                                                  // C) Play the audio with error handling
-                                                  console.log('[Audio Playback] Attempting to play audio...');
-                                                  try {
-                                                    await audio.play();
-                                                    console.log('[Audio Playback] Audio playing successfully');
-                                                    setPlayingAudioId(audioId);
-                                                  } catch (playError: any) {
-                                                    console.error('[Audio Playback] Play error:', playError);
-                                                    // D) Mobile support: Safari requires user gesture
-                                                    if (playError.name === 'NotAllowedError') {
-                                                      showToast('Please tap the play button to start audio', 'info');
-                                                    } else {
-                                                      throw playError;
-                                                    }
-                                                  }
-                                                  
-                                                  // Set up event handlers
-                                                  audio.onended = () => {
-                                                    setPlayingAudioId(null);
-                                                    audio.currentTime = 0;
-                                                  };
-                                                  audio.onpause = () => {
-                                                    if (audio.ended) {
-                                                      setPlayingAudioId(null);
-                                                    }
-                                                  };
-                                                  audio.onerror = (e) => {
-                                                    console.error('Audio playback error:', e, audio.error);
-                                                    showToast('Failed to play audio. Please check your speakers.', 'error');
-                                                    setPlayingAudioId(null);
-                                                  };
-                                                } catch (error: any) {
-                                                  console.error('Audio play error:', error);
-                                                  if (error.name === 'NotAllowedError') {
-                                                    showToast('Please allow audio playback in your browser', 'error');
-                                                  } else {
-                                                    showToast('Failed to play audio. Please check your speakers.', 'error');
-                                                  }
-                                                  setPlayingAudioId(null);
-                                                }
-                                              }
+                                            const currentlyPlaying = isPlaying(message._id, idx);
+                                            
+                                            if (currentlyPlaying) {
+                                              // Pause if currently playing
+                                              pausePlayback();
+                                            } else {
+                                              // Stop any current playback and start new one
+                                              stopPlayback();
+                                              await playVoiceNote(message._id, idx, true);
                                             }
                                           }}
                                           className={`w-8 h-8 rounded-full flex items-center justify-center text-white transition-all flex-shrink-0 relative ${
-                                            playingAudioId === `audio-${message._id}-${idx}`
+                                            isPlaying(message._id, idx)
                                               ? 'bg-red-600 hover:bg-red-700 animate-pulse shadow-lg'
                                               : 'bg-red-500 hover:bg-red-600'
                                           }`}
-                                          title={playingAudioId === `audio-${message._id}-${idx}` ? 'Stop playback' : 'Play voice note'}
+                                          title={isPlaying(message._id, idx) ? 'Pause playback' : 'Play voice note (autoplay enabled)'}
                                         >
-                                          {playingAudioId === `audio-${message._id}-${idx}` ? (
+                                          {isPlaying(message._id, idx) ? (
                                             <>
                                               <X className="w-4 h-4" />
                                               <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-400 rounded-full animate-ping" />
@@ -1631,49 +1657,46 @@ const InboxPage: React.FC = () => {
                                           )}
                                         </button>
                                         <div className="flex-1 min-w-0">
-                                          <div className="flex items-center gap-2 mb-1">
-                                            <AudioWave 
-                                              isPlaying={playingAudioId === `audio-${message._id}-${idx}`}
-                                              className="text-red-500"
-                                            />
+                                          {/* Interactive waveform with scrubbing */}
+                                          <VoiceWaveform
+                                            duration={att.duration || (playingState?.messageId === message._id && playingState?.attachmentIndex === idx ? playingState.duration : 0)}
+                                            currentTime={playingState?.messageId === message._id && playingState?.attachmentIndex === idx ? playingState.currentTime : 0}
+                                            isPlaying={isPlaying(message._id, idx)}
+                                            onSeek={(time) => {
+                                              if (playingState?.messageId === message._id && playingState?.attachmentIndex === idx) {
+                                                seekTo(time);
+                                              }
+                                            }}
+                                            onSeekStart={() => {
+                                              // Cancel autoplay when user starts seeking
+                                              if (playingState?.messageId === message._id && playingState?.attachmentIndex === idx) {
+                                                pausePlayback();
+                                              }
+                                            }}
+                                            className="mb-1"
+                                            waveformColor="rgb(239 68 68)" // red-500
+                                            progressColor="rgb(220 38 38)" // red-600
+                                          />
+                                          <div className="flex items-center gap-2 justify-between">
                                             <span className="text-[10px] text-gray-600 dark:text-gray-400">
-                                              {att.duration}s
+                                              {att.duration ? `${Math.floor(att.duration)}s` : 'Voice'}
                                             </span>
-                </div>
+                                            {isInSequence(message._id, idx) && !isPlaying(message._id, idx) && (
+                                              <span className="text-[8px] text-red-500 dark:text-red-400 opacity-75">
+                                                (in queue)
+                                              </span>
+                                            )}
+                                          </div>
+                                          {/* Hidden audio element for backward compatibility */}
                                           <audio 
                                             id={`audio-${message._id}-${idx}`}
                                             src={getFileUrl(att.path)} 
                                             className="hidden"
                                             preload="auto"
                                             crossOrigin="anonymous"
-                                            ref={(el) => {
-                                              if (el) {
-                                                // CRITICAL: Ensure audio has correct volume and is not muted
-                                                el.volume = 1.0;
-                                                el.muted = false;
-                                                
-                                                // Log audio element state for debugging
-                                                console.log('[Audio Element] Initialized:', {
-                                                  src: el.src,
-                                                  volume: el.volume,
-                                                  muted: el.muted,
-                                                  readyState: el.readyState
-                                                });
-                                                
-                                                // Add error handler
-                                                el.onerror = (e) => {
-                                                  console.error('[Audio Element] Error loading audio:', e, el.error);
-                                                };
-                                                
-                                                // Log when audio can play
-                                                el.oncanplay = () => {
-                                                  console.log('[Audio Element] Audio can play:', el.src);
-                                                };
-                                              }
-                                            }}
                                           />
-                </div>
-              </div>
+                                        </div>
+                                      </div>
                                     ) : att.type === 'image' ? (
                                       <div className="mt-2 -mx-1 -my-1 first:mt-0">
                                         <img
@@ -1804,7 +1827,7 @@ const InboxPage: React.FC = () => {
                     <div className="flex items-center gap-2 justify-start py-2">
                       <ChatIndicator 
                         status="typing" 
-                        userName={typingUserName || (typeof activeThread?.buyerId === 'object' ? (activeThread.buyerId.fullName || 'Buyer') : 'Buyer')}
+                        userName={typingUserName || (typeof activeThread?.buyerId === 'object' && activeThread.buyerId !== null ? (activeThread.buyerId.fullName || 'Buyer') : 'Buyer')}
                         position="below"
                         className="ml-2"
                       />
@@ -1894,19 +1917,21 @@ const InboxPage: React.FC = () => {
                 </div>
                   ))}
               <div className="flex items-end gap-2">
+                    {/* File input for documents - accepts: text, word, spreadsheets, presentations, PDF, data files, archives, etc. */}
                     <input
                       ref={fileInputRef}
                       type="file"
                       multiple
-                      accept=".pdf,.doc,.docx,.zip,.rar"
+                      accept=".txt,.rtf,.doc,.docx,.odt,.xls,.xlsx,.ods,.ppt,.pptx,.odp,.pdf,.epub,.mobi,.csv,.json,.xml,.yaml,.yml,.sql,.zip,.rar,.7z,.tar,.gz,.md,.tex,.log,.webm"
                       onChange={handleFileSelect}
                       className="hidden"
                     />
+                    {/* Image input for images - accepts: .jpg, .jpeg, .png */}
                     <input
                       ref={imageInputRef}
                       type="file"
                       multiple
-                      accept="image/*"
+                      accept=".jpg,.jpeg,.png,image/jpeg,image/jpg,image/png"
                       onChange={handleFileSelect}
                       className="hidden"
                     />
@@ -2149,6 +2174,17 @@ const InboxPage: React.FC = () => {
                               </div>
                             </div>
                           )}
+                          {/* Saved Status Indicator */}
+                          {isRecordingSaved && (
+                            <div className="mb-2 px-3 py-2 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg flex items-center gap-2 animate-fadeIn">
+                              <div className="relative flex items-center justify-center">
+                                <Check className="w-4 h-4 text-green-500" />
+                              </div>
+                              <span className="text-sm font-medium text-green-600 dark:text-green-400">
+                                Voice note saved
+                              </span>
+                            </div>
+                          )}
                           {/* Text Input Area */}
                           <div className="relative flex items-center">
                             <textarea
@@ -2184,17 +2220,19 @@ const InboxPage: React.FC = () => {
                             {/* Icons inside textarea - Show when no media or show alongside media */}
                             {!messageContent.trim() && uploadedAttachments.length === 0 && selectedFiles.filter(f => !Array.from(uploadingFiles.values()).includes(f)).length === 0 && (
                               <div className="absolute right-2 bottom-2 flex items-center gap-1">
+                                {/* File picker button - opens document picker */}
                                 <button
                                   onClick={() => fileInputRef.current?.click()}
                                   className="p-2 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors active:scale-95"
-                                  title="Attach file"
+                                  title="Attach file (documents, spreadsheets, PDFs, archives, etc.)"
                                 >
                                   <Paperclip className="w-4 h-4 sm:w-5 sm:h-5" />
                                 </button>
+                                {/* Image picker button - opens image picker */}
                                 <button
                                   onClick={() => imageInputRef.current?.click()}
                                   className="p-2 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors active:scale-95"
-                                  title="Attach image"
+                                  title="Attach image (.jpg, .jpeg, .png)"
                                 >
                                   <ImageIcon className="w-4 h-4 sm:w-5 sm:h-5" />
                                 </button>

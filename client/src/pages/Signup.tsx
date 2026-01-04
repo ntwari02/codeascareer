@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useTheme } from '../contexts/ThemeContext';
-import { User, Mail, Lock, RotateCw, Chrome, Apple, Sun, Moon, Home, Briefcase, Eye, EyeOff } from 'lucide-react';
+import { User, Mail, Lock, RotateCw, Chrome, Apple, Sun, Moon, Home, Briefcase, Eye, EyeOff, Loader2 } from 'lucide-react';
 import { useToastStore } from '../stores/toastStore';
 
 // Basic guard against obvious SQL injection-style patterns.
@@ -25,6 +25,7 @@ export function Signup() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [error, setError] = useState('');
   const [agreedToTerms, setAgreedToTerms] = useState(false);
 
@@ -384,15 +385,21 @@ export function Signup() {
                 <button
                   type="button"
                   onClick={() => {
+                    setIsGoogleLoading(true);
                     const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
                     const role = formData.role;
                     window.location.href = `${API_BASE_URL}/auth/google?role=${role}`;
                   }}
-                  className="group flex items-center justify-center gap-1.5 sm:gap-2 px-3 py-2 sm:py-2.5 md:py-3 bg-white dark:bg-[#1a1a2e]/80 border border-gray-300 dark:border-gray-700/50 text-gray-900 dark:text-white rounded-lg sm:rounded-xl hover:bg-gray-50 dark:hover:bg-[#1a1a2e] transition-all duration-300 shadow-sm hover:shadow-lg hover:shadow-orange-500/20 hover:scale-105 active:scale-95 text-xs sm:text-sm md:text-base relative overflow-hidden"
+                  disabled={isGoogleLoading}
+                  className="group flex items-center justify-center gap-1.5 sm:gap-2 px-3 py-2 sm:py-2.5 md:py-3 bg-white dark:bg-[#1a1a2e]/80 border border-gray-300 dark:border-gray-700/50 text-gray-900 dark:text-white rounded-lg sm:rounded-xl hover:bg-gray-50 dark:hover:bg-[#1a1a2e] transition-all duration-300 shadow-sm hover:shadow-lg hover:shadow-orange-500/20 hover:scale-105 active:scale-95 text-xs sm:text-sm md:text-base relative overflow-hidden disabled:opacity-70 disabled:cursor-not-allowed disabled:hover:scale-100"
                 >
                   <div className="absolute inset-0 bg-gradient-to-r from-orange-500/0 via-orange-500/10 to-orange-500/0 opacity-0 group-hover:opacity-100 transition-opacity duration-300 transform -skew-x-12 group-hover:translate-x-full group-hover:translate-x-0 animate-shimmer"></div>
-                  <Chrome className="h-3.5 w-3.5 sm:h-4 sm:w-4 md:h-5 md:w-5 group-hover:rotate-12 transition-transform duration-300" />
-                  <span className="font-medium relative z-10">Google</span>
+                  {isGoogleLoading ? (
+                    <Loader2 className="h-3.5 w-3.5 sm:h-4 sm:w-4 md:h-5 md:w-5 animate-spin relative z-10" />
+                  ) : (
+                    <Chrome className="h-3.5 w-3.5 sm:h-4 sm:w-4 md:h-5 md:w-5 group-hover:rotate-12 transition-transform duration-300 relative z-10" />
+                  )}
+                  <span className="font-medium relative z-10">{isGoogleLoading ? 'Signing up...' : 'Google'}</span>
                 </button>
                 <button
                   type="button"

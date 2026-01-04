@@ -46,60 +46,114 @@ const inboxUpload = multer({
     fileSize: 10 * 1024 * 1024, // 10MB limit per file
   },
   fileFilter: (req, file, cb) => {
+    // Allowed extensions: images, documents, and webm
     const allowedExtensions = [
-      '.jpeg',
+      // Images
       '.jpg',
+      '.jpeg',
       '.png',
-      '.gif',
-      '.webp',
-      '.pdf',
+      // Text files
+      '.txt',
+      '.rtf',
+      // Word processing
       '.doc',
       '.docx',
-      '.txt',
-      '.csv',
-      '.xlsx',
+      '.odt',
+      // Spreadsheets
       '.xls',
+      '.xlsx',
+      '.ods',
+      // Presentations
+      '.ppt',
+      '.pptx',
+      '.odp',
+      // PDF & ebook
+      '.pdf',
+      '.epub',
+      '.mobi',
+      // Data & code files
+      '.csv',
+      '.json',
+      '.xml',
+      '.yaml',
+      '.yml',
+      '.sql',
+      // Compressed archives
       '.zip',
       '.rar',
-      // Audio formats for voice notes
-      '.mp3',
-      '.wav',
-      '.m4a',
-      '.ogg',
+      '.7z',
+      '.tar',
+      '.gz',
+      // Other formats
+      '.md',
+      '.tex',
+      '.log',
+      // Audio formats
       '.webm',
-      '.aac',
-      '.flac',
-      '.opus',
+      '.ogg',
+      '.mp3',
+      '.m4a',
+      '.wav',
     ];
     const allowedMimeTypes = [
+      // Images
       'image/jpeg',
       'image/jpg',
       'image/png',
-      'image/gif',
-      'image/webp',
-      'application/pdf',
-      'application/msword',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      // Text files
       'text/plain',
+      'text/rtf',
+      'application/rtf',
+      // Word processing
+      'application/msword', // .doc
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // .docx
+      'application/vnd.oasis.opendocument.text', // .odt
+      // Spreadsheets
+      'application/vnd.ms-excel', // .xls
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // .xlsx
+      'application/vnd.oasis.opendocument.spreadsheet', // .ods
+      // Presentations
+      'application/vnd.ms-powerpoint', // .ppt
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation', // .pptx
+      'application/vnd.oasis.opendocument.presentation', // .odp
+      // PDF & ebook
+      'application/pdf',
+      'application/epub+zip', // .epub
+      'application/x-mobipocket-ebook', // .mobi
+      // Data & code files
       'text/csv',
-      'application/vnd.ms-excel',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/json',
+      'application/xml',
+      'text/xml',
+      'text/yaml',
+      'text/x-yaml',
+      'application/x-yaml',
+      'application/sql',
+      'text/x-sql',
+      // Compressed archives
       'application/zip',
       'application/x-rar-compressed',
-      // Audio MIME types for voice notes
-      'audio/mpeg',
+      'application/x-7z-compressed',
+      'application/x-tar',
+      'application/gzip',
+      'application/x-gzip',
+      // Other formats
+      'text/markdown',
+      'text/x-markdown',
+      'application/x-tex',
+      'text/x-log',
+      // Audio formats
+      'audio/webm',
+      'audio/ogg',
+      'audio/opus',
+      'audio/mpeg', // .mp3
       'audio/mp3',
+      'audio/mp4', // .m4a
+      'audio/x-m4a',
       'audio/wav',
       'audio/wave',
       'audio/x-wav',
-      'audio/mp4',
-      'audio/m4a',
-      'audio/ogg',
-      'audio/webm',
-      'audio/aac',
-      'audio/flac',
-      'audio/opus',
-      'audio/x-m4a',
+      'video/webm',
     ];
 
     const ext = path.extname(file.originalname).toLowerCase();
@@ -111,7 +165,7 @@ const inboxUpload = multer({
     } else {
       cb(
         new Error(
-          `Invalid file type: ${file.originalname}. Only images, PDFs, documents, archives, and audio files are allowed.`
+          `Invalid file type: ${file.originalname}. Only images (.jpg, .jpeg, .png), documents (.txt, .doc, .docx, .pdf, .xls, .xlsx, .ppt, .pptx, .csv, .json, .xml, .md, etc.), archives (.zip, .rar, .7z), and audio files (.webm, .ogg, .mp3, .m4a, .wav) are allowed.`
         )
       );
     }

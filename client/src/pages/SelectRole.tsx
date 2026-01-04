@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
 import { useToastStore } from '../stores/toastStore';
@@ -11,8 +11,25 @@ export function SelectRole() {
   const { showToast } = useToastStore();
   const [selectedRole, setSelectedRole] = useState<'buyer' | 'seller' | null>(null);
   const [loading, setLoading] = useState(false);
+  const [googleName, setGoogleName] = useState<string>('');
+  const [googleEmail, setGoogleEmail] = useState<string>('');
 
   const temp = searchParams.get('temp');
+
+  // Decode temp token to get Google user info
+  useEffect(() => {
+    if (temp) {
+      try {
+        // Decode base64 in browser using atob
+        const decoded = atob(temp);
+        const googleInfo = JSON.parse(decoded);
+        setGoogleName(googleInfo.name || googleInfo.email?.split('@')[0] || '');
+        setGoogleEmail(googleInfo.email || '');
+      } catch (e) {
+        console.error('Failed to decode temp token:', e);
+      }
+    }
+  }, [temp]);
 
   if (!temp) {
     // No temp token - redirect to login
@@ -93,8 +110,16 @@ export function SelectRole() {
             <h2 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white mb-2">
               Choose Your Account Type
             </h2>
+            {googleName && (
+              <p className="text-lg text-gray-700 dark:text-gray-300 mb-2">
+                Welcome, <span className="font-semibold text-orange-600 dark:text-orange-400">{googleName}</span>!
+              </p>
+            )}
             <p className="text-gray-600 dark:text-gray-400">
-              Select how you want to use Reaglex
+              {googleName 
+                ? `Your account will be created with the name "${googleName}" from your Google account.`
+                : 'Select how you want to use Reaglex'
+              }
             </p>
           </div>
 
