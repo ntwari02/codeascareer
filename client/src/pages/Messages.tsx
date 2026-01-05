@@ -244,6 +244,7 @@ export function Messages() {
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const messageInputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null); // For documents/files (.pdf, .docx, .webm)
   const imageInputRef = useRef<HTMLInputElement>(null); // For images (.jpg, .jpeg, .png)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -547,9 +548,10 @@ export function Messages() {
       setUploadErrors(new Map());
       setUploadingFiles(new Map());
       
-      // Reload messages and threads from server to ensure consistency
+      // Only reload messages for the current thread (thread list is already updated optimistically)
       await loadThreadMessages(selectedThread);
-      await loadThreads(true); // Silent reload to avoid duplicate toasts
+      // NOTE: Removed loadThreads() call to prevent unnecessary chat list refresh
+      // The thread list is already updated optimistically above (lines 504-538)
       
       // Scroll to bottom within the messages container (not the whole page)
       setTimeout(() => {
@@ -1137,9 +1139,9 @@ export function Messages() {
               setRecordingDuration(0);
               setUploadProgress(new Map());
               
-              // Reload messages and threads from server to ensure consistency
+              // Only reload messages for the current thread (thread list is already updated optimistically)
               await loadThreadMessages(selectedThread);
-              await loadThreads(true); // Silent reload
+              // NOTE: Removed loadThreads() call to prevent unnecessary chat list refresh
               
               // Scroll to bottom
               setTimeout(() => {
@@ -2615,9 +2617,9 @@ export function Messages() {
                                       setRecordingDuration(0);
                                       setUploadProgress(new Map());
                                       
-                                      // Reload messages and threads from server to ensure consistency
+                                      // Only reload messages for the current thread (thread list is already updated optimistically)
                                       await loadThreadMessages(selectedThread);
-                                      await loadThreads(true); // Silent reload
+                                      // NOTE: Removed loadThreads() call to prevent unnecessary chat list refresh
                                       
                                       // Scroll to bottom
                                       setTimeout(() => {

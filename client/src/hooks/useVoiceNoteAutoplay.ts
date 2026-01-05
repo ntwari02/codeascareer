@@ -85,7 +85,7 @@ export function useVoiceNoteAutoplay({
           
           if (voiceAttachments.length > 0) {
             // Add all voice attachments from this message
-            voiceAttachments.forEach((att, idx) => {
+            voiceAttachments.forEach((att) => {
               const attachmentIndex = message.attachments!.findIndex(a => a === att);
               sequence.push({
                 messageId: message._id,
@@ -272,29 +272,56 @@ export function useVoiceNoteAutoplay({
 
       // Set up event handlers
       audio.onloadedmetadata = () => {
-        console.log('[Voice Autoplay] Audio loaded, duration:', audio.duration);
+        const duration = audio.duration;
+        console.log('[Voice Autoplay] Audio loaded, duration:', duration);
+        
+        // Validate duration is a finite number
+        if (!isFinite(duration) || duration <= 0) {
+          console.warn('[Voice Autoplay] Invalid duration:', duration);
+          return;
+        }
+        
         // Update playing state with duration
         setPlayingState(prev => prev ? {
           ...prev,
-          duration: audio.duration || 0,
+          duration: duration,
         } : null);
       };
 
       // Track currentTime for waveform display
       const updateCurrentTime = () => {
-        if (audioRef.current) {
+        // CRITICAL: Check if audioRef.current exists and is ready
+        if (!audioRef.current || audioRef.current.readyState === 0) {
+          return; // Audio not loaded yet
+        }
+        
+        try {
+          const currentTime = audioRef.current.currentTime;
+          const duration = audioRef.current.duration;
+          
+          // Validate values are finite numbers
+          if (!isFinite(currentTime) || !isFinite(duration)) {
+            return; // Invalid values, skip update
+          }
+          
           setPlayingState(prev => {
             if (!prev || prev.messageId !== messageId || prev.attachmentIndex !== attachmentIndex) {
               return prev;
             }
             return {
               ...prev,
-              currentTime: audioRef.current!.currentTime,
-              duration: audioRef.current!.duration || prev.duration,
+              currentTime: currentTime,
+              duration: duration || prev.duration,
             };
           });
+        } catch (error) {
+          // Silently handle errors (audio might be disposed)
+          console.warn('[Voice Autoplay] Error updating currentTime:', error);
         }
       };
+
+      // CRITICAL: Store audio reference BEFORE setting up interval
+      audioRef.current = audio;
 
       // Set up timeupdate interval for smooth waveform updates
       if (timeUpdateIntervalRef.current) {
@@ -304,12 +331,17 @@ export function useVoiceNoteAutoplay({
 
       audio.onplay = () => {
         console.log('[Voice Autoplay] Audio started playing');
+        
+        // Validate duration before setting state
+        const duration = audio.duration;
+        const validDuration = isFinite(duration) && duration > 0 ? duration : 0;
+        
         setPlayingState({
           messageId,
           attachmentIndex,
           audioElement: audio,
           currentTime: 0,
-          duration: audio.duration || 0,
+          duration: validDuration,
         });
         
         // Reset user seek flag when new audio starts
@@ -362,8 +394,7 @@ export function useVoiceNoteAutoplay({
         autoplayEnabledRef.current = false;
       };
 
-      // Store audio reference
-      audioRef.current = audio;
+      // Note: audioRef.current is already set above (before interval setup)
 
       try {
         // Load and play
@@ -372,6 +403,13 @@ export function useVoiceNoteAutoplay({
         console.log('[Voice Autoplay] Audio playing successfully');
       } catch (error: any) {
         console.error('[Voice Autoplay] Play error:', error);
+        
+        // Clean up on error
+        if (timeUpdateIntervalRef.current) {
+          clearInterval(timeUpdateIntervalRef.current);
+          timeUpdateIntervalRef.current = null;
+        }
+        
         if (error.name === 'NotAllowedError') {
           console.warn('[Voice Autoplay] User interaction required to play audio');
         }
@@ -461,9 +499,23 @@ export function useVoiceNoteAutoplay({
    * This cancels autoplay when user manually seeks
    */
   const seekTo = useCallback((time: number) => {
-    if (audioRef.current && playingState) {
-      // Clamp time to valid range
-      const clampedTime = Math.max(0, Math.min(time, audioRef.current.duration || 0));
+    if (!audioRef.current || !playingState) {
+      return;
+    }
+    
+    // Validate time is a finite number
+    if (!isFinite(time) || time < 0) {
+      console.warn('[Voice Autoplay] Invalid seek time:', time);
+      return;
+    }
+    
+    try {
+      const duration = audioRef.current.duration;
+      // Clamp time to valid range (only if duration is valid)
+      const clampedTime = isFinite(duration) && duration > 0
+        ? Math.max(0, Math.min(time, duration))
+        : Math.max(0, time);
+      
       audioRef.current.currentTime = clampedTime;
       
       // Update playing state
@@ -475,6 +527,8 @@ export function useVoiceNoteAutoplay({
       // Cancel autoplay when user manually seeks
       userSeekedRef.current = true;
       autoplayEnabledRef.current = false;
+    } catch (error) {
+      console.warn('[Voice Autoplay] Seek error:', error);
     }
   }, [playingState]);
 

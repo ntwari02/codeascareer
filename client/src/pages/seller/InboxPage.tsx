@@ -300,9 +300,10 @@ const InboxPage: React.FC = () => {
       setUploadErrors(new Map());
       setUploadingFiles(new Map());
       
-      // Reload messages
+      // Only reload messages for the current thread (thread list is already updated optimistically)
       await loadThreadMessages(activeThread._id);
-      await loadThreads();
+      // NOTE: Removed loadThreads() call to prevent unnecessary chat list refresh
+      // The thread list will be updated via WebSocket or can be updated optimistically if needed
       
       showToast('Message sent', 'success');
     } catch (error: any) {
@@ -751,9 +752,9 @@ const InboxPage: React.FC = () => {
               setRecordingDuration(0);
               setUploadProgress(new Map());
               
-              // Reload messages
+              // Only reload messages for the current thread (thread list will be updated via WebSocket)
               await loadThreadMessages(activeThread._id);
-              await loadThreads();
+              // NOTE: Removed loadThreads() call to prevent unnecessary chat list refresh
               
               showToast('Voice note sent', 'success');
             }
@@ -2002,9 +2003,9 @@ const InboxPage: React.FC = () => {
                                       setRecordingDuration(0);
                                       setUploadProgress(new Map());
                                       
-                                      // Reload messages
+                                      // Only reload messages for the current thread (thread list will be updated via WebSocket)
                                       await loadThreadMessages(activeThread._id);
-                                      await loadThreads();
+                                      // NOTE: Removed loadThreads() call to prevent unnecessary chat list refresh
                                       
                                       showToast('Voice note sent', 'success');
                                     }
