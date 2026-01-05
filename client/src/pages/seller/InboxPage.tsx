@@ -25,6 +25,7 @@ import { inboxAPI, Message, MessageThread, MessageAttachment } from '@/services/
 import { websocketService } from '@/services/websocketService';
 import { useToastStore } from '@/stores/toastStore';
 import { useAuthStore } from '@/stores/authStore';
+import { useNotificationStore } from '@/stores/notificationStore';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { AudioWave } from '@/components/AudioWave';
 import { VoiceWaveform } from '@/components/VoiceWaveform';
@@ -62,6 +63,7 @@ const resolveAvatarUrl = (url: string | null | undefined): string | null => {
 const InboxPage: React.FC = () => {
   const { showToast } = useToastStore();
   const { user } = useAuthStore();
+  const { setUnreadCount } = useNotificationStore();
   
   // State
   const [threads, setThreads] = useState<MessageThread[]>([]);
@@ -181,6 +183,29 @@ const InboxPage: React.FC = () => {
       return bTime - aTime;
     });
   }, [threads, hasActiveIndicators]);
+
+  // Calculate total unread messages
+  const totalUnread = useMemo(() => {
+    return threads.reduce((sum, t) => sum + (t.sellerUnreadCount || 0), 0);
+  }, [threads]);
+
+  // Update global notification count when unread count changes
+  useEffect(() => {
+    setUnreadCount(totalUnread);
+  }, [totalUnread, setUnreadCount]);
+
+  // Update document title with unread count
+  useEffect(() => {
+    const baseTitle = 'Inbox';
+    if (totalUnread > 0) {
+      document.title = `(${totalUnread}) ${baseTitle}`;
+    } else {
+      document.title = baseTitle;
+    }
+    return () => {
+      document.title = baseTitle; // Reset on unmount
+    };
+  }, [totalUnread]);
 
   // Load threads
   const loadThreads = useCallback(async (silent = false) => {
@@ -324,11 +349,59 @@ const InboxPage: React.FC = () => {
 
       // Send message - WhatsApp style: allow empty content if attachments exist
       console.log('[Send Message] Sending message with', attachments.length, 'attachment(s)');
-      await inboxAPI.sendMessage(activeThread._id, {
+      const response = await inboxAPI.sendMessage(activeThread._id, {
         content: messageText || '', // Empty string is allowed if attachments exist
         attachments: attachments || [],
         replyTo: replyTo?._id,
       });
+
+      // Optimistically add the sent message to the messages array immediately
+      if (response.message) {
+        setMessages((prev) => {
+          // Check if message already exists
+          if (prev.some(m => m._id === response.message._id)) {
+            return prev;
+          }
+          return [...prev, response.message];
+        });
+        
+        // Update thread list immediately to show the new message preview
+        setThreads((prevThreads) => {
+          return prevThreads.map((thread) => {
+            if (thread._id === activeThread._id) {
+              // Generate preview from message content or attachments
+              let preview = messageText || '';
+              if (!preview && attachments.length > 0) {
+                const firstAtt = attachments[0];
+                if (firstAtt.type === 'voice') {
+                  preview = '🎤 Voice note';
+                } else if (firstAtt.type === 'image') {
+                  preview = '📷 Image';
+                } else {
+                  preview = `📎 ${firstAtt.originalName || 'File'}`;
+                }
+                if (attachments.length > 1) {
+                  preview += ` (+${attachments.length - 1} more)`;
+                }
+              }
+              preview = preview.length > 200 ? preview.substring(0, 200) + '...' : preview;
+              
+              return {
+                ...thread,
+                lastMessageAt: new Date().toISOString(),
+                lastMessagePreview: preview,
+                sellerUnreadCount: 0, // Sender has read their own message
+              };
+            }
+            return thread;
+          }).sort((a, b) => {
+            // Sort by lastMessageAt descending
+            const aTime = new Date(a.lastMessageAt).getTime();
+            const bTime = new Date(b.lastMessageAt).getTime();
+            return bTime - aTime;
+          });
+        });
+      }
 
       // Clear composer
       setMessageContent('');
@@ -345,7 +418,7 @@ const InboxPage: React.FC = () => {
       // Only reload messages for the current thread (thread list is already updated optimistically)
       await loadThreadMessages(activeThread._id);
       // NOTE: Removed loadThreads() call to prevent unnecessary chat list refresh
-      // The thread list will be updated via WebSocket or can be updated optimistically if needed
+      // The thread list is already updated optimistically above
       
       showToast('Message sent', 'success');
     } catch (error: any) {
@@ -1346,12 +1419,19 @@ const InboxPage: React.FC = () => {
             )}
           </div>
           <div className="min-w-0 flex-1">
-            <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900 dark:text-white flex items-center gap-2 transition-colors duration-300">
-              <MessageCircle className="w-5 h-5 sm:w-6 sm:h-6 md:w-7 md:h-7 text-red-400 flex-shrink-0" />
-              <span className="truncate">Inbox & RFQ Communications</span>
-            </h1>
+            <div className="flex items-center gap-2 sm:gap-3">
+              <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900 dark:text-white flex items-center gap-2 transition-colors duration-300">
+                <MessageCircle className="w-5 h-5 sm:w-6 sm:h-6 md:w-7 md:h-7 text-red-400 flex-shrink-0" />
+                <span className="truncate">Inbox & RFQ Communications</span>
+              </h1>
+              {totalUnread > 0 && (
+                <span className="inline-flex items-center justify-center min-w-[24px] h-6 px-2 rounded-full bg-red-500 text-white text-xs sm:text-sm font-bold">
+                  {totalUnread > 99 ? '99+' : totalUnread}
+                </span>
+              )}
+            </div>
             <p className="text-gray-600 dark:text-gray-400 mt-1 text-xs sm:text-sm transition-colors duration-300">
-              Central place for buyer messages, RFQs, and negotiation threads.
+              {totalUnread > 0 ? `${totalUnread} unread message${totalUnread > 1 ? 's' : ''}` : 'Central place for buyer messages, RFQs, and negotiation threads.'}
             </p>
           </div>
         </div>
@@ -1474,12 +1554,19 @@ const InboxPage: React.FC = () => {
                     </div>
                     <div className="flex-1 min-w-0 flex flex-col gap-1">
                     <div className="flex items-center justify-between gap-2">
-                      <p className="text-sm font-semibold text-gray-900 dark:text-white line-clamp-1">
-                            {buyer ? (buyer.fullName || buyer.email || 'Buyer') : 'Buyer'}
-                      </p>
-                          <span className="text-[11px] text-gray-500 dark:text-gray-400">
-                            {formatTime(thread.lastMessageAt)}
+                      <div className="flex items-center gap-2 min-w-0">
+                        <p className="text-sm font-semibold text-gray-900 dark:text-white line-clamp-1">
+                          {buyer ? (buyer.fullName || buyer.email || 'Buyer') : 'Buyer'}
+                        </p>
+                        {thread.sellerUnreadCount > 0 && (
+                          <span className="inline-flex items-center justify-center min-w-[18px] h-4.5 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex-shrink-0">
+                            {thread.sellerUnreadCount > 9 ? '9+' : thread.sellerUnreadCount}
                           </span>
+                        )}
+                      </div>
+                      <span className="text-[11px] text-gray-500 dark:text-gray-400 flex-shrink-0">
+                        {formatTime(thread.lastMessageAt)}
+                      </span>
                     </div>
                     <p className="text-xs text-gray-700 dark:text-gray-300 line-clamp-1">{thread.subject}</p>
                     <div className="flex items-center justify-between gap-2">
@@ -1515,9 +1602,6 @@ const InboxPage: React.FC = () => {
                           <span className="px-2 py-0.5 rounded-full bg-purple-100 dark:bg-purple-900/30 text-[10px] text-purple-700 dark:text-purple-300">
                             RFQ
                           </span>
-                        )}
-                            {thread.sellerUnreadCount > 0 && (
-                          <span className="w-2 h-2 rounded-full bg-red-500 dark:bg-red-400 flex-shrink-0" />
                         )}
                           <span className="text-[11px] text-gray-500 dark:text-gray-400 flex-shrink-0">
                             {formatTime(thread.lastMessageAt)}

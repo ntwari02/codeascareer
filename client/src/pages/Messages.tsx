@@ -1353,6 +1353,22 @@ export function Messages() {
 
     // Handle new messages - FIXED: Always update messages if thread is active
     websocketService.onNewMessage = (threadId: string, message: any) => {
+      // Clear recording indicator when a message is received in the active thread
+      // This ensures the indicator disappears when the user sends their voice note or any message
+      if (selectedThread === threadId && isRecordingIndicator) {
+        // Check if the message is from the user who was recording, or if it's a voice note
+        const messageSenderId = typeof message.senderId === 'object' ? message.senderId._id : message.senderId;
+        const isVoiceNote = message.attachments && message.attachments.some((att: any) => att.type === 'voice');
+        
+        // Clear indicator if: message is from recording user OR it's a voice note (recording completed)
+        if (messageSenderId === recordingUserId || isVoiceNote) {
+          setIsRecordingIndicator(false);
+          setRecordingUserId(null);
+          setRecordingUserName(null);
+          setRecordingDurationIndicator(0);
+        }
+      }
+      
       // Update messages if this is the active thread
       if (selectedThread === threadId) {
         setMessages((prev) => {
@@ -1548,6 +1564,12 @@ export function Messages() {
       setTypingUserId(null);
       setTypingUserName(null);
       
+      // Reset recording indicator when leaving conversation
+      setIsRecordingIndicator(false);
+      setRecordingUserId(null);
+      setRecordingUserName(null);
+      setRecordingDurationIndicator(0);
+      
       if (selectedThread) {
         // Send stop typing before leaving thread
         websocketService.sendTyping(selectedThread, false);
@@ -1566,6 +1588,12 @@ export function Messages() {
     setIsTyping(false);
     setTypingUserId(null);
     setTypingUserName(null);
+    
+    // Reset recording indicator when switching conversations
+    setIsRecordingIndicator(false);
+    setRecordingUserId(null);
+    setRecordingUserName(null);
+    setRecordingDurationIndicator(0);
     
     if (selectedThread) {
       console.log('[useEffect] Selected thread changed to:', selectedThread);
