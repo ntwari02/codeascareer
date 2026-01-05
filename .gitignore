@@ -37,4 +37,7 @@ Thumbs.db
 # Vite
 client/.vite/
 
+# Uploads (user-generated content)
+server/uploads/
+client/uploads/
 

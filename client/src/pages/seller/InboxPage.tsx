@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   MessageCircle,
   Search,
@@ -31,7 +31,10 @@ import { VoiceWaveform } from '@/components/VoiceWaveform';
 import { ImageLightbox } from '@/components/ImageLightbox';
 import { UploadProgress } from '@/components/UploadProgress';
 import ChatIndicator from '@/components/ChatIndicator';
+import ChatListIndicator from '@/components/ChatListIndicator';
 import { useVoiceNoteAutoplay } from '@/hooks/useVoiceNoteAutoplay';
+import { useGlobalChatIndicators } from '@/hooks/useGlobalChatIndicators';
+import type { ChatIndicator as ChatIndicatorType } from '@/hooks/useGlobalChatIndicators';
 
 // Get server base URL for file attachments
 const getFileUrl = (path: string): string => {
@@ -122,6 +125,7 @@ const InboxPage: React.FC = () => {
   const [typingUserName, setTypingUserName] = useState<string | null>(null);
   const [isRecordingIndicator, setIsRecordingIndicator] = useState(false);
   const [recordingUserId, setRecordingUserId] = useState<string | null>(null);
+  const [recordingUserName, setRecordingUserName] = useState<string | null>(null);
   const [recordingDurationIndicator, setRecordingDurationIndicator] = useState(0);
   const [isSelectingFile, setIsSelectingFile] = useState(false);
   const [selectingFileUserId, setSelectingFileUserId] = useState<string | null>(null);
@@ -139,6 +143,44 @@ const InboxPage: React.FC = () => {
   // Store chunks in ref to ensure they persist across function calls
   const recordingChunksRef = useRef<Blob[]>([]);
   const recordingMimeTypeRef = useRef<string>('audio/webm');
+
+  // Global chat indicators hook - manages indicators for ALL chats (open chat + chat list)
+  // getUserName function to resolve user names for indicators
+  const getUserNameForGlobal = useCallback((threadId: string, userId: string): string | null => {
+    const thread = threads.find(t => t._id === threadId);
+    if (!thread) return null;
+    
+    // For seller inbox, the other user is always the buyer
+    if (typeof thread.buyerId === 'object' && thread.buyerId !== null) {
+      return thread.buyerId.fullName || 'Buyer';
+    }
+    return 'Buyer';
+  }, [threads]);
+
+  const {
+    getThreadIndicators,
+    hasActiveIndicators,
+  } = useGlobalChatIndicators({
+    currentUserId: user?.id,
+    getUserName: getUserNameForGlobal,
+  });
+
+  // Sort threads: chats with active indicators first, then by lastMessageAt
+  const sortedThreads = useMemo(() => {
+    return [...threads].sort((a, b) => {
+      const aHasIndicators = hasActiveIndicators(a._id);
+      const bHasIndicators = hasActiveIndicators(b._id);
+      
+      // Priority: chats with active indicators go to top
+      if (aHasIndicators && !bHasIndicators) return -1;
+      if (!aHasIndicators && bHasIndicators) return 1;
+      
+      // If both have or both don't have indicators, sort by lastMessageAt
+      const aTime = new Date(a.lastMessageAt).getTime();
+      const bTime = new Date(b.lastMessageAt).getTime();
+      return bTime - aTime;
+    });
+  }, [threads, hasActiveIndicators]);
 
   // Load threads
   const loadThreads = useCallback(async (silent = false) => {
@@ -662,8 +704,21 @@ const InboxPage: React.FC = () => {
       setIsRecording(true);
       setRecordingDuration(0);
       
+      // Send recording indicator to other users
+      if (activeThread) {
+        websocketService.sendRecording(activeThread._id, true, 0);
+      }
+      
+      // Update recording duration and send updates to WebSocket
       recordingIntervalRef.current = setInterval(() => {
-        setRecordingDuration((prev) => prev + 1);
+        setRecordingDuration((prev) => {
+          const newDuration = prev + 1;
+          // Send duration update to WebSocket every second
+          if (activeThread) {
+            websocketService.sendRecording(activeThread._id, true, newDuration);
+          }
+          return newDuration;
+        });
       }, 1000);
     } catch (error: any) {
       console.error('[Voice Recording] getUserMedia error:', error);
@@ -717,6 +772,11 @@ const InboxPage: React.FC = () => {
       if (recordingIntervalRef.current) {
         clearInterval(recordingIntervalRef.current);
         recordingIntervalRef.current = null;
+      }
+      
+      // Stop recording indicator
+      if (activeThread) {
+        websocketService.sendRecording(activeThread._id, false);
       }
       
       console.log('[Voice Recording] MediaRecorder state after stop:', mediaRecorderRef.current.state);
@@ -997,7 +1057,48 @@ const InboxPage: React.FC = () => {
           return newMessages;
         });
       }
-      loadThreads(); // Refresh thread list
+      
+      // Update thread list optimistically to show the new message preview
+      setThreads((prevThreads) => {
+        const updatedThreads = prevThreads.map((thread) => {
+          if (thread._id === threadId) {
+            // Generate preview from message content or attachments
+            let preview = message.content || '';
+            if (!preview && message.attachments && message.attachments.length > 0) {
+              const firstAtt = message.attachments[0];
+              if (firstAtt.type === 'voice') {
+                preview = '🎤 Voice note';
+              } else if (firstAtt.type === 'image') {
+                preview = '📷 Image';
+              } else {
+                preview = `📎 ${firstAtt.originalName || 'File'}`;
+              }
+              if (message.attachments.length > 1) {
+                preview += ` (+${message.attachments.length - 1} more)`;
+              }
+            }
+            preview = preview.length > 200 ? preview.substring(0, 200) + '...' : preview;
+            
+            return {
+              ...thread,
+              lastMessageAt: new Date().toISOString(),
+              lastMessagePreview: preview,
+              // Update unread count based on sender
+              ...(message.senderType === 'buyer' ? { sellerUnreadCount: (thread.sellerUnreadCount || 0) + 1 } : { sellerUnreadCount: 0 }),
+            };
+          }
+          return thread;
+        });
+        
+        // Sort by lastMessageAt descending (most recent first)
+        return updatedThreads.sort((a, b) => {
+          const aTime = new Date(a.lastMessageAt).getTime();
+          const bTime = new Date(b.lastMessageAt).getTime();
+          return bTime - aTime;
+        });
+      });
+      
+      // NOTE: Removed loadThreads() call - optimistic update is sufficient, prevents UI flicker
       
       // Show notification if message is from buyer and not in active thread
       if (message.senderType === 'buyer' && activeThread?._id !== threadId) {
@@ -1035,7 +1136,31 @@ const InboxPage: React.FC = () => {
           loadThreadMessages(threadId);
         }
       }
-      loadThreads();
+      
+      // Update thread list optimistically
+      if (_update) {
+        setThreads((prevThreads) => {
+          const updatedThreads = prevThreads.map((thread) => {
+            if (thread._id === threadId) {
+              return {
+                ...thread,
+                ..._update,
+                lastMessageAt: _update.lastMessageAt || thread.lastMessageAt,
+              };
+            }
+            return thread;
+          });
+          
+          // Sort by lastMessageAt descending (most recent first)
+          return updatedThreads.sort((a, b) => {
+            const aTime = new Date(a.lastMessageAt).getTime();
+            const bTime = new Date(b.lastMessageAt).getTime();
+            return bTime - aTime;
+          });
+        });
+      }
+      
+      // NOTE: Removed loadThreads() call - optimistic update is sufficient, prevents UI flicker
     };
 
     /**
@@ -1063,6 +1188,36 @@ const InboxPage: React.FC = () => {
       }
     };
 
+    /**
+     * Listen for incoming recording events from other users
+     * - Only show if it's for the current thread and not from current user
+     * - Shows recording indicator with duration
+     */
+    websocketService.onUserRecording = (threadId: string, userId: string, isRecording: boolean, duration?: number) => {
+      if (activeThread?._id === threadId && userId !== user?.id) {
+        if (isRecording) {
+          setIsRecordingIndicator(true);
+          setRecordingUserId(userId);
+          // Get user name from thread
+          const thread = threads.find(t => t._id === threadId);
+          const userName = typeof thread?.buyerId === 'object' && thread.buyerId !== null
+            ? (thread.buyerId.fullName || 'Buyer')
+            : 'Buyer';
+          setRecordingUserName(userName);
+          // Update duration if provided
+          if (duration !== undefined) {
+            setRecordingDurationIndicator(duration);
+          }
+        } else {
+          // Stop recording indicator immediately
+          setIsRecordingIndicator(false);
+          setRecordingUserId(null);
+          setRecordingUserName(null);
+          setRecordingDurationIndicator(0);
+        }
+      }
+    };
+
     // Cleanup
     return () => {
       // Reset typing indicator when leaving conversation
@@ -1074,13 +1229,20 @@ const InboxPage: React.FC = () => {
       setTypingUserId(null);
       setTypingUserName(null);
       
+      // Reset recording indicator when leaving conversation
+      setIsRecordingIndicator(false);
+      setRecordingUserId(null);
+      setRecordingUserName(null);
+      setRecordingDurationIndicator(0);
+      
       if (activeThread) {
-        // Send stop typing before leaving thread
+        // Send stop typing and stop recording before leaving thread
         websocketService.sendTyping(activeThread._id, false);
+        websocketService.sendRecording(activeThread._id, false);
         websocketService.leaveThread(activeThread._id);
       }
     };
-  }, [activeThread, loadThreads, loadThreadMessages, threads, showToast]);
+  }, [activeThread, loadThreads, loadThreadMessages, threads, showToast, user?.id]);
 
   // Initial load
   useEffect(() => {
@@ -1274,7 +1436,7 @@ const InboxPage: React.FC = () => {
                   )}
                 </div>
               ) : (
-                threads.map((thread) => {
+                sortedThreads.map((thread) => {
                   const isActive = thread._id === activeThread?._id;
                   const buyer = typeof thread.buyerId === 'object' && thread.buyerId !== null ? thread.buyerId : null;
                 return (
@@ -1321,9 +1483,33 @@ const InboxPage: React.FC = () => {
                     </div>
                     <p className="text-xs text-gray-700 dark:text-gray-300 line-clamp-1">{thread.subject}</p>
                     <div className="flex items-center justify-between gap-2">
-                      <p className="text-[11px] text-gray-500 dark:text-gray-400 line-clamp-1">
+                      {/* Show indicator OR last message preview */}
+                      {(() => {
+                        const threadIndicators = getThreadIndicators(thread._id);
+                        const activeIndicator = threadIndicators.find((ind: ChatIndicatorType) => ind.isTyping || ind.isRecording);
+                        
+                        if (activeIndicator) {
+                          // Show indicator instead of last message preview
+                          return (
+                            <div className="flex-1 min-w-0">
+                              <ChatListIndicator
+                                isTyping={activeIndicator.isTyping}
+                                isRecording={activeIndicator.isRecording}
+                                recordingDuration={activeIndicator.recordingDuration}
+                                userName={activeIndicator.userName}
+                                className="line-clamp-1"
+                              />
+                            </div>
+                          );
+                        }
+                        
+                        // Show last message preview when no indicator
+                        return (
+                          <p className="text-[11px] text-gray-500 dark:text-gray-400 line-clamp-1">
                             {thread.lastMessagePreview}
-                      </p>
+                          </p>
+                        );
+                      })()}
                       <div className="flex items-center gap-1">
                         {thread.type === 'rfq' && (
                           <span className="px-2 py-0.5 rounded-full bg-purple-100 dark:bg-purple-900/30 text-[10px] text-purple-700 dark:text-purple-300">
@@ -1870,6 +2056,16 @@ const InboxPage: React.FC = () => {
                     <ChatIndicator 
                       status="typing" 
                       userName={typingUserName || (typeof activeThread?.buyerId === 'object' ? (activeThread.buyerId.fullName || 'Buyer') : 'Buyer')}
+                      position="above"
+                      className="mb-2"
+                    />
+                  )}
+                  {/* Recording Indicator - Show above input area when OTHER user is recording (receiver sees this) */}
+                  {isRecordingIndicator && recordingUserId && (
+                    <ChatIndicator 
+                      status="recording" 
+                      userName={recordingUserName || (typeof activeThread?.buyerId === 'object' ? (activeThread.buyerId.fullName || 'Buyer') : 'Buyer')}
+                      duration={recordingDurationIndicator}
                       position="above"
                       className="mb-2"
                     />

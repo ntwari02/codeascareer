@@ -14,7 +14,10 @@ import { VoiceWaveform } from '../components/VoiceWaveform';
 import { ImageLightbox } from '../components/ImageLightbox';
 import { UploadProgress } from '../components/UploadProgress';
 import ChatIndicator from '../components/ChatIndicator';
+import ChatListIndicator from '../components/ChatListIndicator';
 import { useVoiceNoteAutoplay } from '../hooks/useVoiceNoteAutoplay';
+import { useGlobalChatIndicators } from '../hooks/useGlobalChatIndicators';
+import type { ChatIndicator as ChatIndicatorType } from '../hooks/useGlobalChatIndicators';
 
 // Get server base URL for file attachments
 const getFileUrl = (path: string): string => {
@@ -259,6 +262,27 @@ export function Messages() {
   const activeThread = useMemo(() => {
     return threads.find(t => t._id === selectedThread);
   }, [threads, selectedThread]);
+
+  // Global chat indicators hook - manages indicators for ALL chats (open chat + chat list)
+  // getUserName function to resolve user names for indicators
+  const getUserNameForGlobal = useCallback((threadId: string, userId: string): string | null => {
+    const thread = threads.find(t => t._id === threadId);
+    if (!thread) return null;
+    
+    // For buyer inbox, the other user is always the seller
+    if (typeof thread.sellerId === 'object' && thread.sellerId !== null) {
+      return thread.sellerId.storeName || thread.sellerId.fullName || 'Seller';
+    }
+    return 'Seller';
+  }, [threads]);
+
+  const {
+    getThreadIndicators,
+    hasActiveIndicators,
+  } = useGlobalChatIndicators({
+    currentUserId: user?.id,
+    getUserName: getUserNameForGlobal,
+  });
 
   // Request notification permission on mount
   useEffect(() => {
@@ -920,32 +944,32 @@ export function Messages() {
         // Helper function to clean up and add file
         const addFileAndCleanup = () => {
           URL.revokeObjectURL(testUrl);
-          
-          // Add file to selected files
-          setSelectedFiles((prev) => [...prev, file]);
+        
+        // Add file to selected files
+        setSelectedFiles((prev) => [...prev, file]);
           
           // Show "saved" status
           setIsRecordingSaved(true);
           setTimeout(() => setIsRecordingSaved(false), 2000);
-          
-          // A) Ensure stream tracks stop after recording ends (but only after blob is created)
+        
+        // A) Ensure stream tracks stop after recording ends (but only after blob is created)
           // CRITICAL: Don't stop stream until blob is fully created and tested
-          if (recordingStreamRef.current) {
-            recordingStreamRef.current.getTracks().forEach(track => {
-              track.stop();
-              console.log('[Voice Recording] Audio track stopped:', track.label);
-            });
-            recordingStreamRef.current = null;
-          }
-          
-          // Clear chunks after use (but keep them until file is created)
-          recordingChunksRef.current = [];
-          
-          // Call the completion callback if set
-          if (recordingCompleteRef.current) {
-            recordingCompleteRef.current(file);
-            recordingCompleteRef.current = null;
-          }
+        if (recordingStreamRef.current) {
+          recordingStreamRef.current.getTracks().forEach(track => {
+            track.stop();
+            console.log('[Voice Recording] Audio track stopped:', track.label);
+          });
+          recordingStreamRef.current = null;
+        }
+        
+        // Clear chunks after use (but keep them until file is created)
+        recordingChunksRef.current = [];
+        
+        // Call the completion callback if set
+        if (recordingCompleteRef.current) {
+          recordingCompleteRef.current(file);
+          recordingCompleteRef.current = null;
+        }
         };
         
         // Test if audio can be loaded and played
@@ -1285,10 +1309,21 @@ export function Messages() {
       );
     }
 
-    return filtered.sort((a, b) => 
-      new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime()
-    );
-  }, [threads, filter, searchQuery]);
+    // Sort: chats with active indicators first, then by lastMessageAt
+    return filtered.sort((a, b) => {
+      const aHasIndicators = hasActiveIndicators(a._id);
+      const bHasIndicators = hasActiveIndicators(b._id);
+      
+      // Priority: chats with active indicators go to top
+      if (aHasIndicators && !bHasIndicators) return -1;
+      if (!aHasIndicators && bHasIndicators) return 1;
+      
+      // If both have or both don't have indicators, sort by lastMessageAt
+      const aTime = new Date(a.lastMessageAt).getTime();
+      const bTime = new Date(b.lastMessageAt).getTime();
+      return bTime - aTime;
+    });
+  }, [threads, filter, searchQuery, hasActiveIndicators]);
 
   const totalUnread = useMemo(() => {
     return threads.reduce((sum, t) => sum + t.buyerUnreadCount, 0);
@@ -1377,8 +1412,7 @@ export function Messages() {
         });
       });
       
-      // Reload threads from server to ensure consistency (silent reload)
-      loadThreads(true);
+      // NOTE: Removed loadThreads() call - optimistic update is sufficient, prevents UI flicker
       
       // Show notification if message is from seller
       // Show notification if: (1) not in active thread OR (2) page is not focused (user is on another tab/window)
@@ -1459,8 +1493,7 @@ export function Messages() {
         });
       }
       
-      // Reload threads from server to ensure consistency (silent reload)
-      loadThreads(true);
+      // NOTE: Removed loadThreads() call - optimistic update is sufficient, prevents UI flicker
     };
 
     // Handle typing indicators
@@ -1922,9 +1955,33 @@ export function Messages() {
                             </span>
                           </div>
                           <div className="flex items-center gap-2 mb-1">
+                            {/* Show indicator OR last message preview */}
+                            {(() => {
+                              const threadIndicators = getThreadIndicators(thread._id);
+                              const activeIndicator = threadIndicators.find((ind: ChatIndicatorType) => ind.isTyping || ind.isRecording);
+                              
+                              if (activeIndicator) {
+                                // Show indicator instead of last message preview
+                                return (
+                                  <div className="flex-1 min-w-0">
+                                    <ChatListIndicator
+                                      isTyping={activeIndicator.isTyping}
+                                      isRecording={activeIndicator.isRecording}
+                                      recordingDuration={activeIndicator.recordingDuration}
+                                      userName={activeIndicator.userName}
+                                      className="truncate"
+                                    />
+                                  </div>
+                                );
+                              }
+                              
+                              // Show last message preview when no indicator
+                              return (
                             <p className="text-xs text-gray-600 dark:text-gray-400 truncate flex-1">
                                 {thread.lastMessagePreview || 'No messages yet'}
                               </p>
+                              );
+                            })()}
                               {thread.buyerUnreadCount > 0 && (
                                 <span className="bg-orange-600 text-white text-xs font-bold rounded-full h-5 w-5 flex items-center justify-center flex-shrink-0 min-w-[20px]">
                                   {thread.buyerUnreadCount > 9 ? '9+' : thread.buyerUnreadCount}
@@ -2241,7 +2298,7 @@ export function Messages() {
                                                   if (currentlyPlaying) {
                                                     // Pause if currently playing
                                                     pausePlayback();
-                                                  } else {
+                                                          } else {
                                                     // Stop any current playback and start new one
                                                     stopPlayback();
                                                     await playVoiceNote(message._id, idx, true);
@@ -2283,7 +2340,7 @@ export function Messages() {
                                                   className="mb-1"
                                                   waveformColor="rgb(249 115 22)" // orange-500
                                                   progressColor="rgb(234 88 12)" // orange-600
-                                                />
+                                                  />
                                                 <div className="flex items-center gap-2 justify-between">
                                                   <span className="text-[10px] text-gray-600 dark:text-gray-400">
                                                     {attachment.duration ? `${Math.floor(attachment.duration)}s` : 'Voice'}
@@ -2476,6 +2533,7 @@ export function Messages() {
                     />
                   )}
                   {/* Recording Indicator - Show above input area (WhatsApp style) */}
+                  {/* Show indicator when OTHER user is recording (receiver sees this) */}
                   {isRecordingIndicator && recordingUserId && (
                     <ChatIndicator 
                       status="recording" 
